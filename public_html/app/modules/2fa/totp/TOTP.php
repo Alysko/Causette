@@ -70,22 +70,27 @@ class TOTP {
      * Encrypt a TOTP secret for database storage.
      */
     public static function encrypt(string $plaintext): string {
-        $key = hash('sha256', CSRF_SECRET, true);
+        $versioned = defined('CAUSETTE_TOTP_KEY');
+        $key = $versioned ? hex2bin(CAUSETTE_TOTP_KEY) : hash('sha256', CSRF_SECRET, true);
         $iv = random_bytes(12);
         $tag = '';
         $ciphertext = openssl_encrypt($plaintext, self::CIPHER, $key, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
         if ($ciphertext === false) {
             throw new RuntimeException('Encryption failed');
         }
-        return base64_encode($iv . $tag . $ciphertext);
+        return ($versioned ? 'v1:' : '') . base64_encode($iv . $tag . $ciphertext);
     }
 
     /**
      * Decrypt a TOTP secret from database storage.
      */
     public static function decrypt(string $encoded): ?string {
-        $key = hash('sha256', CSRF_SECRET, true);
-        $data = base64_decode($encoded, true);
+        $versioned = str_starts_with($encoded, 'v1:');
+        if ($versioned !== defined('CAUSETTE_TOTP_KEY')) {
+            return null;
+        }
+        $key = $versioned ? hex2bin(CAUSETTE_TOTP_KEY) : hash('sha256', CSRF_SECRET, true);
+        $data = base64_decode($versioned ? substr($encoded, 3) : $encoded, true);
         if ($data === false || strlen($data) < 28) {
             return null;
         }

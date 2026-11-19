@@ -60,3 +60,15 @@ test('private project documents are absent from the Git index', () => {
     const privateDocument = /^(?:.*\/)?(?:AGENTS|REQUIREMENTS|SECURITY-AUDIT|SECURITY-FINDINGS|PROJECT-STATE)\.md$/i;
     assert.ok(trackedFiles.split('\0').every(file => !privateDocument.test(file)));
 });
+
+test('internal application code and the installation schema are denied as direct files', () => {
+    const rewrite = readFileSync(new URL('public_html/.htaccess', root), 'utf8');
+    const fileGate = rewrite.search(/^RewriteCond\s+%\{REQUEST_FILENAME\}\s+-[fd]\b/im);
+    const denyRules = [...rewrite.matchAll(/^RewriteRule\s+(\S+)\s+-\s+\[F,NC\]/gm)]
+        .filter(rule => rule.index < fileGate)
+        .map(rule => new RegExp(rule[1], 'i'));
+    for (const path of ['app/install/schema-v1.sql', 'app/config/private-runtime.php', 'vendor/phpmailer/src/SMTP.php']) {
+        assert.ok(denyRules.some(rule => rule.test(path)), path);
+    }
+    assert.ok(denyRules.every(rule => !rule.test('assets/css/install.css')));
+});

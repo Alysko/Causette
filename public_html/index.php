@@ -1,7 +1,95 @@
 <?php
+use Causette\Installation\SetupConfiguration;
+
 date_default_timezone_set('UTC');
+ini_set('display_errors', '0');
 
 require_once __DIR__ . '/app/core/RequestOrigin.php';
+require_once __DIR__ . '/app/install/SetupConfiguration.php';
+
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+if ($requestPath === '/install') {
+    header('Cache-Control: no-store');
+    header('Content-Type: text/html; charset=UTF-8');
+    header('Referrer-Policy: no-referrer');
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 16384) {
+        http_response_code(413);
+        exit;
+    }
+    if (in_array(strtolower((string)($_SERVER['HTTPS'] ?? '')), ['on', '1'], true)) {
+        if (!function_exists('session_status') || session_status() !== PHP_SESSION_NONE) {
+            http_response_code(503);
+            echo 'Causette setup requires PHP sessions with automatic session start disabled.';
+            exit;
+        }
+        ini_set('session.use_only_cookies', '1');
+        ini_set('session.use_strict_mode', '1');
+        session_name('CAUSETTESETUP');
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => '/install',
+            'domain' => '',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict',
+        ]);
+        if (!session_start()) {
+            http_response_code(503);
+            echo 'Causette setup could not start a protected session.';
+            exit;
+        }
+    }
+
+    require_once __DIR__ . '/app/core/Controller.php';
+    require_once __DIR__ . '/app/controllers/InstallController.php';
+    $installer = new InstallController();
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    if ($method === 'POST') {
+        $installer->install();
+    } elseif ($method === 'GET' || $method === 'HEAD') {
+        $installer->showInstall();
+    } else {
+        header('Allow: GET, HEAD, POST');
+        http_response_code(405);
+    }
+    exit;
+}
+
+$privateRoot = SetupConfiguration::privateRoot();
+$runtimePath = dirname(__DIR__) . '/storage/' . SetupConfiguration::RUNTIME_FILE;
+$legacyConfiguration = __DIR__ . '/app/config/config.php';
+$privateConfiguration = null;
+if (SetupConfiguration::exists($runtimePath)) {
+    try {
+        if ($privateRoot === null) {
+            throw new RuntimeException('The private root could not be validated.');
+        }
+        $privateConfiguration = SetupConfiguration::read($runtimePath);
+        SetupConfiguration::validateSite($privateConfiguration);
+        foreach (['csrf_secret', 'totp_key'] as $key) {
+            if (!is_string($privateConfiguration[$key] ?? null)
+                || !preg_match('/\A[a-f0-9]{64}\z/D', $privateConfiguration[$key])
+            ) {
+                throw new RuntimeException('A private key is invalid.');
+            }
+        }
+    } catch (Throwable) {
+        http_response_code(503);
+        echo 'Causette private configuration is unavailable.';
+        exit;
+    }
+    if (!SetupConfiguration::acceptsRequest($privateConfiguration['url'])) {
+        http_response_code(421);
+        echo 'Open Causette using the configured HTTPS address.';
+        exit;
+    }
+} elseif (!is_file($legacyConfiguration)) {
+    http_response_code(424);
+    echo 'Causette setup is required. Open /install using the configured HTTPS address.';
+    exit;
+}
 
 function is_https_request(): bool {
     return prologue_is_https_request();
@@ -57,8 +145,8 @@ function enforce_https_if_needed(): void {
     exit;
 }
 
-function configure_secure_session(): void {
-    $isHttps = is_https_request();
+function configure_secure_session(bool $forceSecure = false): void {
+    $isHttps = $forceSecure || is_https_request();
 
     ini_set('session.use_only_cookies', '1');
     ini_set('session.use_strict_mode', '1');
@@ -120,10 +208,16 @@ function send_security_headers(): void {
     }
 }
 
-enforce_https_if_needed();
-configure_secure_session();
+if ($privateConfiguration === null) {
+    enforce_https_if_needed();
+}
+configure_secure_session($privateConfiguration !== null);
 session_start();
-require_once __DIR__ . '/app/config/config.php';
+if ($privateConfiguration !== null) {
+    require __DIR__ . '/app/config/private-runtime.php';
+} else {
+    require $legacyConfiguration;
+}
 
 function flash_get(string $key): ?string {
     if (!isset($_SESSION['_flash'][$key])) {
@@ -157,12 +251,10 @@ try {
 } catch (Throwable $exception) {
 }
 
-$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-
 try {
     $dbVersion = Setting::get('database_version');
     if ($dbVersion !== null && version_compare((string)$dbVersion, APP_VERSION, '<')) {
-        if ($requestPath !== '/update' && $requestPath !== '/install') {
+        if ($requestPath !== '/update') {
             $showUpdateButton = false;
             try {
                 $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -182,14 +274,8 @@ try {
     }
 } catch (Throwable $exception) {
 }
-if (!isset($dbVersion) && $requestPath !== '/install') {
-    ErrorHandler::abort(424, 'Prologue has not been installed yet.');
-}
 if (!isset($dbVersion)) {
-    unset($_SESSION['user_id'], $_SESSION['auth_session_token'], $_SESSION['last_activity_touch_at']);
-    if (isset($_COOKIE['remember_me'])) {
-        Auth::clearRememberCookie();
-    }
+    ErrorHandler::abort(424, 'Causette has not been installed yet.');
 }
 if (strpos($requestPath, '/api') === 0) {
     RateLimiter::enforceApiLimit($requestPath, $_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -198,9 +284,6 @@ if (strpos($requestPath, '/api') === 0) {
 $router = new Router();
 
 // Auth
-$router->get('/install', 'InstallController@showInstall');
-$router->post('/install', 'InstallController@install');
-
 $router->get('/update', 'UpdateController@showUpdate');
 $router->post('/update', 'UpdateController@runUpdate');
 

@@ -3,6 +3,7 @@ RewriteEngine On
 
 # Storage must be outside the document root and must have no public alias.
 RewriteRule ^storage(?:/|$) - [F,NC]
+RewriteRule ^(?:app|vendor)(?:/|$) - [F,NC]
 
 # Serve existing files/directories directly
 RewriteCond %{REQUEST_FILENAME} -f [OR]

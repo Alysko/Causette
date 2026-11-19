@@ -16,6 +16,8 @@ Causette targets ordinary Apache/PHP hosting with MySQL. An operator uses the ho
 
 PHP 8.5 is the target minimum for the first release. The verification matrix includes PHP 8.5 and 8.6. Use the latest security patch available from the hosting provider. The release archive will specify tested versions, extensions and server settings.
 
+See the [shared-hosting installation procedure](docs/install.md) for the fresh installation and recovery workflow.
+
 ## Development checks
 
 Run the following in a Git checkout with PHP and Node.js installed.

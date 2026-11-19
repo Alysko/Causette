@@ -4,11 +4,12 @@ set -eu
 # Run inside a disposable Apache environment with a writable /tmp and loopback.
 fixture=$(mktemp -d /tmp/causette-apache.XXXXXX)
 public="$fixture/public"
-mkdir -p "$public/storage/logs"
+mkdir -p "$public/storage/logs" "$public/app/install"
 cp "$1" "$public/.htaccess"
 printf '%s\n' 'public asset' > "$public/public.txt"
 printf '%s\n' 'front controller' > "$public/index.php"
 printf '%s\n' 'private fixture' > "$public/storage/logs/fixture.txt"
+printf '%s\n' 'internal fixture' > "$public/app/install/schema-v1.sql"
 
 cat > "$fixture/httpd.conf" <<EOF
 ServerRoot "$fixture"
@@ -45,7 +46,7 @@ done
 
 test "$(curl_local --fail "$origin/public.txt")" = 'public asset'
 test "$(curl_local --fail "$origin/a/fixture.txt")" = 'front controller'
-for path in /storage /storage/ /storage/logs/fixture.txt /STORAGE/logs/fixture.txt; do
+for path in /storage /storage/ /storage/logs/fixture.txt /STORAGE/logs/fixture.txt /app/install/schema-v1.sql /vendor/example.php; do
     status=$(curl_local --output /dev/null --write-out '%{http_code}' "$origin$path")
     if [ "$status" != 403 ]; then
         printf 'Expected HTTP 403 for %s, got %s\n' "$path" "$status" >&2

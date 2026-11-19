@@ -37,12 +37,16 @@ jobs:
         run: |
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
             --user 33:33 \
+            --tmpfs /project/storage:rw,noexec,nosuid,mode=0700,uid=33,gid=33 \
+            --tmpfs /tmp:rw,noexec,nosuid,mode=1777 \
             --mount "type=bind,source=$PWD/public_html,target=/project/public_html,readonly" \
             --mount "type=bind,source=$PWD/tests,target=/project/tests,readonly" \
             --entrypoint sh "$PHP_IMAGE" -c '
               set -eu
               php -n /project/tests/chat-bootstrap.test.php
               php -n /project/tests/mfa-delivery.test.php
+              php -n /project/tests/installer-authorization.test.php
+              php -n /project/tests/installer-keys.test.php
             '
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'
