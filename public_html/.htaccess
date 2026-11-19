@@ -1,8 +1,8 @@
 Options -Indexes
 RewriteEngine On
 
-# Let /storage be served as static files (e.g., via Apache Alias)
-RewriteRule ^storage/ - [L]
+# Storage must be outside the document root and must have no public alias.
+RewriteRule ^storage(?:/|$) - [F,NC]
 
 # Serve existing files/directories directly
 RewriteCond %{REQUEST_FILENAME} -f [OR]

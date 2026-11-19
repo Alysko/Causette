@@ -1,4 +1,8 @@
 <?php
+use Causette\View\HtmlJson;
+
+require_once __DIR__ . '/../core/HtmlJson.php';
+
 $emojiDirs = [];
 if (defined('STORAGE_FILESYSTEM_ROOT')) {
     $configuredStorageRoot = trim((string)STORAGE_FILESYSTEM_ROOT);
@@ -974,9 +978,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
 <?php endif; ?>
 
 <script>
-    window.PENDING_ATTACHMENTS = <?= json_encode($pendingAttachments ?? [], JSON_UNESCAPED_SLASHES) ?>;
-    window.INITIAL_PINNED_MESSAGE = <?= json_encode($pinnedMessage, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
-    window.INITIAL_ACTIVE_POLL = <?= json_encode($activePoll, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+    window.PENDING_ATTACHMENTS = <?= HtmlJson::encode($pendingAttachments ?? []) ?>;
+    window.INITIAL_PINNED_MESSAGE = <?= HtmlJson::encode($pinnedMessage) ?>;
+    window.INITIAL_ACTIVE_POLL = <?= HtmlJson::encode($activePoll) ?>;
 </script>
 
 <div id="pin-replace-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
