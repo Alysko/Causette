@@ -31,15 +31,28 @@ jobs:
           tools: none
       - run: node scripts/check-syntax.mjs
       - run: node --test tests/*.test.mjs
-      - name: Verify the chat bootstrap in isolation
+      - name: Verify PHP behavior in isolation
         env:
           PHP_IMAGE: ${{ matrix.image }}
         run: |
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
             --user 33:33 \
             --mount "type=bind,source=$PWD/public_html,target=/project/public_html,readonly" \
-            --mount "type=bind,source=$PWD/tests/chat-bootstrap.test.php,target=/project/tests/chat-bootstrap.test.php,readonly" \
-            --entrypoint php "$PHP_IMAGE" -n /project/tests/chat-bootstrap.test.php
+            --mount "type=bind,source=$PWD/tests,target=/project/tests,readonly" \
+            --entrypoint sh "$PHP_IMAGE" -c '
+              set -eu
+              php -n /project/tests/chat-bootstrap.test.php
+              php -n /project/tests/mfa-delivery.test.php
+            '
+      - name: Verify Apache routing in isolation
+        if: matrix.php == '8.5'
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --user 33:33 --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --mount "type=bind,source=$PWD/tests/apache-storage-routing.sh,target=/verify.sh,readonly" \
+            --mount "type=bind,source=$PWD/public_html/.htaccess,target=/causette.htaccess,readonly" \
+            --entrypoint sh docker.io/library/php@sha256:0110f2cd5f4d58417afc7340b22c4ddcce54e970b87c03a6c77259b07b47c325 \
+            /verify.sh /causette.htaccess
 
   secrets:
     name: Secret scan
@@ -61,3 +74,24 @@ jobs:
           printf '%s  %s\n' '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' "$archive" | sha256sum --check
           tar -xzf "$archive" -C "$scanner_dir" gitleaks
           "$scanner_dir/gitleaks" git --no-banner --redact=100 --log-opts='-m HEAD' .
+
+  static-analysis:
+    name: Semgrep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan PHP and JavaScript
+        shell: bash
+        run: |
+          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,size=256m \
+            --env GIT_CONFIG_GLOBAL=/tmp/semgrep.gitconfig \
+            --env SEMGREP_LOG_FILE=/tmp/semgrep.log --env SEMGREP_SETTINGS_FILE=/tmp/semgrep-settings.yml \
+            --mount "type=bind,source=$PWD/public_html,target=/src,readonly" \
+            --entrypoint semgrep docker.io/semgrep/semgrep@sha256:6e1b04340e60e910fbb4ddbf3c857ab0918f064417ad5ac530014ccb3cf8c8f1 \
+            scan --config p/php --config p/javascript --metrics=off --disable-version-check \
+            --max-target-bytes 5000000 --error --json /src |
+            node -e 'const r = JSON.parse(require("node:fs").readFileSync(0, "utf8")); console.log(`Findings: ${r.results.length}, scan errors: ${r.errors.length}`); if (r.errors.length) process.exitCode = 1;'

@@ -19,6 +19,9 @@
         } elseif ($flashError === 'captcha_failed') {
             $toastMessage = 'Captcha verification failed. Please try again.';
             $toastKind = 'error';
+        } elseif ($flashError === 'mfa_unavailable') {
+            $toastMessage = 'Sign-in verification could not start. Please try again later.';
+            $toastKind = 'error';
         } elseif ($flashError !== null) {
             $toastMessage = 'Login failed. Check your credentials.';
             $toastKind = 'error';

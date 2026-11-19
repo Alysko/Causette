@@ -27,6 +27,7 @@ class AuthController extends Controller {
         }
 
         Auth::csrfValidate();
+        unset($_SESSION['2fa_pending_user'], $_SESSION['2fa_remember_me'], $_SESSION['2fa_provider']);
         $this->verifyCaptchaOrFail('/login');
         $identifier = trim($_POST['identifier'] ?? '');
         $password = $_POST['password'] ?? '';
@@ -77,12 +78,25 @@ class AuthController extends Controller {
 
         $twofaProvider = TwoFAManager::getAvailableProvider((int)$user->id);
         if (!$shouldBypassBootstrap2FA && $twofaProvider && Auth::needs2FA($user->id, $ip)) {
-            if ($twofaProvider->sendChallenge((int)$user->id, $ip)) {
-                $_SESSION['2fa_pending_user'] = $user->id;
-                $_SESSION['2fa_remember_me'] = $rememberMe;
-                $_SESSION['2fa_provider'] = $twofaProvider->getName();
-                $this->redirect('/2fa');
+            try {
+                $providerName = $twofaProvider->sendChallenge((int)$user->id, $ip)
+                    ? $twofaProvider->getName()
+                    : '';
+            } catch (\Throwable) {
+                $providerName = '';
             }
+
+            if ($providerName === '') {
+                $this->flash('error', 'mfa_unavailable');
+                $this->redirect('/login');
+                return;
+            }
+
+            $_SESSION['2fa_pending_user'] = $user->id;
+            $_SESSION['2fa_remember_me'] = $rememberMe;
+            $_SESSION['2fa_provider'] = $providerName;
+            $this->redirect('/2fa');
+            return;
         }
 
         Auth::markTrustedIP($user->id, $ip);
