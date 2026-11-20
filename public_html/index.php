@@ -2,6 +2,7 @@
 use Causette\Installation\SetupConfiguration;
 use Causette\Localization\Locale;
 use Causette\Security\BrowserSession;
+use Causette\Security\ContentSecurityPolicy;
 use Causette\Security\IntegrationKeyring;
 use Causette\Security\LegacySite;
 use Causette\Security\RequestOrigin;
@@ -18,6 +19,7 @@ if (session_status() !== PHP_SESSION_NONE) {
 
 require_once __DIR__ . '/app/core/RequestOrigin.php';
 require_once __DIR__ . '/app/core/BrowserSession.php';
+require_once __DIR__ . '/app/core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/app/core/IntegrationKeyring.php';
 require_once __DIR__ . '/app/core/Locale.php';
 require_once __DIR__ . '/app/install/SetupConfiguration.php';
@@ -178,38 +180,9 @@ function start_causette_session(string $path, ?string $name = null, string $same
     }
 }
 
-function get_captcha_csp_domains(): array {
-    try {
-        $provider = trim((string)(Setting::get('captcha_provider') ?? ''));
-    } catch (Throwable $e) {
-        return [];
-    }
-
-    if ($provider === 'cloudflare-turnstile') {
-        return ['https://challenges.cloudflare.com'];
-    }
-
-    if ($provider === 'google-recaptcha-v2') {
-        return ['https://www.google.com', 'https://www.gstatic.com'];
-    }
-
-    return [];
-}
-
-function send_security_headers(bool $isRecoveryPage): void {
+function send_security_headers(bool $isRecoveryPage, ?string $captchaProvider): void {
     if (headers_sent()) {
         return;
-    }
-
-    $captchaDomains = get_captcha_csp_domains();
-    $extraScriptSrc = '';
-    $extraFrameSrc = '';
-    $extraConnectSrc = '';
-    if (!empty($captchaDomains)) {
-        $domainStr = ' ' . implode(' ', $captchaDomains);
-        $extraScriptSrc = $domainStr;
-        $extraFrameSrc = '; frame-src' . $domainStr;
-        $extraConnectSrc = $domainStr;
     }
 
     header('X-Frame-Options: DENY');
@@ -218,7 +191,8 @@ function send_security_headers(bool $isRecoveryPage): void {
         header('Referrer-Policy: strict-origin-when-cross-origin');
     }
     header('Permissions-Policy: geolocation=(), payment=(), usb=(), camera=(self), microphone=(self)');
-    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'" . $extraConnectSrc . "; script-src 'self' 'unsafe-inline'" . $extraScriptSrc . "; style-src 'self' 'unsafe-inline'" . $extraFrameSrc);
+    header('Cache-Control: no-store');
+    header('Content-Security-Policy: ' . ContentSecurityPolicy::forPage($captchaProvider));
 
     if (is_https_request()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
@@ -274,7 +248,12 @@ try {
 if (!is_string($dbVersion) || $dbVersion === '') {
     ErrorHandler::abort(424, 'Causette has not been installed yet.');
 }
-send_security_headers($isRecoveryPage);
+$captchaProvider = null;
+if (in_array($requestPath, ['/login', '/register', '/forgot-password'], true) && in_array($requestMethod, ['GET', 'HEAD'], true)) {
+    require_once __DIR__ . '/app/modules/captcha/CaptchaManager.php';
+    $captchaProvider = CaptchaManager::getActiveProvider()?->getName();
+}
+send_security_headers($isRecoveryPage, $captchaProvider);
 if ($requestPath === '/credential-upgrade') {
     (new CredentialUpgradeController())->handle($requestMethod, $dbVersion);
     exit;

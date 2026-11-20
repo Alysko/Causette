@@ -70,7 +70,7 @@
         </div>
         <?php if (!empty($captchaWidgetHtml)): ?>
             <div class="mb-4"><?= $captchaWidgetHtml ?></div>
-            <script src="<?= htmlspecialchars($captchaScriptUrl, ENT_QUOTES, 'UTF-8') ?>" async defer></script>
+            <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" src="<?= htmlspecialchars($captchaScriptUrl, ENT_QUOTES, 'UTF-8') ?>" async defer></script>
         <?php endif; ?>
         <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-semibold"><?= $locale->html('login.submit') ?></button>
     </form>

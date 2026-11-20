@@ -1,7 +1,9 @@
 <?php
 use Causette\Localization\Locale;
+use Causette\View\AssetUrl;
 
 require_once __DIR__ . '/Locale.php';
+require_once __DIR__ . '/AssetUrl.php';
 
 class ErrorHandler {
     private static $debugMode = false;
@@ -192,15 +194,19 @@ class ErrorHandler {
                 $details[] = "Trace:\n" . $debug['trace'];
             }
 
-            $debugBlock = '<pre style="margin-top:24px;padding:16px;border-radius:10px;background:#f4f6f8;color:#111827;text-align:left;overflow:auto;white-space:pre-wrap;">'
+            $debugBlock = '<pre class="debug">'
                 . htmlspecialchars(implode("\n", $details), ENT_QUOTES, 'UTF-8')
                 . '</pre>';
         }
 
+        if (!headers_sent()) {
+            header('Cache-Control: no-store');
+            header("Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+        }
         echo '<!doctype html>'
             . '<html lang="' . htmlspecialchars($locale->language(), ENT_QUOTES, 'UTF-8') . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             . '<title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title>'
-            . '<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f9fafb;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}main{max-width:680px;margin:24px;padding:36px;background:#fff;border-radius:14px;box-shadow:0 12px 30px rgba(17,24,39,.08)}h1{margin:0 0 10px;font-size:32px}p{margin:0;color:#4b5563;line-height:1.5}.home-link{display:inline-block;margin-top:18px;color:#059669;text-decoration:none;font-weight:600}.home-link:hover{text-decoration:underline}</style>'
+            . '<link rel="stylesheet" href="' . AssetUrl::html('/assets/css/error.css') . '">'
             . '</head><body><main>'
             . '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
             . '<p>' . $description . '</p>'

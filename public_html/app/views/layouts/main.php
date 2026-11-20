@@ -2,6 +2,7 @@
 <?php
 $locale = \Causette\Localization\Locale::current();
 require_once __DIR__ . '/../../core/HtmlJson.php';
+require_once __DIR__ . '/../../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../../core/AssetUrl.php';
 require_once __DIR__ . '/../../core/ReactionCatalog.php';
 $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
@@ -16,116 +17,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     <title>Causette</title>
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
-    <style>
-        body { background: #09090b; }
-        body.app-font-large { font-size: 1.125rem; }
-        .language-links { display: flex; gap: 0.75rem; }
-        .language-links a:hover, .language-links [aria-current="true"] { text-decoration: underline; }
-        #app-top-progress {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: #000;
-            z-index: 10000;
-            pointer-events: none;
-        }
-        #app-top-progress-fill {
-            width: 0;
-            height: 100%;
-            background: #22c55e;
-            opacity: 0;
-            transition: width .18s ease, opacity .22s ease;
-            will-change: width, opacity;
-        }
-        #app-top-progress[data-loading="1"] #app-top-progress-fill {
-            opacity: 1;
-        }
-        .causette-accent { color: #34d399; }
-        .sidebar { background: #111827; }
-        body.h-screen {
-            height: 100dvh;
-            height: var(--app-vh, 100dvh);
-        }
-        body.h-screen > .app-shell { height: 100%; min-height: 0; }
-        .typing-dots { display: inline-flex; gap: 1px; margin-left: 2px; }
-        .typing-dots span { opacity: .35; animation: typing-dot 1s infinite; }
-        .typing-dots span:nth-child(2) { animation-delay: .2s; }
-        .typing-dots span:nth-child(3) { animation-delay: .4s; }
-        @keyframes typing-dot {
-            0%, 80%, 100% { opacity: .35; }
-            40% { opacity: 1; }
-        }
-        @keyframes notification-expire-bar {
-            0% { transform: scaleX(1); }
-            100% { transform: scaleX(0); }
-        }
-        #notification-icon-preview { min-height: 0; }
-        .notification-icon-row {
-            height: 4rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #notification-history-panel.panel-hidden {
-            width: 0 !important;
-            min-width: 0;
-            border-left-width: 0;
-            opacity: 0;
-            transform: translateX(100%);
-            pointer-events: none;
-            overflow: hidden;
-        }
-        #notification-history-panel.panel-visible {
-            opacity: 1;
-            transform: translateX(0);
-            pointer-events: auto;
-        }
-        @media (max-width: 1023px) {
-            #app-sidebar { display: none; }
-            #app-sidebar.mobile-open {
-                display: flex;
-                position: fixed;
-                top: 0; left: 0; bottom: 0;
-                width: min(85vw, 18rem);
-                z-index: 50;
-            }
-            #notification-history-panel { display: none; }
-            #notification-history-panel.mobile-open {
-                display: flex;
-                position: fixed;
-                top: var(--mobile-top-bar-h, 65px); right: 0; bottom: 0;
-                width: min(95vw, 24rem);
-                z-index: 50;
-                border-left: 1px solid #3f3f46;
-            }
-            #notification-history-panel.mobile-open #notification-history-header {
-                justify-content: space-between;
-            }
-            #notification-history-panel.mobile-open #notification-history-header #notification-history-button {
-                display: none;
-            }
-            #notification-history-panel.mobile-open #notification-history-header #notification-history-title {
-                display: block !important;
-            }
-            #notification-icon-preview { display: none !important; }
-            #mobile-overlay-backdrop { display: none; }
-            #mobile-overlay-backdrop.visible {
-                display: block;
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,0.5);
-                z-index: 49;
-            }
-        }
-
-        @media (max-width: 639.98px) {
-            #message-form {
-                padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
 </head>
 <?php
     $currentUser = Auth::user();
@@ -287,11 +179,11 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <span id="chat-call-status-label"></span>
             <span id="chat-call-status-duration" class="hidden text-xs opacity-80 tabular-nums">00:00</span>
             <span id="chat-call-show-overlay-hint" class="hidden text-xs opacity-60"><i class="fa-solid fa-up-right-from-square"></i> <?= $tr('ui.show') ?></span>
-            <button id="join-call-btn" onclick="joinCall()" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.join_call') ?></button>
-            <button id="accept-call-btn" onclick="acceptCall()" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.accept') ?></button>
-            <button id="decline-call-btn" onclick="declineCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.decline') ?></button>
-            <button id="exit-call-btn" onclick="endCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end_call') ?></button>
-            <button id="end-ringing-call-btn" onclick="endCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end') ?></button>
+            <button id="join-call-btn" data-app-action="join-call" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.join_call') ?></button>
+            <button id="accept-call-btn" data-app-action="accept-call" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.accept') ?></button>
+            <button id="decline-call-btn" data-app-action="decline-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.decline') ?></button>
+            <button id="exit-call-btn" data-app-action="end-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end_call') ?></button>
+            <button id="end-ringing-call-btn" data-app-action="end-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end') ?></button>
         </div>
 
         <div id="incoming-call-waiting-overlay" class="hidden fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm p-4">
@@ -300,8 +192,8 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                     <h2 id="incoming-call-waiting-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.incoming_call_waiting') ?></h2>
                     <p id="incoming-call-waiting-subtitle" class="mt-2 text-sm text-zinc-400"><?= $tr('ui.you_are_currently_in_an_active') ?></p>
                     <div class="mt-5 flex items-center justify-end gap-3">
-                        <button type="button" id="incoming-call-waiting-decline-btn" onclick="declineIncomingCallWaiting()" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.decline_new_call') ?></button>
-                        <button type="button" id="incoming-call-waiting-switch-btn" onclick="switchToIncomingCallWaiting()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.end_current_join') ?></button>
+                        <button type="button" id="incoming-call-waiting-decline-btn" data-app-action="decline-incoming-call" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.decline_new_call') ?></button>
+                        <button type="button" id="incoming-call-waiting-switch-btn" data-app-action="switch-incoming-call" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.end_current_join') ?></button>
                     </div>
                 </div>
             </div>
@@ -424,7 +316,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         <aside id="notification-history-panel" class="w-20 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out panel-hidden">
             <div class="p-4 border-b border-zinc-700 flex items-center justify-center" id="notification-history-header">
                 <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3"><?= $tr('ui.notifications') ?></div>
-                <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" onclick="clearAllNotifications()"><?= $tr('ui.clear_all') ?></button>
+                <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" data-app-action="clear-notifications"><?= $tr('ui.clear_all') ?></button>
                 <button id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800" aria-label="<?= $tr('ui.toggle_notification_history') ?>">
                     <i class="fa-regular fa-bell"></i>
                     <span id="notification-history-count" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
@@ -436,7 +328,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     </div>
 
     <!-- Call overlay -->
-    <div id="call-overlay" class="hidden fixed bg-black/95 z-40 flex flex-col" style="inset:0">
+    <div id="call-overlay" class="hidden fixed bg-black/95 z-40 flex flex-col">
         <div id="call-connecting-overlay" class="hidden absolute inset-0 z-20 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
             <div class="text-center">
                 <div id="call-connecting-overlay-title" class="text-lg md:text-xl font-semibold text-zinc-100"><?= $tr('ui.connecting_call') ?></div>
@@ -450,11 +342,11 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                 <span id="call-overlay-duration" class="hidden text-xs text-zinc-500 tabular-nums">00:00</span>
             </div>
             <div class="flex items-center gap-1.5">
-                <button onclick="toggleCallParticipantsPanel()" id="call-participants-toggle-btn" class="hidden h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-2.5" title="<?= $tr('ui.show_participants_panel') ?>" aria-label="<?= $tr('ui.toggle_participants_panel') ?>" aria-expanded="false"><i class="fa-solid fa-users"></i></button>
-                <button onclick="openCallSettingsModal()" id="call-settings-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.call_settings') ?>"><i class="fa-solid fa-gear"></i></button>
-                <button onclick="setCallOverlayMode('hidden')" id="call-overlay-hidden-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.hide_call_window_reopen_from_call') ?>"><i class="fa-solid fa-chevron-up"></i></button>
-                <button onclick="setCallOverlayMode('half')" id="call-overlay-half-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.split_screen') ?>"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
-                <button onclick="setCallOverlayMode('full')" id="call-overlay-full-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.full_size') ?>"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+                <button data-app-action="toggle-call-participants" id="call-participants-toggle-btn" class="hidden h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-2.5" title="<?= $tr('ui.show_participants_panel') ?>" aria-label="<?= $tr('ui.toggle_participants_panel') ?>" aria-expanded="false"><i class="fa-solid fa-users"></i></button>
+                <button data-app-action="open-call-settings" id="call-settings-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.call_settings') ?>"><i class="fa-solid fa-gear"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="hidden" id="call-overlay-hidden-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.hide_call_window_reopen_from_call') ?>"><i class="fa-solid fa-chevron-up"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="half" id="call-overlay-half-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.split_screen') ?>"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="full" id="call-overlay-full-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.full_size') ?>"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
             </div>
         </div>
 
@@ -462,20 +354,20 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <div class="flex-1 min-h-0 flex flex-col">
                 <div id="call-videos" class="flex-1 min-h-0 flex items-center justify-center gap-6 flex-wrap overflow-auto">
                     <div id="remote-user-tile" class="flex flex-col items-center gap-2">
-                        <div id="remote-video-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center" style="width:320px;height:180px">
+                        <div id="remote-video-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                             <video id="remote-camera-video" autoplay playsinline class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <video id="remote-screen-video" autoplay playsinline class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <div id="remote-video-placeholder" class="absolute inset-0 flex items-center justify-center"><i class="fa fa-user text-5xl text-zinc-700"></i></div>
                         </div>
-                        <button id="remote-username-btn" type="button" class="text-sm text-zinc-300 px-1 select-none" disabled style="cursor:default"><?= $tr('ui.participant') ?></button>
+                        <button id="remote-username-btn" type="button" class="text-sm text-zinc-300 px-1 select-none" disabled><?= $tr('ui.participant') ?></button>
                     </div>
 
                     <div id="local-user-tile" class="flex flex-col items-center gap-2">
-                        <div id="local-media-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center" style="width:320px;height:180px">
+                        <div id="local-media-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                             <div id="local-video-placeholder" class="absolute inset-0 flex items-center justify-center"><i class="fa fa-microphone text-4xl text-zinc-700"></i></div>
                             <video id="local-video" autoplay playsinline muted class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <video id="screen-share-video" autoplay playsinline muted class="hidden absolute inset-0 w-full h-full object-contain"></video>
-                            <button id="pip-toggle-btn" type="button" class="hidden absolute bottom-2 left-2 z-10 text-xs bg-black/70 hover:bg-black/90 text-white rounded-lg px-2 py-1 gap-1 flex items-center" onclick="togglePipMode()" title="<?= $tr('ui.swap_picture_in_picture') ?>"><i class="fa-solid fa-rotate"></i><span><?= $tr('ui.swap') ?></span></button>
+                            <button id="pip-toggle-btn" type="button" class="hidden absolute bottom-2 left-2 z-10 text-xs bg-black/70 hover:bg-black/90 text-white rounded-lg px-2 py-1 gap-1 flex items-center" data-app-action="toggle-pip" title="<?= $tr('ui.swap_picture_in_picture') ?>"><i class="fa-solid fa-rotate"></i><span><?= $tr('ui.swap') ?></span></button>
                         </div>
                         <span class="text-sm text-zinc-300 select-none" id="local-username-label"><?= $tr('ui.you') ?></span>
                     </div>
@@ -483,19 +375,19 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
 
                 <div class="shrink-0 flex gap-5 flex-wrap justify-center px-6 pb-6 pt-2">
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="toggleMute()" id="mute-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_mute') ?>"><i class="fa fa-microphone"></i></button>
+                        <button data-app-action="toggle-mute" id="mute-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_mute') ?>"><i class="fa fa-microphone"></i></button>
                         <span class="text-xs text-zinc-400"><?= $tr('ui.mute') ?></span>
                     </div>
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="toggleVideoInCall()" id="toggle-video-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_camera') ?>"><i class="fa fa-video-slash"></i></button>
+                        <button data-app-action="toggle-video" id="toggle-video-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_camera') ?>"><i class="fa fa-video-slash"></i></button>
                         <span class="text-xs text-zinc-400"><?= $tr('ui.camera') ?></span>
                     </div>
                     <div id="screenshare-btn-wrap" class="flex flex-col items-center gap-1 hidden">
-                        <button onclick="toggleScreenShare()" id="screenshare-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.share_screen') ?>"><i class="fa fa-display"></i></button>
+                        <button data-app-action="toggle-screen-share" id="screenshare-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.share_screen') ?>"><i class="fa fa-display"></i></button>
                         <span class="text-xs text-zinc-400"><?= $tr('ui.share') ?></span>
                     </div>
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="endCall()" class="bg-red-600 hover:bg-red-500 w-16 h-16 rounded-2xl text-xl border border-red-700" title="<?= $tr('ui.end_call_2') ?>"><i class="fa fa-phone-slash"></i></button>
+                        <button data-app-action="end-call" class="bg-red-600 hover:bg-red-500 w-16 h-16 rounded-2xl text-xl border border-red-700" title="<?= $tr('ui.end_call_2') ?>"><i class="fa fa-phone-slash"></i></button>
                         <span class="text-xs text-zinc-400"><?= $tr('ui.end') ?></span>
                     </div>
                 </div>
@@ -514,20 +406,20 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <h3 class="text-lg font-semibold text-zinc-100 mb-1"><?= $tr('ui.share_your_screen') ?></h3>
             <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.choose_a_quality_setting_your_browser') ?></p>
             <div class="space-y-3">
-                <button onclick="startScreenShare('720p-10fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                <button data-app-action="start-screen-share" data-quality="720p-10fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
                     <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.720p_10_fps') ?></div>
                     <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.low_bandwidth_ideal_for_slow_connections') ?></div>
                 </button>
-                <button onclick="startScreenShare('1080p-30fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                <button data-app-action="start-screen-share" data-quality="1080p-30fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
                     <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.1080p_30_fps') ?></div>
                     <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.balanced_quality_and_performance') ?></div>
                 </button>
-                <button onclick="startScreenShare('native-60fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                <button data-app-action="start-screen-share" data-quality="native-60fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
                     <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.native_resolution_60_fps') ?></div>
                     <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.highest_quality_requires_fast_connection') ?></div>
                 </button>
             </div>
-            <button onclick="closeScreenShareModal()" class="mt-4 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.cancel') ?></button>
+            <button data-app-action="close-screen-share" class="mt-4 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.cancel') ?></button>
         </div>
     </div>
 
@@ -546,7 +438,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                     <label class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.microphone_volume') ?></label>
                     <input id="call-settings-volume" type="range" min="0" max="100" value="100" class="w-full accent-emerald-500 h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer">
                     <div class="mt-2 w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
-                        <div id="call-settings-level" class="h-full bg-emerald-500 rounded-full transition-none" style="width: 0%"></div>
+                        <div id="call-settings-level" class="h-full bg-emerald-500 rounded-full transition-none"></div>
                     </div>
                 </div>
                 <div>
@@ -560,7 +452,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                     </select>
                 </div>
             </div>
-            <button onclick="closeCallSettingsModal()" class="mt-5 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.close') ?></button>
+            <button data-app-action="close-call-settings" class="mt-5 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.close') ?></button>
         </div>
     </div>
     </div>
@@ -670,17 +562,17 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <div class="mb-5 text-5xl text-emerald-400"><i class="fa-solid fa-rotate"></i></div>
             <h2 class="text-xl font-semibold text-zinc-100 mb-2"><?= $tr('ui.system_update_installed') ?></h2>
             <p class="text-zinc-400 mb-6"><?= $tr('ui.please_refresh_the_page_to_continue') ?></p>
-            <button onclick="location.reload()" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition"><?= $tr('ui.refresh_page') ?></button>
+            <button data-app-action="reload-page" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition"><?= $tr('ui.refresh_page') ?></button>
         </div>
     </div>
 </body>
-<script>
+<script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
     window.CAUSETTE_UI = <?= \Causette\View\HtmlJson::encode([
         'language' => $locale->language(),
         'labels' => $locale->catalog('browser'),
     ]) ?>;
-    window.APP_VERSION = <?= json_encode(APP_VERSION) ?>;
-    window.CSRF_TOKEN = <?= json_encode($csrf) ?>;
+    window.APP_VERSION = <?= \Causette\View\HtmlJson::encode(APP_VERSION) ?>;
+    window.CSRF_TOKEN = <?= \Causette\View\HtmlJson::encode($csrf) ?>;
     window.BROWSER_NOTIFICATIONS_ENABLED = <?= $browserNotificationsEnabled ? 'true' : 'false' ?>;
     window.WEB_PUSH_NOTIFICATIONS_ENABLED = <?= $webPushNotificationsEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SOUND_POKE_ENABLED = <?= $pokeSoundEnabled ? 'true' : 'false' ?>;
@@ -688,17 +580,17 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     window.NOTIFICATION_SOUND_OTHER_ENABLED = <?= $otherNotificationSoundEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SOUND_OUTGOING_CALL_RING_ENABLED = <?= $outgoingCallRingSoundEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SIDEBAR_EXPANDED = <?= $notificationSidebarExpanded ? 'true' : 'false' ?>;
-    window.USER_TIMEZONE = <?= json_encode($userTimezone) ?>;
-    window.CURRENT_USER_ID = <?= json_encode((int)($currentUser->id ?? 0)) ?>;
-    window.CURRENT_USERNAME = <?= json_encode((string)($currentUser->username ?? '')) ?>;
+    window.USER_TIMEZONE = <?= \Causette\View\HtmlJson::encode($userTimezone) ?>;
+    window.CURRENT_USER_ID = <?= \Causette\View\HtmlJson::encode((int)($currentUser->id ?? 0)) ?>;
+    window.CURRENT_USERNAME = <?= \Causette\View\HtmlJson::encode((string)($currentUser->username ?? '')) ?>;
     window.TOP_LOADING_BAR_ENABLED = <?= $topLoadingBarEnabled ? 'true' : 'false' ?>;
     window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED = <?= $systemMessagesAutoCombineEnabled ? 'true' : 'false' ?>;
-    window.CURRENT_USER_PRESENCE_STATUS = <?= json_encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
+    window.CURRENT_USER_PRESENCE_STATUS = <?= \Causette\View\HtmlJson::encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
     window.CAUSETTE_REACTION_LABELS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::labels($locale)) ?>;
-    window.OPENMOJI_FILES = <?= json_encode($openMojiFileNames, JSON_UNESCAPED_SLASHES) ?>;
-    window.OPENMOJI_METADATA = <?= json_encode($openMojiMetadata, JSON_UNESCAPED_SLASHES) ?>;
+    window.OPENMOJI_FILES = <?= \Causette\View\HtmlJson::encode($openMojiFileNames) ?>;
+    window.OPENMOJI_METADATA = <?= \Causette\View\HtmlJson::encode($openMojiMetadata) ?>;
 </script>
 <?php foreach ($scripts as $script): ?>
-    <script data-app-script="<?= $script ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/' . $script) ?>"></script>
+    <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" data-app-script="<?= $script ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/' . $script) ?>"></script>
 <?php endforeach; ?>
 </html>

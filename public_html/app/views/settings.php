@@ -1,6 +1,7 @@
 <?php
 $locale = \Causette\Localization\Locale::current();
 $tr = $locale->html(...);
+require_once __DIR__ . '/../core/HtmlJson.php';
 ?>
 <div class="p-8 overflow-auto space-y-8">
     <h1 class="text-3xl font-bold"><?= $tr('ui.settings') ?></h1>
@@ -647,7 +648,7 @@ $tr = $locale->html(...);
                         <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition"><?= $tr('ui.save_captcha_settings') ?></button>
                     </div>
                 </form>
-                <script>
+                <script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
                     document.getElementById('cp_captcha_provider').addEventListener('change', function() {
                         var keysDiv = document.getElementById('cp-captcha-keys');
                         if (this.value === '') {
@@ -811,7 +812,7 @@ $tr = $locale->html(...);
                                     <i class="fa-regular fa-copy"></i>
                                 </button>
                                 <?php if (!$invite->used_by): ?>
-                                    <form method="POST" action="<?= htmlspecialchars(base_path('/settings/invites/delete'), ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('Delete this invite code?');">
+                                    <form method="POST" action="<?= htmlspecialchars(base_path('/settings/invites/delete'), ENT_QUOTES, 'UTF-8') ?>" data-confirm-message="<?= $tr('ui.confirm_delete_invite_code') ?>">
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                                         <input type="hidden" name="invite_code" value="<?= htmlspecialchars($invite->code, ENT_QUOTES, 'UTF-8') ?>">
                                         <button type="submit" class="text-zinc-500 hover:text-red-300" title="<?= $tr('ui.delete_invite_code') ?>"><i class="fa-regular fa-trash-can"></i></button>
@@ -1089,7 +1090,7 @@ $tr = $locale->html(...);
                                 <p class="text-zinc-300"><span class="text-zinc-400"><?= $tr('ui.ip') ?></span> <?= htmlspecialchars((string)$session->ip_address, ENT_QUOTES, 'UTF-8') ?></p>
                                 <p class="text-zinc-300"><span class="text-zinc-400"><?= $tr('ui.browser') ?></span> <?= htmlspecialchars((string)$session->browser, ENT_QUOTES, 'UTF-8') ?></p>
                             </div>
-                            <form method="POST" action="<?= htmlspecialchars(base_path('/settings/sessions/exit'), ENT_QUOTES, 'UTF-8') ?>" onsubmit="return confirm('End this session?');">
+                            <form method="POST" action="<?= htmlspecialchars(base_path('/settings/sessions/exit'), ENT_QUOTES, 'UTF-8') ?>" data-confirm-message="<?= $tr('ui.confirm_end_session') ?>">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                                 <input type="hidden" name="session_id" value="<?= (int)$session->id ?>">
                                 <button type="submit" class="text-red-300 hover:text-red-200 underline decoration-red-400 whitespace-nowrap"><?= $tr('ui.exit_session') ?></button>
@@ -1121,12 +1122,8 @@ $tr = $locale->html(...);
                             <span class="text-zinc-200"><?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?></span>
                         <?php endforeach; ?>
                     </div>
-                    <button type="button" onclick="
-                        const codes = Array.from(document.querySelectorAll('#recovery-codes-grid span')).map(el => el.textContent).join('\n');
-                        navigator.clipboard.writeText(codes);
-                        this.textContent = 'Copied!';
-                        setTimeout(() => this.textContent = 'Copy all codes', 2000);
-                    " class="w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 py-2.5 rounded-xl text-sm font-medium transition"><?= $tr('ui.copy_all_codes') ?></button>
+                    <button type="button" data-app-action="copy-recovery-codes" data-copy-label="<?= $tr('ui.copy_all_codes') ?>"
+                            data-copied-label="<?= $tr('ui.recovery_codes_copied') ?>" class="w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 py-2.5 rounded-xl text-sm font-medium transition"><?= $tr('ui.copy_all_codes') ?></button>
                 </div>
 
             <?php elseif ($totpSetupPending): ?>
@@ -1396,7 +1393,7 @@ $tr = $locale->html(...);
 <!-- ============================================================ -->
 <!-- JAVASCRIPT -->
 <!-- ============================================================ -->
-<script>
+<script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
 (function () {
     // ---- Generic modal open/close ----
     var openButtons = document.querySelectorAll('[data-modal-open]');
@@ -1581,7 +1578,7 @@ $tr = $locale->html(...);
             if (avatarUploadSpinner) avatarUploadSpinner.classList.remove('hidden');
             if (avatarUploadLabel) avatarUploadLabel.style.pointerEvents = 'none';
 
-            fetch(<?= json_encode(base_url('/settings/avatar')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/settings/avatar')) ?>, {
                 method: 'POST',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
@@ -1626,7 +1623,7 @@ $tr = $locale->html(...);
             var formData = new URLSearchParams();
             formData.append('csrf_token', window.CSRF_TOKEN || (document.querySelector('meta[name="csrf-token"]') || {}).getAttribute?.('content') || '');
 
-            fetch(<?= json_encode(base_url('/settings/avatar/delete')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/settings/avatar/delete')) ?>, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

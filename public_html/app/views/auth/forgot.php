@@ -25,7 +25,7 @@
         <input id="forgot-email" type="email" name="email" placeholder="<?= $tr('ui.email') ?>" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 mb-6" required>
         <?php if (!empty($captchaWidgetHtml)): ?>
             <div class="mb-4"><?= $captchaWidgetHtml ?></div>
-            <script src="<?= htmlspecialchars($captchaScriptUrl, ENT_QUOTES, 'UTF-8') ?>" async defer></script>
+            <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" src="<?= htmlspecialchars($captchaScriptUrl, ENT_QUOTES, 'UTF-8') ?>" async defer></script>
         <?php endif; ?>
         <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-semibold"><?= $tr('ui.send_reset_link') ?></button>
     </form>

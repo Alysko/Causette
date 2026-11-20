@@ -1286,7 +1286,7 @@ function renderToastHistory() {
             ? Math.max(0, expiresAt - now)
             : 0;
         const expiryBorder = isTemporary
-            ? `<div class="absolute bottom-0 left-0 h-0.5 bg-zinc-500 origin-left" style="width:100%; animation: notification-expire-bar ${remainingMs}ms linear forwards;"></div>`
+            ? `<div class="absolute bottom-0 left-0 h-0.5 bg-zinc-500 origin-left" data-toast-expiry-ms="${remainingMs}"></div>`
             : '';
         const createdAt = String(toast.createdAt || '');
         return `
@@ -1297,6 +1297,10 @@ function renderToastHistory() {
             </div>
         `;
     }).join('') || `<div class="px-4 py-3 text-zinc-400 text-sm">${escapeHtml(uiText('no_notifications_yet'))}</div>`;
+
+    list.querySelectorAll('[data-toast-expiry-ms]').forEach((bar) => {
+        bar.style.animationDuration = `${bar.dataset.toastExpiryMs}ms`;
+    });
 
     const messageNodes = list.querySelectorAll('[data-toast-message-index]');
     messageNodes.forEach((node) => {

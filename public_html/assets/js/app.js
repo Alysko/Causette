@@ -1,3 +1,4 @@
+const documentScriptNonce = document.currentScript?.nonce;
 let currentChat = null;
 let currentUserId = Number(window.CURRENT_USER_ID || 0) || null;
 let localStream = null;
@@ -500,7 +501,9 @@ function shouldHandleClientNavigationForUrl(targetUrl) {
     if (targetUrl.searchParams.has('lang')) return false;
 
     const pathname = String(targetUrl.pathname || '');
-    const blockedPrefixes = ['/auth', '/install', '/update'];
+    const blockedPrefixes = [
+        '/auth', '/install', '/update', '/login', '/register', '/forgot-password', '/reset-password', '/credential-upgrade',
+    ];
     if (blockedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
         return false;
     }
@@ -508,26 +511,10 @@ function shouldHandleClientNavigationForUrl(targetUrl) {
     return true;
 }
 
-function executeScriptsInContainer(container) {
-    if (!(container instanceof Element)) return;
+function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
+    const responseNonce = policy?.match(/(?:^|;)\s*script-src\s+[^;]*?'nonce-([A-Za-z0-9+/]{32})'/)?.[1];
+    if (!documentScriptNonce || !responseNonce) return false;
 
-    const scripts = Array.from(container.querySelectorAll('script'));
-    scripts.forEach((oldScript) => {
-        const newScript = document.createElement('script');
-
-        for (const attribute of oldScript.attributes) {
-            newScript.setAttribute(attribute.name, attribute.value);
-        }
-
-        if (!oldScript.src) {
-            newScript.textContent = oldScript.textContent || '';
-        }
-
-        oldScript.replaceWith(newScript);
-    });
-}
-
-function replaceMainContentFromHtml(htmlText, targetUrl, options = {}) {
     const parser = new DOMParser();
     const nextDoc = parser.parseFromString(htmlText, 'text/html');
     const nextScripts = Array.from(nextDoc.querySelectorAll('script[data-app-script]'), (script) => script.getAttribute('src'));
@@ -543,8 +530,22 @@ function replaceMainContentFromHtml(htmlText, targetUrl, options = {}) {
         return false;
     }
 
+    const pageScripts = [];
+    for (const script of nextMain.querySelectorAll('script')) {
+        // Only view scripts authorized by the fetched response may run after a document swap.
+        if (script.nonce === responseNonce && script.hasAttribute('data-page-script') && !script.hasAttribute('src') && !script.hasAttribute('type')) {
+            pageScripts.push(script);
+        } else {
+            script.remove();
+        }
+    }
     currentMain.replaceWith(nextMain);
-    executeScriptsInContainer(nextMain);
+    for (const original of pageScripts) {
+        const script = document.createElement('script');
+        script.nonce = documentScriptNonce;
+        script.textContent = original.textContent;
+        original.replaceWith(script);
+    }
 
     const nextTitle = String(nextDoc.querySelector('title')?.textContent || '').trim();
     if (nextTitle) {
@@ -589,6 +590,7 @@ async function navigateApp(url, options = {}) {
 
         const response = await fetch(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
             method: 'GET',
+            mode: 'same-origin',
             headers: {
                 'X-Requested-With': 'XMLHttpRequest'
             }
@@ -600,7 +602,8 @@ async function navigateApp(url, options = {}) {
         }
 
         const htmlText = await response.text();
-        const swapped = replaceMainContentFromHtml(htmlText, targetUrl, { updateHistory: options.updateHistory !== false });
+        const policy = response.headers.get('Content-Security-Policy');
+        const swapped = replaceMainContentFromHtml(htmlText, policy, targetUrl, { updateHistory: options.updateHistory !== false });
         if (!swapped) {
             window.location.href = toUrl;
             return false;
@@ -1845,6 +1848,71 @@ function bindDynamicViewportHeight() {
     window.visualViewport?.addEventListener('scroll', syncViewportHeight);
 }
 
+function bindAppActions() {
+    const actions = new Map(Object.entries({
+        'start-voice-call': () => startVoiceCall(),
+        'join-call': () => joinCall(),
+        'accept-call': () => acceptCall(),
+        'decline-call': () => declineCall(),
+        'end-call': () => endCall(),
+        'decline-incoming-call': () => declineIncomingCallWaiting(),
+        'switch-incoming-call': () => switchToIncomingCallWaiting(),
+        'toggle-call-participants': () => toggleCallParticipantsPanel(),
+        'open-call-settings': () => openCallSettingsModal(),
+        'close-call-settings': () => closeCallSettingsModal(),
+        'set-call-overlay': (data) => setCallOverlayMode(data.mode),
+        'toggle-pip': () => togglePipMode(),
+        'toggle-mute': () => toggleMute(),
+        'toggle-video': () => toggleVideoInCall(),
+        'toggle-screen-share': () => toggleScreenShare(),
+        'start-screen-share': (data) => startScreenShare(data.quality),
+        'close-screen-share': () => closeScreenShareModal(),
+        'clear-notifications': () => clearAllNotifications(),
+        'new-post': () => openNewPostModal(),
+        'create-group-chat': () => createGroupChat(),
+        'open-add-user': () => window.openAddUserModal?.(),
+        'approve-group-join': (data) => approveGroupJoinRequest(Number(data.userId)),
+        'deny-group-join': (data) => denyGroupJoinRequest(Number(data.userId)),
+        'poke-group-member': (data) => pokeGroupMember(Number(data.userId), data.username),
+        'demote-group-moderator': (data) => demoteGroupModerator(Number(data.userId), data.username),
+        'promote-group-moderator': (data) => promoteGroupModerator(Number(data.userId), data.username),
+        'unmute-group-member': (data) => unmuteGroupMember(Number(data.userId), data.username),
+        'mute-group-member': (data) => muteGroupMember(Number(data.userId), data.username),
+        'remove-group-member': (data) => removeGroupMember(Number(data.userId), data.username),
+        'toggle-favorite-user': (data) => toggleFavoriteUser(Number(data.userId), data.favorite === '1' ? 1 : 0),
+        'unfriend': (data) => openUnfriendModal(Number(data.userId)),
+        'accept-friend-request': (data) => acceptFriendRequest(Number(data.userId)),
+        'cancel-friend-request': (data) => cancelFriendRequest(Number(data.userId)),
+        'send-friend-request': (data) => sendFriendRequestByValue(data.userNumber),
+        'report-user': (data) => reportTarget('user', Number(data.userId)),
+        'toggle-admin-user-menu': (data) => toggleAdminUserMenu(Number(data.userId)),
+        'confirm-admin-user-role': (data) => confirmAdminUserRoleAction(Number(data.userId)),
+        'confirm-admin-user-ban': (data) => confirmAdminUserBanAction(Number(data.userId)),
+        'delete-admin-user': (data) => deleteAdminUser(Number(data.userId)),
+        'manage-api-key': (data) => window.manageKey?.(Number(data.keyId), data.keyName, data.keyChats, data.keyIps, data.keyType),
+        'expire-api-key': (data) => window.expireKey?.(Number(data.keyId), data.keyName),
+        'copy-api-key': () => window.copyNewKey?.(),
+        'reload-page': () => location.reload(),
+        'copy-recovery-codes': async (data, button) => {
+            const codes = Array.from(document.querySelectorAll('#recovery-codes-grid span'), (entry) => entry.textContent);
+            await navigator.clipboard.writeText(codes.join('\n'));
+            button.textContent = data.copiedLabel;
+            setTimeout(() => { button.textContent = data.copyLabel; }, 2000);
+        },
+    }));
+    document.addEventListener('click', (event) => {
+        const button = event.target instanceof Element && event.target.closest('button[data-app-action]');
+        if (!button || button.disabled) return;
+        actions.get(button.dataset.appAction)?.(button.dataset, button);
+    });
+    document.addEventListener('submit', (event) => {
+        const message = event.target.dataset?.confirmMessage;
+        if (message && !window.confirm(message)) {
+            event.preventDefault();
+        }
+    });
+}
+
 function startAppInitOnce() {
     if (appInitStarted) return;
     appInitStarted = true;
@@ -1859,6 +1927,7 @@ function startAppInitOnce() {
     }
     currentClientRenderedUrl = window.location.pathname + window.location.search + window.location.hash;
     bindClientNavigation();
+    bindAppActions();
     init().catch(() => {});
 }
 

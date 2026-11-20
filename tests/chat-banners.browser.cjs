@@ -320,6 +320,136 @@ async function checkPostSearch(browser, errors) {
     console.log('Post search preserved literal wildcards, page boundaries and ordering across equal timestamps.');
 }
 
+async function checkContentSecurity(browser, errors) {
+    const visitors = await newPage(browser, errors);
+    const response = await visitors.goto(origin + '/login');
+    const baseline = response.headers()['content-security-policy'];
+    const canaryUrl = origin + '/login?csp-fixture=1';
+    const html = (await response.text()).replace('</body>', `
+        <script>document.body.dataset.fixtureScript = "ran"</script>
+        <style>#fixture-csp { opacity: 0.2 }</style>
+        <button type="button" id="fixture-csp" style="font-size: 37px"
+                onclick='this.dataset.fixtureHandler = "ran"'>Fixture</button>
+        </body>`);
+    await visitors.route(canaryUrl, (route) => route.fulfill({
+        contentType: 'text/html',
+        headers: { 'content-security-policy': baseline },
+        body: html,
+    }));
+    await visitors.goto(canaryUrl);
+    const canary = await visitors.evaluate(() => {
+        const button = document.getElementById('fixture-csp');
+        button.click();
+        const computed = getComputedStyle(button);
+        return {
+            script: document.body.dataset.fixtureScript ?? null,
+            handler: button.dataset.fixtureHandler ?? null,
+            inlineStyle: computed.fontSize === '37px',
+            styleBlock: computed.opacity === '0.2',
+        };
+    });
+    assert.deepEqual(canary, { script: null, handler: null, inlineStyle: false, styleBlock: false });
+    assert.doesNotMatch(baseline, /unsafe-inline|unsafe-eval|cloudflare\.com|google\.com|gstatic\.com/);
+    const next = await visitors.goto(origin + '/login');
+    const nonce = (policy) => policy.match(/'nonce-([^']+)'/)?.[1];
+    assert.ok(nonce(baseline));
+    assert.ok(nonce(next.headers()['content-security-policy']));
+    assert.notEqual(nonce(baseline), nonce(next.headers()['content-security-policy']));
+    assert.match(next.headers()['cache-control'], /\bno-store\b/);
+    const missing = await visitors.goto(origin + '/fixture-missing-page');
+    assert.equal(missing.status(), 404);
+    assert.equal(await visitors.locator('main').evaluate((element) => getComputedStyle(element).maxWidth), '680px');
+    await visitors.close();
+
+    const admin = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    await admin.evaluate(() => {
+        window.fixtureNavigationMarker = true;
+        window.INITIAL_PINNED_MESSAGE = null;
+        window.fixturePolicyViolations = [];
+        document.addEventListener('securitypolicyviolation', (event) => {
+            window.fixturePolicyViolations.push(event.effectiveDirective);
+        });
+    });
+    assert.equal(await admin.evaluate(() => window.navigateApp('/')), true);
+    await admin.getByRole('heading', { name: 'Dashboard', exact: true }).waitFor();
+    await admin.locator('button[data-app-action="new-post"]').click();
+    await admin.locator('#new-post-modal').waitFor();
+    await admin.locator('#new-post-modal-close').click();
+    assert.equal(await admin.evaluate((path) => window.navigateApp(path), firstChat), true);
+    await waitForText(admin, '#pinned-message-content', '<mark>Thé</mark> &');
+    assert.ok(await admin.evaluate(() => window.INITIAL_PINNED_MESSAGE));
+    assert.equal(await admin.evaluate(() => window.navigateApp('/apikeys')), true);
+    await admin.locator('button[data-modal-open="ak-create-modal"]').click();
+    await admin.locator('#ak-create-modal').waitFor();
+    await admin.locator('#ak-create-modal button[data-modal-close="ak-create-modal"]').first().click();
+    assert.equal(await admin.evaluate(() => window.navigateApp('/settings')), true);
+    await admin.locator('button[data-modal-open="cp-security-modal"]').click();
+    await admin.locator('#cp_captcha_provider').selectOption('cloudflare-turnstile');
+    await admin.locator('#cp_captcha_site_key').waitFor();
+    assert.equal(await admin.evaluate(() => window.fixtureNavigationMarker), true);
+    assert.deepEqual(await admin.evaluate(() => window.fixturePolicyViolations), []);
+
+    const providers = [
+        {
+            name: 'cloudflare-turnstile', widget: 'cf-turnstile',
+            script: 'https://challenges.cloudflare.com/turnstile/v0/api.js',
+            frame: 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/fixture',
+            host: 'challenges.cloudflare.com', otherHost: 'www.google.com',
+        },
+        {
+            name: 'google-recaptcha-v2', widget: 'g-recaptcha',
+            script: 'https://www.google.com/recaptcha/api.js',
+            frame: 'https://www.google.com/recaptcha/api2/anchor',
+            host: 'www.google.com', otherHost: 'challenges.cloudflare.com',
+        },
+    ];
+    for (const provider of providers) {
+        await admin.goto(origin + '/settings?lang=en');
+        await admin.locator('button[data-modal-open="cp-security-modal"]').click();
+        await admin.locator('#cp_captcha_provider').selectOption(provider.name);
+        await admin.locator('#cp_captcha_site_key').fill('fixture-public-site-key');
+        await admin.locator('#cp_captcha_secret_key').fill('fixture-only-captcha-key');
+        assert.equal(await submitForm(admin, '/admin/captcha', admin.locator('form[action$="/admin/captcha"] button')), 302);
+        const ordinary = await admin.goto(origin + '/');
+        assert.doesNotMatch(ordinary.headers()['content-security-policy'], /cloudflare\.com|google\.com|gstatic\.com/);
+
+        const page = await newPage(browser, errors);
+        await page.route(provider.script, (route) => route.fulfill({
+            contentType: 'application/javascript',
+            body: `const widget = document.querySelector('.${provider.widget}');
+                const iframe = document.createElement('iframe');
+                iframe.src = ${JSON.stringify(provider.frame)};
+                widget.append(iframe);`,
+        }));
+        await page.route(provider.frame, (route) => route.fulfill({
+            contentType: 'text/html', body: '<p>Fixture challenge frame</p>',
+        }));
+        for (const path of ['/login', '/register', '/forgot-password']) {
+            const formResponse = await page.goto(origin + path + '?lang=en');
+            const policy = formResponse.headers()['content-security-policy'];
+            assert.ok(policy.includes(provider.host), path);
+            assert.ok(!policy.includes(provider.otherHost), path);
+            const script = page.locator(`script[src="${provider.script}"]`);
+            assert.equal(await script.evaluate(element => element.nonce), nonce(policy));
+            assert.equal(await page.locator(`.${provider.widget}`).getAttribute('data-sitekey'), 'fixture-public-site-key');
+            await page.frameLocator(`.${provider.widget} iframe`).getByText('Fixture challenge frame').waitFor();
+        }
+
+        await page.goto(origin + '/login?lang=en');
+        await page.locator('input[name=identifier]').fill('fixtureadmin');
+        await page.locator('input[name=password]').fill(adminPassword);
+        assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name="identifier"]) button[type=submit]')), 302);
+        await page.waitForURL('**/login');
+        assert.match(await page.locator('#page-toast').getAttribute('data-toast-message'), /Captcha verification failed/);
+        await page.close();
+    }
+    await admin.goto(origin + '/settings?lang=en');
+    await admin.locator('button[data-modal-open="cp-security-modal"]').click();
+    await admin.locator('#cp_captcha_provider').selectOption('');
+    assert.equal(await submitForm(admin, '/admin/captcha', admin.locator('form[action$="/admin/captcha"] button')), 302);
+    console.log('CSP blocked inline canaries, preserved navigation, and limited each CAPTCHA to its authentication forms.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -347,6 +477,11 @@ async function run() {
         }
         if (process.argv.includes('--post-search')) {
             await checkPostSearch(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--content-security')) {
+            await checkContentSecurity(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

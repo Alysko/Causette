@@ -658,7 +658,7 @@ function renderSearchResultAction(user) {
         return `<a href="/c/${escapeHtml(personalChatNumber)}" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm inline-flex items-center justify-center">Personal Chat</a>`;
     }
 
-    return `<button class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm" onclick="sendFriendRequestByValue('${escapeHtml(formattedUserNumber)}')">Add Friend</button>`;
+    return `<button class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm" data-app-action="send-friend-request" data-user-number="${escapeHtml(formattedUserNumber)}">Add Friend</button>`;
 }
 
 function getAdminUserListNodes() {
@@ -1520,7 +1520,7 @@ function highlightSearchTerm(text, query) {
     const regexSafe = escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return escapedText.replace(
         new RegExp(regexSafe, 'gi'),
-        '<mark style="background:rgba(52,211,153,0.2);color:#6ee7b7;border-radius:2px;padding:0 2px;">$&</mark>'
+        '<mark class="search-match">$&</mark>'
     );
 }
 
@@ -1584,7 +1584,7 @@ async function searchPostsPage(query, page) {
                         <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${friendLabel}</span>
                         <span class="ml-auto shrink-0 text-xs text-zinc-500" data-utc="${escapeHtml(createdAtRaw)}" title="${escapeHtml(createdAtRaw)}">${escapeHtml(timestamp)}</span>
                     </div>
-                    <div class="text-sm text-zinc-300 leading-5 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;">${highlightedContent}</div>
+                    <div class="text-sm text-zinc-300 leading-5 overflow-hidden search-preview">${highlightedContent}</div>
                 </a>
             `;
         }).join('');
@@ -1689,7 +1689,7 @@ async function searchMessagesPage(query, page) {
                         <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${chatTypeLabel}</span>
                         <span class="ml-auto shrink-0 text-xs text-zinc-500" data-utc="${escapeHtml(createdAtRaw)}" title="${escapeHtml(createdAtRaw)}">${escapeHtml(timestamp)}</span>
                     </div>
-                    <div class="text-sm text-zinc-300 leading-5 overflow-hidden" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${highlightedContent}</div>
+                    <div class="text-sm text-zinc-300 leading-5 overflow-hidden search-preview search-preview-short">${highlightedContent}</div>
                     <div class="mt-2 text-xs text-zinc-500">Sent by <span class="text-zinc-400">${senderUsername}</span></div>
                 </a>
             `;

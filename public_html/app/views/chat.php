@@ -3,6 +3,7 @@ use Causette\Localization\Locale;
 use Causette\View\HtmlJson;
 
 require_once __DIR__ . '/../core/HtmlJson.php';
+require_once __DIR__ . '/../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../core/Locale.php';
 require_once __DIR__ . '/../core/ReactionCatalog.php';
 
@@ -232,7 +233,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php endif; ?>
         </div>
         <div class="flex gap-6">
-            <button id="start-voice-call-button" onclick="startVoiceCall()" class="causette-accent hover:text-emerald-300 <?= $canStartCalls ? '' : 'opacity-50 cursor-not-allowed' ?> <?= !empty($isUserInActiveCall) ? 'hidden' : '' ?>" <?= $canStartCalls ? '' : 'disabled title="You can\'t call a banned user"' ?>><i class="fa fa-phone text-2xl"></i></button>
+            <button id="start-voice-call-button" data-app-action="start-voice-call" class="causette-accent hover:text-emerald-300 <?= $canStartCalls ? '' : 'opacity-50 cursor-not-allowed' ?> <?= !empty($isUserInActiveCall) ? 'hidden' : '' ?>" <?= $canStartCalls ? '' : 'disabled title="You can\'t call a banned user"' ?>><i class="fa fa-phone text-2xl"></i></button>
         </div>
     </div>
     <?php if ($isGroupChat && $isRequestablePreview): ?>
@@ -270,8 +271,8 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php foreach ($pendingGroupJoinRequests as $pendingJoin): ?>
                 <span class="inline-flex items-center gap-2 bg-zinc-800 border border-zinc-700 rounded-full px-3 py-1" data-join-request-user-id="<?= (int)$pendingJoin->requester_user_id ?>">
                     <span class="text-zinc-200"><?= htmlspecialchars((string)$pendingJoin->username, ENT_QUOTES, 'UTF-8') ?></span>
-                    <button type="button" class="text-emerald-300 hover:text-emerald-200" onclick="approveGroupJoinRequest(<?= (int)$pendingJoin->requester_user_id ?>)"><?= $tr('ui.approve') ?></button>
-                    <button type="button" class="text-red-300 hover:text-red-200" onclick="denyGroupJoinRequest(<?= (int)$pendingJoin->requester_user_id ?>)"><?= $tr('ui.deny') ?></button>
+                    <button type="button" class="text-emerald-300 hover:text-emerald-200" data-app-action="approve-group-join" data-user-id="<?= (int)$pendingJoin->requester_user_id ?>"><?= $tr('ui.approve') ?></button>
+                    <button type="button" class="text-red-300 hover:text-red-200" data-app-action="deny-group-join" data-user-id="<?= (int)$pendingJoin->requester_user_id ?>"><?= $tr('ui.deny') ?></button>
                 </span>
             <?php endforeach; ?>
         </div>
@@ -314,7 +315,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <?php endif; ?>
                     <?php
                         $memberId = (int)$member->id;
-                        $memberUsernameJson = json_encode((string)$member->username, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
+                        $memberUsernameHtml = htmlspecialchars((string)$member->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                         $memberIsSelf = $memberId === (int)$currentUserId;
                         $memberIsOwner = $memberId === (int)$chat->created_by;
                         $memberIsModerator = strtolower((string)($member->group_role ?? 'member')) === 'moderator';
@@ -340,34 +341,34 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         </button>
                         <div id="group-member-menu-<?= $memberId ?>" data-group-member-menu class="hidden absolute right-0 top-full mt-2 min-w-44 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-2 z-30">
                             <?php if ($canPokeMember): ?>
-                            <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-emerald-300" onclick='pokeGroupMember(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                            <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-emerald-300" data-app-action="poke-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                 <i class="fa-solid fa-hand-point-right mr-2" aria-hidden="true"></i><?= $tr('ui.poke') ?>
                             </button>
                             <?php endif; ?>
                             <?php if ($canRoleManageMember): ?>
                                 <?php if ($memberIsModerator): ?>
-                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-sky-300" onclick='demoteGroupModerator(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-sky-300" data-app-action="demote-group-moderator" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                     <i class="fa-solid fa-user-minus mr-2" aria-hidden="true"></i><?= $tr('ui.demote') ?>
                                 </button>
                                 <?php else: ?>
-                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-sky-300" onclick='promoteGroupModerator(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-sky-300" data-app-action="promote-group-moderator" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                     <i class="fa-solid fa-user-shield mr-2" aria-hidden="true"></i><?= $tr('ui.promote') ?>
                                 </button>
                                 <?php endif; ?>
                             <?php endif; ?>
                             <?php if ($canMuteManageMember): ?>
                                 <?php if ((int)($member->is_group_muted ?? 0) === 1): ?>
-                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-amber-300" onclick='unmuteGroupMember(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-amber-300" data-app-action="unmute-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                     <i class="fa-solid fa-volume-high mr-2" aria-hidden="true"></i><?= $tr('ui.unmute') ?>
                                 </button>
                                 <?php else: ?>
-                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-amber-300" onclick='muteGroupMember(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-amber-300" data-app-action="mute-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                     <i class="fa-solid fa-volume-xmark mr-2" aria-hidden="true"></i><?= $tr('ui.mute') ?>
                                 </button>
                                 <?php endif; ?>
                             <?php endif; ?>
                             <?php if ($canRemoveMember): ?>
-                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-red-300" onclick='removeGroupMember(<?= $memberId ?>, <?= $memberUsernameJson ?>)'>
+                                <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-red-300" data-app-action="remove-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                     <i class="fa-solid fa-trash mr-2" aria-hidden="true"></i><?= $tr('ui.delete') ?>
                                 </button>
                             <?php endif; ?>
@@ -377,7 +378,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 </span>
             <?php endforeach; ?>
             <?php if ($otherMembersCount === 0 && $canAddUsers): ?>
-                <button type="button" onclick="openAddUserModal()" class="inline-flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 rounded-full px-3 py-1 text-zinc-300 hover:text-zinc-100">
+                <button type="button" data-app-action="open-add-user" class="inline-flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 rounded-full px-3 py-1 text-zinc-300 hover:text-zinc-100">
                     <i class="fa-solid fa-plus text-xs"></i> <?= $tr('ui.add_user') ?>
                 </button>
             <?php endif; ?>
@@ -963,7 +964,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
 </div>
 <?php endif; ?>
 
-<script>
+<script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
     window.CAUSETTE_CHAT_I18N = <?= HtmlJson::encode(['language' => $chatLocale->language(), 'labels' => $chatLocale->catalog('chat')]) ?>;
     window.PENDING_ATTACHMENTS = <?= HtmlJson::encode($pendingAttachments ?? []) ?>;
     window.INITIAL_PINNED_MESSAGE = <?= HtmlJson::encode($pinnedMessage) ?>;

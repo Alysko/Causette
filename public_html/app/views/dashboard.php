@@ -158,7 +158,7 @@ $tr = $locale->html(...);
                                         <div class="text-[11px] text-emerald-400 mt-0.5"><?= $tr('ui.incoming_request') ?></div>
                                     </div>
                                 </div>
-                                <button class="bg-emerald-600 hover:bg-emerald-500 text-sm px-3 py-1.5 rounded-lg" onclick="acceptFriendRequest(<?= (int)$request->requester_id ?>)"><?= $tr('ui.accept') ?></button>
+                                <button class="bg-emerald-600 hover:bg-emerald-500 text-sm px-3 py-1.5 rounded-lg" data-app-action="accept-friend-request" data-user-id="<?= (int)$request->requester_id ?>"><?= $tr('ui.accept') ?></button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -180,7 +180,7 @@ $tr = $locale->html(...);
                                         <div class="text-[11px] text-zinc-400 mt-0.5"><?= $tr('ui.outgoing_request') ?></div>
                                     </div>
                                 </div>
-                                <button class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" onclick="cancelFriendRequest(<?= (int)($request->target_user_id ?? 0) ?>)"><?= $tr('ui.cancel') ?></button>
+                                <button class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" data-app-action="cancel-friend-request" data-user-id="<?= (int)($request->target_user_id ?? 0) ?>"><?= $tr('ui.cancel') ?></button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -244,7 +244,7 @@ $tr = $locale->html(...);
                 </a>
             <?php endif; ?>
 
-            <button type="button" onclick="createGroupChat()" class="w-full bg-zinc-800 hover:bg-zinc-700 rounded-xl p-3 flex items-center gap-3 transition">
+            <button type="button" data-app-action="create-group-chat" class="w-full bg-zinc-800 hover:bg-zinc-700 rounded-xl p-3 flex items-center gap-3 transition">
                 <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center bg-zinc-900 text-zinc-300">
                     <i class="fa fa-user-group text-sm"></i>
                 </div>
@@ -278,7 +278,7 @@ $tr = $locale->html(...);
         <div class="flex items-center justify-between gap-3 mb-4">
             <h2 class="text-xl font-semibold text-zinc-300"><?= $tr('ui.posts') ?></h2>
             <div class="flex items-center gap-3">
-                <button type="button" onclick="openNewPostModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
+                <button type="button" data-app-action="new-post" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
                     <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
                 </button>
             </div>
@@ -327,7 +327,7 @@ $tr = $locale->html(...);
                                     <?= htmlspecialchars(User::avatarInitial((string)($post->username ?? '')), ENT_QUOTES, 'UTF-8') ?>
                                 </div>
                             <?php endif; ?>
-                            <a href="<?= htmlspecialchars($postAuthorUrl, ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-medium text-zinc-200 hover:text-white transition" onclick="event.stopPropagation()"><?= $postAuthorUsername ?></a>
+                            <a href="<?= htmlspecialchars($postAuthorUrl, ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-medium text-zinc-200 hover:text-white transition"><?= $postAuthorUsername ?></a>
                             <span class="text-xs text-zinc-500 ml-auto" data-utc="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($postCreatedAtLabel, ENT_QUOTES, 'UTF-8') ?></span>
                         </div>
                         <p class="text-sm text-zinc-100 whitespace-pre-wrap break-words leading-6"><?= nl2br(htmlspecialchars($postContent, ENT_QUOTES, 'UTF-8')) ?></p>

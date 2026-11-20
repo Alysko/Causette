@@ -107,7 +107,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                 <?= $tr('ui.server') ?>
             </a>
         </div>
-        <button type="button" onclick="openNewPostModal()" class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
+        <button type="button" data-app-action="new-post" class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
             <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
         </button>
     </div>

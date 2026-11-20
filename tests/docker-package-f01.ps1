@@ -13,7 +13,9 @@ param(
 
     [switch]$Reactions,
 
-    [switch]$PostSearch
+    [switch]$PostSearch,
+
+    [switch]$ContentSecurity
 )
 
 $ErrorActionPreference = 'Stop'
@@ -128,6 +130,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     }
     if ($Localization) {
         Run-Browser '--localization'
+    }
+    if ($ContentSecurity) {
+        Run-Browser '--content-security'
     }
     Run-Browser '--french-member'
 }

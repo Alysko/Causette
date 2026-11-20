@@ -1121,7 +1121,7 @@ async function cleanupLocalCallSession(options = {}) {
     const overlay = document.getElementById('call-overlay');
     if (overlay) {
         overlay.classList.add('hidden');
-        overlay.style.cssText = 'inset:0';
+        overlay.classList.remove('call-overlay-half');
     }
     callOverlayMode = 'full';
     const appLayout = document.getElementById('app-layout');
@@ -1698,18 +1698,12 @@ function setCallOverlayMode(mode) {
     const appLayout = document.getElementById('app-layout');
     if (!overlay) return;
 
-    if (callOverlayMode === 'hidden') {
-        overlay.classList.add('hidden');
-        overlay.style.cssText = 'inset:0';
-        if (appLayout) { appLayout.style.marginTop = ''; appLayout.style.height = ''; }
-    } else if (callOverlayMode === 'half') {
-        overlay.classList.remove('hidden');
-        overlay.style.cssText = 'top:0;left:0;right:0;bottom:auto;height:50vh';
-        if (appLayout) { appLayout.style.marginTop = '50vh'; appLayout.style.height = '50vh'; }
-    } else { // 'full'
-        overlay.classList.remove('hidden');
-        overlay.style.cssText = 'inset:0';
-        if (appLayout) { appLayout.style.marginTop = ''; appLayout.style.height = ''; }
+    const half = callOverlayMode === 'half';
+    overlay.classList.toggle('hidden', callOverlayMode === 'hidden');
+    overlay.classList.toggle('call-overlay-half', half);
+    if (appLayout) {
+        appLayout.style.marginTop = half ? '50vh' : '';
+        appLayout.style.height = half ? '50vh' : '';
     }
 
     persistCallOverlayMode(callOverlayMode);

@@ -1,6 +1,7 @@
 <?php
 $locale = \Causette\Localization\Locale::current();
 $tr = $locale->html(...);
+require_once __DIR__ . '/../core/HtmlJson.php';
 ?>
 <?php
     $keyList = $keys ?? [];
@@ -85,13 +86,13 @@ $tr = $locale->html(...);
                         <?php if ($isActive): ?>
                             <div class="flex gap-2 shrink-0">
                                 <button type="button"
-                                        onclick="manageKey(<?= (int)$key->id ?>, '<?= htmlspecialchars(addslashes($key->name)) ?>', '<?= htmlspecialchars(addslashes($key->allowed_chats ?? '')) ?>', '<?= htmlspecialchars(addslashes($key->allowed_ips ?? '')) ?>', '<?= htmlspecialchars($key->type) ?>')"
+                                        data-app-action="manage-api-key" data-key-id="<?= (int)$key->id ?>" data-key-name="<?= htmlspecialchars($key->name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-chats="<?= htmlspecialchars($key->allowed_chats ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-ips="<?= htmlspecialchars($key->allowed_ips ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-type="<?= htmlspecialchars($key->type, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                                         class="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 transition">
                                     <i class="fa-solid fa-gear"></i>
                                     <?= $tr('ui.manage') ?>
                                 </button>
                                 <button type="button"
-                                        onclick="expireKey(<?= (int)$key->id ?>, '<?= htmlspecialchars(addslashes($key->name)) ?>')"
+                                        data-app-action="expire-api-key" data-key-id="<?= (int)$key->id ?>" data-key-name="<?= htmlspecialchars($key->name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                                         class="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 transition">
                                     <i class="fa-solid fa-ban"></i>
                                     <?= $tr('ui.expire') ?>
@@ -222,7 +223,7 @@ $tr = $locale->html(...);
                 <div class="flex gap-2">
                     <input type="text" id="ak-new-key-display" readonly
                            class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 font-mono text-sm text-zinc-100 select-all focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <button type="button" id="ak-copy-btn" onclick="copyNewKey()"
+                    <button type="button" id="ak-copy-btn" data-app-action="copy-api-key"
                             class="shrink-0 rounded-xl bg-zinc-700 px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-600 transition">
                         <i class="fa-regular fa-copy"></i>
                     </button>
@@ -230,7 +231,7 @@ $tr = $locale->html(...);
             </div>
 
             <div class="flex gap-2">
-                <button type="button" data-modal-close="ak-created-modal" onclick="location.reload()"
+                <button type="button" data-modal-close="ak-created-modal" data-app-action="reload-page"
                         class="flex-1 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 transition">
                     <?= $tr('ui.done') ?>
                 </button>
@@ -330,7 +331,7 @@ $tr = $locale->html(...);
          class="hidden" aria-hidden="true"></div>
 <?php endif; ?>
 
-<script>
+<script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
 (function () {
     // ---- Generic modal open/close ----
     var openButtons = document.querySelectorAll('[data-modal-open]');
@@ -433,7 +434,7 @@ $tr = $locale->html(...);
                 body.append('chat_ids[]', id);
             });
 
-            fetch(<?= json_encode(base_url('/apikeys/create')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/create')) ?>, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -477,7 +478,7 @@ $tr = $locale->html(...);
         expireConfirmBtn.addEventListener('click', function () {
             if (pendingExpireKeyId <= 0) return;
 
-            postForm(<?= json_encode(base_url('/apikeys/expire')) ?>, {
+            postForm(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/expire')) ?>, {
                 csrf_token: getCsrfToken(),
                 key_id: String(pendingExpireKeyId)
             }).then(function (result) {
@@ -532,7 +533,7 @@ $tr = $locale->html(...);
                 body.append('chat_ids[]', id);
             });
 
-            fetch(<?= json_encode(base_url('/apikeys/update')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/update')) ?>, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

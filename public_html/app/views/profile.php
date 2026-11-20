@@ -148,19 +148,19 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             <?php if (!empty($personalChatNumber ?? null)): ?>
             <a href="<?= htmlspecialchars(base_url('/c/' . $personalChatNumber), ENT_QUOTES, 'UTF-8') ?>" class="<?= htmlspecialchars($profileActionSuccessClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-comment-dots text-xs"></i> <?= $tr('ui.personal_chat') ?></a>
             <?php endif; ?>
-            <button type="button" onclick="toggleFavoriteUser(<?= (int)$profile->id ?>, <?= !empty($isFavorite ?? false) ? '0' : '1' ?>)" class="<?= htmlspecialchars(!empty($isFavorite ?? false) ? $profileActionNeutralClass : $profileActionWarnClass, ENT_QUOTES, 'UTF-8') ?>">
+            <button type="button" data-app-action="toggle-favorite-user" data-user-id="<?= (int)$profile->id ?>" data-favorite="<?= !empty($isFavorite ?? false) ? '0' : '1' ?>" class="<?= htmlspecialchars(!empty($isFavorite ?? false) ? $profileActionNeutralClass : $profileActionWarnClass, ENT_QUOTES, 'UTF-8') ?>">
                 <i class="fa <?= !empty($isFavorite ?? false) ? 'fa-star-half-stroke' : 'fa-star' ?> text-xs"></i>
                 <?= !empty($isFavorite ?? false) ? 'Remove Favorite' : 'Add to Favorites' ?>
             </button>
-            <button type="button" onclick="openUnfriendModal(<?= (int)$profile->id ?>)" class="<?= htmlspecialchars($profileActionDangerClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-user-minus text-xs"></i> <?= $tr('ui.unfriend') ?></button>
+            <button type="button" data-app-action="unfriend" data-user-id="<?= (int)$profile->id ?>" class="<?= htmlspecialchars($profileActionDangerClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-user-minus text-xs"></i> <?= $tr('ui.unfriend') ?></button>
             <?php elseif (($friendshipStatus ?? null) === 'pending' && ($friendshipDirection ?? null) === 'incoming'): ?>
-            <button onclick="acceptFriendRequest(<?= (int)$profile->id ?>)" class="<?= htmlspecialchars($profileActionSuccessClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-check text-xs"></i> <?= $tr('ui.accept_request') ?></button>
+            <button data-app-action="accept-friend-request" data-user-id="<?= (int)$profile->id ?>" class="<?= htmlspecialchars($profileActionSuccessClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-check text-xs"></i> <?= $tr('ui.accept_request') ?></button>
             <?php elseif (($friendshipStatus ?? null) === 'pending' && ($friendshipDirection ?? null) === 'outgoing'): ?>
             <button type="button" class="<?= htmlspecialchars($profileActionMutedClass, ENT_QUOTES, 'UTF-8') ?>" disabled><i class="fa fa-paper-plane text-xs"></i> <?= $tr('ui.request_sent') ?></button>
             <?php else: ?>
-            <button onclick="sendFriendRequestByValue('<?= htmlspecialchars(User::formatUserNumber($profile->user_number), ENT_QUOTES, 'UTF-8') ?>')" class="<?= htmlspecialchars($profileActionSuccessClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-user-plus text-xs"></i> <?= $tr('ui.add_friend') ?></button>
+            <button data-app-action="send-friend-request" data-user-number="<?= htmlspecialchars(User::formatUserNumber($profile->user_number), ENT_QUOTES, 'UTF-8') ?>" class="<?= htmlspecialchars($profileActionSuccessClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-user-plus text-xs"></i> <?= $tr('ui.add_friend') ?></button>
             <?php endif; ?>
-            <button onclick="reportTarget('user', <?= (int)$profile->id ?>)" class="<?= htmlspecialchars($profileActionDangerClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-flag text-xs"></i> <?= $tr('ui.report_user') ?></button>
+            <button data-app-action="report-user" data-user-id="<?= (int)$profile->id ?>" class="<?= htmlspecialchars($profileActionDangerClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-flag text-xs"></i> <?= $tr('ui.report_user') ?></button>
             </div>
         </div>
         <?php endif; ?>
@@ -173,7 +173,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
         <div class="flex items-center gap-3">
             <span class="text-xs text-zinc-500 uppercase tracking-wide"><?= (int)($totalPosts ?? count($posts ?? [])) ?> total</span>
             <?php if ((int)$profile->id === (int)$currentUserId): ?>
-                <button type="button" onclick="openNewPostModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
+                <button type="button" data-app-action="new-post" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
                     <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
                 </button>
             <?php endif; ?>
