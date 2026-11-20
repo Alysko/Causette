@@ -58,20 +58,6 @@ body.h-screen > .app-shell { height: 100%; min-height: 0; }
     align-items: center;
     justify-content: center;
 }
-#notification-history-panel.panel-hidden {
-    width: 0 !important;
-    min-width: 0;
-    border-left-width: 0;
-    opacity: 0;
-    transform: translateX(100%);
-    pointer-events: none;
-    overflow: hidden;
-}
-#notification-history-panel.panel-visible {
-    opacity: 1;
-    transform: translateX(0);
-    pointer-events: auto;
-}
 @media (max-width: 1023px) {
     #app-sidebar { display: none; }
     #app-sidebar.mobile-open {
@@ -89,15 +75,6 @@ body.h-screen > .app-shell { height: 100%; min-height: 0; }
         width: min(95vw, 24rem);
         z-index: 50;
         border-left: 1px solid #3f3f46;
-    }
-    #notification-history-panel.mobile-open #notification-history-header {
-        justify-content: space-between;
-    }
-    #notification-history-panel.mobile-open #notification-history-header #notification-history-button {
-        display: none;
-    }
-    #notification-history-panel.mobile-open #notification-history-header #notification-history-title {
-        display: block !important;
     }
     #notification-icon-preview { display: none !important; }
     #mobile-overlay-backdrop { display: none; }

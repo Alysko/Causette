@@ -204,7 +204,8 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <i class="fa-solid fa-comments text-2xl causette-accent"></i>
             <span class="text-2xl font-bold text-zinc-100">Causette</span>
         </button>
-        <button id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800" aria-label="<?= $tr('ui.open_notifications') ?>">
+        <button type="button" id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
+                aria-label="<?= $tr('ui.toggle_notification_history') ?>" aria-controls="notification-history-list" aria-expanded="false">
             <i class="fa-regular fa-bell text-zinc-300"></i>
             <span id="notification-history-count-mobile" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
         </button>
@@ -313,11 +314,13 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             </div>
         </div>
 
-        <aside id="notification-history-panel" class="w-20 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out panel-hidden">
+        <aside id="notification-history-panel" class="w-20 shrink-0 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out"
+               aria-label="<?= $tr('ui.notifications') ?>">
             <div class="p-4 border-b border-zinc-700 flex items-center justify-center" id="notification-history-header">
                 <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3"><?= $tr('ui.notifications') ?></div>
                 <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" data-app-action="clear-notifications"><?= $tr('ui.clear_all') ?></button>
-                <button id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800" aria-label="<?= $tr('ui.toggle_notification_history') ?>">
+                <button type="button" id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
+                        aria-label="<?= $tr('ui.toggle_notification_history') ?>" aria-controls="notification-history-list" aria-expanded="false">
                     <i class="fa-regular fa-bell"></i>
                     <span id="notification-history-count" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
                 </button>

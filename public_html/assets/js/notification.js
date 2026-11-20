@@ -70,7 +70,7 @@ function syncToastHostPosition() {
     const host = document.getElementById('toast-host');
     if (!host) return;
 
-    if (isNotificationHistoryExpanded()) {
+    if (isNotificationHistoryExpanded() && window.innerWidth >= 1024) {
         host.style.right = 'calc(min(95vw, 24rem) + 1.25rem)';
         return;
     }
@@ -356,54 +356,9 @@ function updateFriendRequestBadges(count) {
     setCountBadgeState(document.getElementById('friends-requests-tab-badge'), count);
 }
 
-function updateMobileNotificationState() {
+function updateMobileNotificationBadge() {
     const mobileBadge = document.getElementById('notification-history-count-mobile');
-    const mobileButton = document.getElementById('notification-history-button-mobile');
-    const count = Math.max(unreadNotificationCount, toastHistory.length);
-
-    if (mobileBadge) {
-        setCountBadgeState(mobileBadge, count);
-    }
-    if (mobileButton) {
-        if (count > 0) {
-            mobileButton.disabled = false;
-            mobileButton.classList.remove('opacity-30', 'pointer-events-none');
-        } else {
-            mobileButton.disabled = true;
-            mobileButton.classList.add('opacity-30', 'pointer-events-none');
-        }
-    }
-}
-
-function syncNotificationPanelVisibility(hasNotifications) {
-    const panel = document.getElementById('notification-history-panel');
-    const mobileButton = document.getElementById('notification-history-button-mobile');
-    const hasAny = Boolean(hasNotifications);
-
-    if (panel) {
-        if (!hasAny) {
-            panel.classList.remove('mobile-open', 'w-96', 'max-w-[95vw]');
-            panel.classList.add('w-20');
-            panel.classList.remove('panel-visible');
-            panel.classList.add('panel-hidden');
-            panel.setAttribute('aria-hidden', 'true');
-        } else {
-            panel.classList.remove('panel-hidden');
-            panel.classList.add('panel-visible');
-            panel.setAttribute('aria-hidden', 'false');
-        }
-    }
-
-    if (mobileButton) {
-        mobileButton.classList.toggle('hidden', !hasAny);
-    }
-
-    if (!hasAny) {
-        const backdrop = document.getElementById('mobile-overlay-backdrop');
-        if (backdrop) {
-            backdrop.classList.remove('visible');
-        }
-    }
+    setCountBadgeState(mobileBadge, Math.max(unreadNotificationCount, toastHistory.length));
 }
 
 let webPushStatusCache = null;
@@ -1083,7 +1038,7 @@ async function fetchNotifications() {
         return total + 1;
     }, 0);
     updateNotificationCountInTitle(unreadNotificationCount);
-    updateMobileNotificationState();
+    updateMobileNotificationBadge();
     const incomingFriendRequestCount = Number(data.incoming_friend_request_count);
     if (Number.isFinite(incomingFriendRequestCount) && incomingFriendRequestCount >= 0) {
         updateFriendRequestBadges(incomingFriendRequestCount);
@@ -1261,9 +1216,7 @@ function renderToastHistory() {
         }
     }
 
-    syncNotificationPanelVisibility(visibleToasts.length > 0);
-
-    updateMobileNotificationState();
+    updateMobileNotificationBadge();
 
     const clearBtn = document.getElementById('notification-clear-all-btn');
     if (clearBtn) {
@@ -1399,7 +1352,7 @@ async function handleToastHistoryClick(event) {
         if (result.success) {
             unreadNotificationCount = Math.max(0, unreadNotificationCount - 1);
             updateNotificationCountInTitle(unreadNotificationCount);
-            updateMobileNotificationState();
+            updateMobileNotificationBadge();
         }
     }
 
@@ -1430,144 +1383,78 @@ function bindNotificationHistory() {
     const list = document.getElementById('notification-history-list');
     const title = document.getElementById('notification-history-title');
     const header = document.getElementById('notification-history-header');
-    if (!button || !panel) return;
-    if (button.dataset.bound === '1') return;
-    button.dataset.bound = '1';
+    const clear = document.getElementById('notification-clear-all-btn');
+    if (!button || !mobileButton || !panel || !list || !title || !header || !clear) return;
 
-    const isMobileLayout = () => window.innerWidth < 1024;
+    const mobileLayout = window.matchMedia('(max-width: 1023px)');
+    const sidebar = document.getElementById('app-sidebar');
+    let pendingSave = null;
+    let saving = false;
 
-    const setExpanded = (expanded) => {
-        const hasNotifications = toastHistory.length > 0;
+    const applyExpandedState = () => {
+        const expanded = isNotificationHistoryExpanded();
+        const mobileOpen = mobileLayout.matches && expanded;
+        panel.classList.toggle('mobile-open', mobileOpen);
+        panel.classList.toggle('w-20', !expanded);
+        panel.classList.toggle('w-96', expanded);
+        panel.classList.toggle('max-w-[95vw]', expanded);
+        list.classList.toggle('hidden', !expanded);
+        title.classList.toggle('hidden', !expanded);
+        clear.classList.toggle('hidden', !expanded || toastHistory.length === 0);
+        header.classList.toggle('justify-center', !expanded);
+        header.classList.toggle('justify-between', expanded);
+        button.setAttribute('aria-expanded', String(expanded));
+        mobileButton.setAttribute('aria-expanded', String(expanded));
 
-        if (!hasNotifications) {
-            syncNotificationPanelVisibility(false);
-            expanded = false;
-        } else {
-            syncNotificationPanelVisibility(true);
-        }
-
-        if (isMobileLayout()) {
-            panel.classList.toggle('mobile-open', expanded);
-            // Close sidebar if open, then show/hide shared backdrop
-            const sidebar = document.getElementById('app-sidebar');
-            if (sidebar) sidebar.classList.remove('mobile-open');
-            const backdrop = document.getElementById('mobile-overlay-backdrop');
-            if (backdrop) backdrop.classList.toggle('visible', expanded);
-        } else {
-            panel.classList.toggle('w-20', !expanded);
-            panel.classList.toggle('w-96', expanded);
-            panel.classList.toggle('max-w-[95vw]', expanded);
-        }
-        if (list) {
-            list.classList.toggle('hidden', !expanded);
-        }
-        if (title) {
-            title.classList.toggle('hidden', !expanded);
-        }
-        const clearBtn = document.getElementById('notification-clear-all-btn');
-        if (clearBtn) {
-            clearBtn.classList.toggle('hidden', !expanded || toastHistory.length === 0);
-        }
-        if (header) {
-            header.classList.toggle('justify-center', !expanded);
-            header.classList.toggle('justify-between', expanded);
-        }
-
-        const iconPreview = document.getElementById('notification-icon-preview');
-        if (iconPreview) {
-            iconPreview.classList.toggle('hidden', expanded || isMobileLayout());
-        }
-
+        if (mobileOpen) sidebar?.classList.remove('mobile-open');
+        syncMobileOverlayBackdrop();
         syncToastHostPosition();
+        renderNotificationIconPreview();
     };
 
-    let expanded = Boolean(window.NOTIFICATION_SIDEBAR_EXPANDED);
-    if (toastHistory.length === 0 || isMobileLayout()) {
-        expanded = false;
-    }
-    window.NOTIFICATION_SIDEBAR_EXPANDED = expanded;
-    setExpanded(expanded);
-
-    const handleToggle = () => {
-        if (toastHistory.length === 0) {
-            return;
+    const saveExpandedState = async (expanded) => {
+        pendingSave = expanded;
+        if (saving) return;
+        saving = true;
+        // Keep at most one write in flight so quick toggles persist in the right order.
+        while (pendingSave !== null) {
+            const value = pendingSave;
+            pendingSave = null;
+            await postForm('/api/notifications/sidebar-state', {
+                csrf_token: getCsrfToken(),
+                expanded: value ? '1' : '0'
+            }).catch(() => {});
         }
+        saving = false;
+    };
 
-        expanded = !expanded;
-        setExpanded(expanded);
+    const setExpanded = (expanded, restoreFocus = false) => {
+        if (expanded === isNotificationHistoryExpanded()) return;
         window.NOTIFICATION_SIDEBAR_EXPANDED = expanded;
-
+        applyExpandedState();
         if (expanded) {
             dismissVisibleNotificationToasts();
+            if (mobileLayout.matches) button.focus();
+        } else if (restoreFocus) {
+            (mobileLayout.matches ? mobileButton : button).focus();
         }
-
-        postForm('/api/notifications/sidebar-state', {
-            csrf_token: getCsrfToken(),
-            expanded: expanded ? '1' : '0'
-        }).catch(() => {});
+        saveExpandedState(expanded);
     };
 
-    button.addEventListener('click', handleToggle);
-
-    if (mobileButton) {
-        mobileButton.addEventListener('click', handleToggle);
-    }
-
-    document.addEventListener('click', (event) => {
-        if (!expanded || toastHistory.length > 0) return;
-
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-
-        if (panel.contains(target)) return;
-        if (button.contains(target)) return;
-        if (mobileButton && mobileButton.contains(target)) return;
-
-        if (typeof window.collapseNotificationPanel === 'function') {
-            window.collapseNotificationPanel();
-        }
+    const toggle = () => setExpanded(!isNotificationHistoryExpanded(), true);
+    button.addEventListener('click', toggle);
+    mobileButton.addEventListener('click', toggle);
+    list.addEventListener('click', handleToastHistoryClick);
+    panel.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !isNotificationHistoryExpanded()) return;
+        event.preventDefault();
+        setExpanded(false, true);
     });
+    window.collapseNotificationPanel = (restoreFocus = false) => setExpanded(false, restoreFocus);
+    mobileLayout.addEventListener('change', applyExpandedState);
 
-    if (list) {
-        list.addEventListener('click', (event) => {
-            handleToastHistoryClick(event);
-        });
-    }
-
-    window.collapseNotificationPanel = () => {
-        if (!expanded) return;
-        expanded = false;
-        window.NOTIFICATION_SIDEBAR_EXPANDED = false;
-        setExpanded(false);
-        postForm('/api/notifications/sidebar-state', {
-            csrf_token: getCsrfToken(),
-            expanded: '0'
-        }).catch(() => {});
-    };
-
-    // Reset panel state when crossing the mobile/desktop breakpoint
-    let wasMobile = isMobileLayout();
-    window.addEventListener('resize', () => {
-        const nowMobile = isMobileLayout();
-        if (wasMobile === nowMobile) return;
-        wasMobile = nowMobile;
-
-        // Clean up mobile-specific state
-        panel.classList.remove('mobile-open');
-        const backdrop = document.getElementById('mobile-overlay-backdrop');
-        if (backdrop) backdrop.classList.remove('visible');
-
-        // Clean up desktop-specific width classes
-        panel.classList.remove('w-96', 'max-w-[95vw]');
-        panel.classList.add('w-20');
-
-        // Reset to collapsed state
-        expanded = false;
-        window.NOTIFICATION_SIDEBAR_EXPANDED = false;
-        setExpanded(false);
-    });
-
-    syncNotificationPanelVisibility(toastHistory.length > 0);
+    applyExpandedState();
+    renderToastHistory();
 }
 
 function shouldSuppressNotificationToast(notification) {

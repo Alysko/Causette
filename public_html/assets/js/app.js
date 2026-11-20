@@ -1328,8 +1328,6 @@ async function init() {
         if (typeof clearCurrentChatMessageNotifications === 'function') {
             await clearCurrentChatMessageNotifications().catch(() => {});
         }
-        bindNotificationHistory();
-        renderToastHistory();
         if (notificationPollIntervalId) {
             clearInterval(notificationPollIntervalId);
         }
@@ -1350,7 +1348,6 @@ async function init() {
         loadSidebarChats().catch(() => {});
     }, 5000);
 
-    bindSidebarToggle();
 }
 
 function bindTrashDeleteModal() {
@@ -1748,6 +1745,12 @@ function bindDashboardPostNavigation() {
     });
 }
 
+function syncMobileOverlayBackdrop() {
+    const backdrop = document.getElementById('mobile-overlay-backdrop');
+    const openOverlay = document.querySelector('#app-sidebar.mobile-open, #notification-history-panel.mobile-open');
+    backdrop?.classList.toggle('visible', window.innerWidth < 1024 && openOverlay !== null);
+}
+
 function bindSidebarToggle() {
     const sidebar = document.getElementById('app-sidebar');
     const toggleBtn = document.getElementById('sidebar-toggle-mobile');
@@ -1768,23 +1771,19 @@ function bindSidebarToggle() {
 
     const setSidebarOpen = (open) => {
         sidebar.classList.toggle('mobile-open', open);
-        backdrop.classList.toggle('visible', open);
+        syncMobileOverlayBackdrop();
     };
 
     toggleBtn.addEventListener('click', () => {
         if (!isMobileLayout()) return;
         const isOpen = sidebar.classList.contains('mobile-open');
-        // Close notification panel if open
-        const notifPanel = document.getElementById('notification-history-panel');
-        if (notifPanel) notifPanel.classList.remove('mobile-open');
+        window.collapseNotificationPanel?.();
         setSidebarOpen(!isOpen);
     });
 
     backdrop.addEventListener('click', () => {
         setSidebarOpen(false);
-        // Also close the notification panel if it's open on mobile
-        const notifPanel = document.getElementById('notification-history-panel');
-        if (notifPanel) notifPanel.classList.remove('mobile-open');
+        window.collapseNotificationPanel?.(true);
     });
 
     // Auto-close sidebar on mobile when a navigation link or chat item is clicked
@@ -1928,6 +1927,8 @@ function startAppInitOnce() {
     currentClientRenderedUrl = window.location.pathname + window.location.search + window.location.hash;
     bindClientNavigation();
     bindAppActions();
+    bindNotificationHistory();
+    bindSidebarToggle();
     init().catch(() => {});
 }
 

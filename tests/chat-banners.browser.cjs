@@ -575,6 +575,82 @@ async function checkPollComposer(browser, errors) {
     console.log('Custom durations, bounded dynamic options, bilingual rendering, voting and modal reset passed.');
 }
 
+async function checkNotificationHistory(browser, errors) {
+    const owner = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    const panel = owner.locator('#notification-history-panel');
+    const list = owner.locator('#notification-history-list');
+    const desktop = owner.locator('#notification-history-button');
+    const mobile = owner.locator('#notification-history-button-mobile');
+    const empty = 'No notifications yet';
+    const setHistory = (action) => post(owner, '/api/notifications/sidebar-state', action);
+
+    await owner.clock.install();
+    await owner.evaluate(() => showToast('Fixture temporary notice', 'info', { temporary: true, durationMs: 30000 }));
+    await setHistory(() => desktop.click());
+    await waitForText(owner, '#notification-history-list', 'Fixture temporary notice');
+    await owner.clock.fastForward(31000);
+    await waitForText(owner, '#notification-history-list', empty);
+    assert.notEqual(await panel.getAttribute('aria-hidden'), 'true', 'Expiry of the final toast must keep history reachable');
+    assert.equal(await desktop.getAttribute('aria-expanded'), 'true');
+    await setHistory(() => desktop.press('Enter'));
+    assert.equal(await list.isHidden(), true);
+    await setHistory(() => desktop.press('Space'));
+    await list.getByText(empty).waitFor();
+
+    assert.equal(await owner.evaluate(path => window.navigateApp(path), secondChat), true);
+    assert.equal(await desktop.getAttribute('aria-expanded'), 'true');
+    await list.getByText(empty).waitFor();
+
+    let releasePoll;
+    const pendingPoll = new Promise(resolve => { releasePoll = resolve; });
+    await owner.route(origin + '/notifications', async (route) => {
+        await pendingPoll;
+        await route.continue();
+    }, { times: 1 });
+    try {
+        const pollStarted = owner.waitForRequest(origin + '/notifications');
+        await owner.reload({ waitUntil: 'domcontentloaded' });
+        await pollStarted;
+        await list.getByText(empty).waitFor();
+        await setHistory(() => desktop.click());
+        assert.equal(await list.isHidden(), true);
+        await setHistory(() => desktop.click());
+        await list.getByText(empty).waitFor();
+    } finally {
+        releasePoll();
+    }
+
+    const peer = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    await peer.locator('#message-input').fill('Inbox fixture');
+    await post(peer, '/api/messages', () => peer.locator('#message-input').press('Enter'));
+    await waitForText(owner, '#notification-history-list', 'Inbox fixture');
+    await post(owner, '/api/notifications/clear', () => owner.locator('#notification-clear-all-btn').click());
+    await list.getByText(empty).waitFor();
+    assert.equal(await desktop.getAttribute('aria-expanded'), 'true');
+
+    await owner.setViewportSize({ width: 390, height: 700 });
+    await list.getByText(empty).waitFor();
+    assert.equal(await mobile.getAttribute('aria-expanded'), 'true');
+    await setHistory(() => desktop.press('Escape'));
+    await panel.waitFor({ state: 'hidden' });
+    assert.equal(await mobile.evaluate(button => document.activeElement === button), true);
+    await setHistory(() => mobile.click());
+    await list.getByText(empty).waitFor();
+    await setHistory(() => owner.locator('#mobile-overlay-backdrop').click({ position: { x: 2, y: 300 } }));
+    await panel.waitFor({ state: 'hidden' });
+    assert.equal(await mobile.getAttribute('aria-expanded'), 'false');
+    await owner.locator('#sidebar-toggle-mobile').click();
+    await owner.locator('#app-sidebar').waitFor({ state: 'visible' });
+    await owner.evaluate(() => fetchNotifications());
+    await owner.locator('#mobile-overlay-backdrop').waitFor({ state: 'visible' });
+    await owner.locator('#mobile-overlay-backdrop').click({ position: { x: 385, y: 300 } });
+    await setHistory(() => mobile.click());
+    await list.getByText(empty).waitFor();
+    await setHistory(() => desktop.click());
+    await panel.waitFor({ state: 'hidden' });
+    console.log('Empty notification history remains accessible after toast expiry, polling, clearing and navigation on desktop and mobile.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -617,6 +693,11 @@ async function run() {
         }
         if (process.argv.includes('--poll-composer')) {
             await checkPollComposer(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--notification-history')) {
+            await checkNotificationHistory(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

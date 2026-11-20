@@ -19,7 +19,9 @@ param(
 
     [switch]$PushDelivery,
 
-    [switch]$PollComposer
+    [switch]$PollComposer,
+
+    [switch]$NotificationHistory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -146,6 +148,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     }
     if ($PollComposer) {
         Run-Browser '--poll-composer'
+    }
+    if ($NotificationHistory) {
+        Run-Browser '--notification-history'
     }
     Run-Browser '--french-member'
 }
