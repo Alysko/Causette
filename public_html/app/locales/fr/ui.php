@@ -541,4 +541,6 @@ return [
     'credential_backup_required' => 'Confirmez la sauvegarde avant de continuer.',
     'credential_busy' => 'Une autre opération de maintenance des identifiants est en cours. Réessayez après sa fin.',
     'credential_failed' => 'Le traitement du lot a échoué. Vérifiez que la base et le fichier privé des clés correspondent, puis réessayez.',
+    'reaction_upgrade_progress' => 'Tables de réactions mises à jour : {count} sur 2.',
+    'reaction_upgrade_permissions' => 'Cette mise à jour nécessite le droit ALTER sur les deux tables de réactions. Laissez le site en maintenance et relancez la mise à jour si elle s’interrompt.',
 ];

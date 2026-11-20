@@ -11,7 +11,12 @@ ob_start();
     <dd><?= htmlspecialchars($appVersion, ENT_QUOTES, 'UTF-8') ?></dd>
 </dl>
 <?php if ($recentAuthentication): ?>
-    <p><?= $tr('ui.this_update_uses_the_existing_database') ?></p>
+    <?php if ($reactionSteps !== null): ?>
+        <p><?= $tr('ui.reaction_upgrade_progress', ['count' => $reactionSteps]) ?></p>
+        <p><?= $tr('ui.reaction_upgrade_permissions') ?></p>
+    <?php else: ?>
+        <p><?= $tr('ui.this_update_uses_the_existing_database') ?></p>
+    <?php endif; ?>
     <form method="post" action="<?= htmlspecialchars(base_path('/update'), ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
         <label><input type="checkbox" name="backup_confirmed" value="1" required> <?= $tr('ui.i_have_saved_the_database_configuration') ?></label>

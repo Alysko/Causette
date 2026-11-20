@@ -3,15 +3,7 @@
 $postReactionCodes = Post::REACTION_CODES;
 $currentUser = Auth::user();
 $isCurrentUserAdmin = strtolower((string)($currentUser->role ?? '')) === 'admin';
-$postReactionCodeToLabel = [
-    '1F44D' => 'Like',
-    '1F44E' => 'Dislike',
-    '2665' => 'Love',
-    '1F923' => 'Laugh',
-    '1F622' => 'Cry',
-    '1F436' => 'Pup',
-    '1F4A9' => 'Poop'
-];
+$postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels(\Causette\Localization\Locale::current());
 
 $unicodeCharForPostReaction = static function (string $reactionCode): string {
     $hex = strtoupper(trim($reactionCode));
@@ -83,23 +75,9 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
         return '';
     }
 
-    return '<div class="flex items-center gap-1.5">' . $badges . '</div>';
+    return '<div class="flex flex-wrap items-center gap-1.5">' . $badges . '</div>';
 };
 
-$renderPostReactionPicker = static function (int $postId) use ($postReactionCodes, $postReactionCodeToLabel, $unicodeCharForPostReaction): string {
-    $options = '';
-    foreach ($postReactionCodes as $code) {
-        $label = $postReactionCodeToLabel[$code] ?? 'Reaction';
-        $emojiChar = $unicodeCharForPostReaction($code);
-        $emojiMarkup = $emojiChar !== ''
-            ? '<span class="text-2xl leading-none">' . htmlspecialchars($emojiChar, ENT_QUOTES, 'UTF-8') . '</span>'
-            : '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
-
-        $options .= '<button type="button" class="w-10 h-10 rounded-full hover:bg-zinc-800 flex items-center justify-center js-profile-post-reaction-option" data-post-id="' . (int)$postId . '" data-reaction-code="' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '" title="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '">' . $emojiMarkup . '</button>';
-    }
-
-    return '<div class="hidden js-profile-post-reaction-picker absolute left-0 bottom-full mb-1.5 z-30" data-post-reaction-picker-for="' . (int)$postId . '"><div class="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded-full px-2 py-1">' . $options . '</div></div>';
-};
 ?>
 
 <div class="h-full overflow-auto">
@@ -221,7 +199,7 @@ $renderPostReactionPicker = static function (int $postId) use ($postReactionCode
             <article class="bg-zinc-800 rounded-xl p-3" data-profile-post-id="<?= $postId ?>">
                 <div class="text-zinc-100 whitespace-pre-wrap break-words leading-6"><?= nl2br(htmlspecialchars($postContent, ENT_QUOTES, 'UTF-8')) ?></div>
                 <div class="relative mt-2">
-                    <?= $renderPostReactionPicker($postId) ?>
+                    <div class="hidden js-profile-post-reaction-picker mb-2" data-post-reaction-picker-for="<?= $postId ?>"></div>
                     <div class="text-xs flex items-center gap-3">
                         <span class="text-zinc-500" data-utc="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($postCreatedAtLabel, ENT_QUOTES, 'UTF-8') ?></span>
                         <?php if ($canDeletePost): ?>

@@ -16,6 +16,10 @@ $pdo->exec("INSERT INTO chat_members (chat_id, user_id, role) VALUES (8, 1, 'mod
 $message = $pdo->prepare('INSERT INTO messages (id, chat_id, user_id, content) VALUES (50, 8, 1, ?)');
 $message->execute(["<mark>Thé</mark> & https://example.test/tea\n☕ @[0111222233334444|fixturepeer]"]);
 $pdo->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (52, 8, 2, 'Replacement <mark>note</mark>'), (53, 9, 1, 'Other room'), (54, 8, 1, 'Latest chat message')");
+$pdo->exec("INSERT INTO message_reactions (message_id, user_id, reaction_code) VALUES (50, 2, '1F44D')");
+$pdo->exec("INSERT INTO posts (id, user_id, content) VALUES (50, 2, 'Fixture reaction post')");
+$pdo->exec("INSERT INTO post_reactions (post_id, user_id, reaction_code) VALUES (50, 2, '2665')");
+$pdo->exec("INSERT INTO friends (user_id, friend_id, status) VALUES (1, 2, 'accepted')");
 $setting = $pdo->prepare('INSERT INTO settings (`key`, `value`) VALUES (?, ?)');
 $setting->execute(['pinned_message_chat_8', '50']);
 $setting->execute(['pinned_message_chat_9', '53']);

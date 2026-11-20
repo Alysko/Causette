@@ -333,7 +333,7 @@ CREATE TABLE message_reactions (
 	UNIQUE KEY uniq_message_reactions_message_user (message_id, user_id),
 	KEY idx_message_reactions_message (message_id),
 	KEY idx_message_reactions_user (user_id),
-	CONSTRAINT chk_message_reactions_code CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9'))
+	CONSTRAINT chk_message_reactions_code_v2 CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9','1F389','1F525','1F44F','1F64C','1F62E','1F914','1F602','1F60D','1F929','1F60E','1F64F','1F680','1F4AF','2728'))
 );
 
 -- Profile posts
@@ -359,7 +359,7 @@ CREATE TABLE post_reactions (
 	UNIQUE KEY uniq_post_reactions_post_user (post_id, user_id),
 	KEY idx_post_reactions_post (post_id),
 	KEY idx_post_reactions_user (user_id),
-	CONSTRAINT chk_post_reactions_code CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9'))
+	CONSTRAINT chk_post_reactions_code_v2 CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9','1F389','1F525','1F44F','1F64C','1F62E','1F914','1F602','1F60D','1F929','1F60E','1F64F','1F680','1F4AF','2728'))
 );
 
 -- Message attachments

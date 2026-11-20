@@ -3,6 +3,7 @@
 $locale = \Causette\Localization\Locale::current();
 require_once __DIR__ . '/../../core/HtmlJson.php';
 require_once __DIR__ . '/../../core/AssetUrl.php';
+require_once __DIR__ . '/../../core/ReactionCatalog.php';
 $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
 ?>
 <!DOCTYPE html>
@@ -693,6 +694,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     window.TOP_LOADING_BAR_ENABLED = <?= $topLoadingBarEnabled ? 'true' : 'false' ?>;
     window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED = <?= $systemMessagesAutoCombineEnabled ? 'true' : 'false' ?>;
     window.CURRENT_USER_PRESENCE_STATUS = <?= json_encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
+    window.CAUSETTE_REACTION_LABELS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::labels($locale)) ?>;
     window.OPENMOJI_FILES = <?= json_encode($openMojiFileNames, JSON_UNESCAPED_SLASHES) ?>;
     window.OPENMOJI_METADATA = <?= json_encode($openMojiMetadata, JSON_UNESCAPED_SLASHES) ?>;
 </script>

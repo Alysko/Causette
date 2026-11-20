@@ -78,6 +78,16 @@ final class FixtureUpdateController extends UpdateController
     {
     }
 
+    protected function advanceVersion(string $version): bool
+    {
+        return Setting::advanceDatabaseVersion($version, APP_VERSION);
+    }
+
+    protected function reactionUpgradeProgress(): ?int
+    {
+        return 0;
+    }
+
     protected function viewRaw($view, $data = []): void
     {
         if (!$this->allowForm || $view !== 'update' || ($data['csrf'] ?? null) !== FORM_TOKEN) {

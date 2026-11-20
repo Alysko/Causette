@@ -1,15 +1,11 @@
 <?php
+use Causette\Chat\ReactionCatalog;
+
+require_once __DIR__ . '/../core/ReactionCatalog.php';
+
 class Message extends Model {
     private const STORED_MENTION_PATTERN = '/@\[(\d{16})\|([a-z][a-z0-9]{3,31})\]/i';
-    public const REACTION_CODES = [
-        '1F44D',
-        '1F44E',
-        '2665',
-        '1F923',
-        '1F622',
-        '1F436',
-        '1F4A9'
-    ];
+    public const REACTION_CODES = ReactionCatalog::CODES;
 
     public static function getRecent($chatId) {
         $messages = Database::query("SELECT m.*, u.username FROM messages m JOIN users u ON m.user_id = u.id WHERE m.chat_id = ? ORDER BY m.created_at DESC LIMIT 50", [$chatId])->fetchAll();
@@ -299,13 +295,7 @@ class Message extends Model {
     }
 
     public static function normalizeReactionCode($value): string {
-        $code = strtoupper(trim((string)$value));
-        $code = preg_replace('/[^0-9A-F]/', '', $code) ?? '';
-        if ($code === '') {
-            return '';
-        }
-
-        return in_array($code, self::REACTION_CODES, true) ? $code : '';
+        return ReactionCatalog::normalize($value);
     }
 
     private static function normalizeStoredUserNumber($value) {

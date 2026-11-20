@@ -7,7 +7,9 @@ param(
     [string]$SourceArchive,
 
     [string]$PhpImage = 'causette-f01-php-apache:8.5',
-    [string]$BrowserDependencies = 'causette-package-f01-browser-deps'
+    [string]$BrowserDependencies = 'causette-package-f01-browser-deps',
+
+    [switch]$ReactionUpgrade
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +26,7 @@ function Invoke-Docker {
 }
 
 function Run-UpdateFixture([string]$Stage) {
-    Invoke-Docker exec $app sh -c 'tr -d "\015" </update-fixture.sh | sh -s -- "$1" "$2"' fixture $Stage $fixtureMode
+    Invoke-Docker exec $app sh -c 'tr -d "\015" </update-fixture.sh | sh -s -- "$1" "$2" "$3" "$4"' fixture $Stage $fixtureMode $sourceVersion $targetVersion
 }
 
 function Run-Browser([string]$Script, [string[]]$Scenario) {
@@ -56,6 +58,9 @@ SELECT id, user_number, username, email, password, role FROM users ORDER BY id;
 SELECT id, chat_number, title, type, created_by FROM chats ORDER BY id;
 SELECT chat_id, user_id, role FROM chat_members ORDER BY chat_id, user_id;
 SELECT id, chat_id, user_id, content, created_at FROM messages ORDER BY id;
+SELECT * FROM message_reactions ORDER BY id;
+SELECT * FROM posts ORDER BY id;
+SELECT * FROM post_reactions ORDER BY id;
 SELECT * FROM polls ORDER BY id;
 SELECT * FROM poll_options ORDER BY id;
 SELECT * FROM poll_votes ORDER BY id;
@@ -82,6 +87,12 @@ function Get-DatabaseSchema {
     return ($schema -join "`n") -replace ' AUTO_INCREMENT=[0-9]+', ''
 }
 
+function Assert-ReactionUpgradeProgress([string]$Expected) {
+    $query = 'SELECT `value` FROM settings WHERE `key` = "reaction_schema_upgrade_103";'
+    $progress = Invoke-Docker exec $db mariadb --user root --database $databaseName --batch --skip-column-names --execute $query
+    if ($progress -cne $Expected) { throw "Expected reaction migration progress $Expected, received $progress." }
+}
+
 function Get-VerifiedArchive([string]$Path) {
     $file = Get-Item -LiteralPath $Path
     if ($file.PSIsContainer -or $file.Extension -ne '.zip') {
@@ -99,6 +110,9 @@ $incoming = Get-VerifiedArchive $Archive
 $zip = $incoming.File
 $sha256 = $incoming.Digest
 $versionUpgrade = -not [string]::IsNullOrEmpty($SourceArchive)
+if ($ReactionUpgrade -and !$versionUpgrade) { throw 'A reaction migration test requires a predecessor ZIP.' }
+$sourceVersion = '1.0.1'
+$targetVersion = if ($ReactionUpgrade) { '1.0.3' } elseif ($versionUpgrade) { '1.0.2' } else { '1.0.1' }
 $fixtureMode = if ($versionUpgrade) { 'upgrade' } else { 'legacy' }
 $repo = Split-Path -Parent $PSScriptRoot
 $id = [guid]::NewGuid().ToString('N').Substring(0, 10)
@@ -114,8 +128,10 @@ try {
         $prior = Get-VerifiedArchive $SourceArchive
         $predecessor = $prior.File.FullName
         $priorHash = $prior.Digest
-        if ($priorHash -cne '9e9c712d68c2108c03f53ce883f41f8ba2dbb1880c4ddd57bdb4fbcc4c09abed') {
-            throw 'The predecessor is not the verified F01 1.0.1 archive.'
+        if ($ReactionUpgrade -and $priorHash -ceq 'd731243377003307b4fba7c4a5f5af7370c45f319cbb474ac142c6bac305ca3c') {
+            $sourceVersion = '1.0.2'
+        } elseif ($priorHash -cne '9e9c712d68c2108c03f53ce883f41f8ba2dbb1880c4ddd57bdb4fbcc4c09abed') {
+            throw 'The predecessor is not a verified F01 archive.'
         }
         Write-Output "Predecessor $($prior.File.Name) (SHA-256 $priorHash)"
         Invoke-Docker volume create $browserState | Out-Null
@@ -171,7 +187,7 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
         Run-Browser 'package-update-f01.browser.cjs' @('remember')
         $schema = Get-DatabaseSchema
     }
-    Assert-DatabaseVersion '1.0.1'
+    Assert-DatabaseVersion $sourceVersion
 
     Invoke-Docker exec $app apache2ctl -k stop
     Wait-Apache $false
@@ -179,15 +195,35 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     $before = Get-StableDatabaseRows
     Run-UpdateFixture 'replace'
     if ((Get-StableDatabaseRows) -cne $before) { throw 'Database content changed during the file replacement.' }
-    Assert-DatabaseVersion '1.0.1'
+    Assert-DatabaseVersion $sourceVersion
 
     Invoke-Docker exec --detach $app apache2-foreground
     Wait-Apache $true
     if ($versionUpgrade) {
-        Run-Browser 'package-update-f01.browser.cjs' @('advance')
-        Assert-DatabaseVersion '1.0.2'
-        if ((Get-DatabaseSchema) -cne $schema) { throw 'The upgrade unexpectedly altered the database schema.' }
-        Write-Output 'The browser recorded version 1.0.2 and the database schema is unchanged.'
+        if ($ReactionUpgrade) {
+            $grantMessageAlter = "GRANT ALTER ON causette_recovery_fixture.message_reactions TO 'causette_fixture'@'localhost';"
+            Invoke-Docker exec $db mariadb --user root --execute $grantMessageAlter
+            Run-Browser 'package-update-f01.browser.cjs' @('reaction-interrupt', $sourceVersion, $targetVersion)
+            Assert-DatabaseVersion $sourceVersion
+            Assert-ReactionUpgradeProgress '1'
+            if ((Get-StableDatabaseRows) -cne $before) { throw 'Interrupted migration changed data.' }
+            $grantPostAlter = "GRANT ALTER ON causette_recovery_fixture.post_reactions TO 'causette_fixture'@'localhost';"
+            Invoke-Docker exec $db mariadb --user root --execute $grantPostAlter
+        }
+        Run-Browser 'package-update-f01.browser.cjs' @('advance', $sourceVersion, $targetVersion)
+        Assert-DatabaseVersion $targetVersion
+        $updatedSchema = Get-DatabaseSchema
+        if ($ReactionUpgrade) {
+            Assert-ReactionUpgradeProgress '2'
+            $reactionChecks = '(?m)^.*CONSTRAINT `chk_(?:message|post)_reactions_code(?:_v2)?` CHECK[^\r\n]*'
+            if ([regex]::Matches($updatedSchema, '(?m)CONSTRAINT `chk_(?:message|post)_reactions_code_v2` CHECK').Count -ne 2 -or
+                ($updatedSchema -replace $reactionChecks, '') -cne ($schema -replace $reactionChecks, '')) {
+                throw 'Unexpected schema after reaction migration.'
+            }
+            Write-Output 'The interrupted migration resumed and changed only the two reaction code checks.'
+        } elseif ($updatedSchema -cne $schema) {
+            throw 'The upgrade unexpectedly altered the database schema.'
+        }
     } else {
         Run-UpdateFixture 'enable-credential-upgrade'
         Run-Browser 'package-update-f01.browser.cjs' @('credentials')
@@ -203,6 +239,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
 
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($before))).ToLowerInvariant()
     Write-Output "Stable application rows matched before and after maintenance (SHA-256 $fingerprint)."
+    if ($ReactionUpgrade) {
+        Run-Browser 'chat-banners.browser.cjs' @('--reactions')
+    }
     Run-Browser 'chat-banners.browser.cjs' @('--french-member', '--preserved-poll')
 }
 finally {

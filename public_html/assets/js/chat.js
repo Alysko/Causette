@@ -162,17 +162,7 @@ function bindMessageFormScrollBehavior(messagesBox) {
     });
 }
 
-const MESSAGE_REACTION_OPTIONS = [
-    { code: '1F44D', label: 'Like' },
-    { code: '1F44E', label: 'Dislike' },
-    { code: '2665', label: 'Love' },
-    { code: '1F923', label: 'Laugh' },
-    { code: '1F622', label: 'Cry' },
-    { code: '1F436', label: 'Pup' },
-    { code: '1F4A9', label: 'Poop' }
-];
-
-const MESSAGE_REACTION_LABEL_BY_CODE = new Map(MESSAGE_REACTION_OPTIONS.map((entry) => [entry.code, entry.label]));
+const MESSAGE_REACTION_LABEL_BY_CODE = new Map(Object.entries(window.CAUSETTE_REACTION_LABELS || {}));
 
 function normalizeEmojiKey(value) {
     return String(value || '').replace(/\.svg$/i, '').trim().toUpperCase();
@@ -576,23 +566,49 @@ function renderReactionBadgesMarkup(messageId, reactions) {
         .join('');
 
     if (!badges) return '';
-    return `<div class="flex items-center gap-1.5">${badges}</div>`;
+    return `<div class="flex flex-wrap items-center gap-1.5">${badges}</div>`;
 }
 
 function renderReactionPickerMarkup(messageId) {
-    const options = MESSAGE_REACTION_OPTIONS.map((option) => `
-        <button type="button" class="w-10 h-10 rounded-full hover:bg-zinc-800 flex items-center justify-center js-reaction-option" data-reaction-message-id="${Number(messageId)}" data-reaction-code="${escapeHtml(option.code)}" title="${escapeHtml(option.label)}">
-            ${renderReactionEmojiMarkup(option.code, 'w-7 h-7')}
-        </button>
-    `).join('');
+    return `<div class="hidden js-reaction-picker mb-2" data-reaction-picker-for="${Number(messageId)}"></div>`;
+}
 
-    return `
-        <div class="hidden js-reaction-picker absolute left-0 bottom-full mb-1.5 z-30" data-reaction-picker-for="${Number(messageId)}">
-            <div class="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded-full px-2 py-1">
-                ${options}
-            </div>
-        </div>
-    `;
+function showReactionPalette(picker, targetId, kind) {
+    if (!picker.firstElementChild) {
+        const grid = document.createElement('div');
+        grid.className = 'inline-grid grid-cols-5 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg sm:grid-cols-7';
+
+        for (const [code, label] of MESSAGE_REACTION_LABEL_BY_CODE) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'flex h-9 w-9 items-center justify-center rounded-lg hover:bg-zinc-700 focus-visible:ring-2 focus-visible:ring-emerald-400';
+            if (kind === 'post') {
+                button.classList.add('js-profile-post-reaction-option');
+                button.dataset.postId = String(targetId);
+            } else {
+                button.classList.add('js-reaction-option');
+                button.dataset.reactionMessageId = String(targetId);
+            }
+            button.dataset.reactionCode = code;
+            button.title = label;
+            button.setAttribute('aria-label', label);
+
+            const imageUrl = getReactionImageUrlByCode(code);
+            if (imageUrl) {
+                const image = document.createElement('img');
+                image.src = imageUrl;
+                image.alt = '';
+                image.className = 'h-7 w-7';
+                image.decoding = 'async';
+                button.appendChild(image);
+            } else {
+                button.textContent = reactionCodeToChar(code);
+            }
+            grid.appendChild(button);
+        }
+        picker.appendChild(grid);
+    }
+    picker.classList.remove('hidden');
 }
 
 function closeAllReactionPickers(resetState = true) {
@@ -613,7 +629,7 @@ function toggleReactionPicker(messageId) {
     const willOpen = picker.classList.contains('hidden');
     closeAllReactionPickers(false);
     if (willOpen) {
-        picker.classList.remove('hidden');
+        showReactionPalette(picker, safeMessageId, 'message');
         openReactionPickerMessageId = safeMessageId;
     } else {
         openReactionPickerMessageId = 0;
@@ -4615,7 +4631,7 @@ function renderMessages(messages, options = {}) {
                                 ${editButton}
                                 ${deleteButton}
                                 ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbs-up" aria-hidden="true"></i></button>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
                             </div>`;
 
         chunks.push(`
@@ -4655,7 +4671,7 @@ function renderMessages(messages, options = {}) {
     if (openReactionPickerMessageId > 0) {
         const picker = box.querySelector(`.js-reaction-picker[data-reaction-picker-for="${openReactionPickerMessageId}"]`);
         if (picker) {
-            picker.classList.remove('hidden');
+            showReactionPalette(picker, openReactionPickerMessageId, 'message');
         } else {
             openReactionPickerMessageId = 0;
         }

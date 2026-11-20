@@ -55,7 +55,7 @@ async function installPredecessor(browser) {
     await submit(page, '/install', install.locator('button[type=submit]'), 200);
     await page.getByText('Causette is installed.', { exact: false }).waitFor();
     assert.equal((await page.goto(origin + '/install')).status(), 404);
-    console.log('The 1.0.1 predecessor archive installed through its browser installer.');
+    console.log('The predecessor archive installed through its browser installer.');
 }
 
 async function login(page, username, password, remember = false) {
@@ -111,7 +111,7 @@ async function rememberAdministrator(browser) {
     writeFileSync(rememberState, JSON.stringify({ cookies: [persistentCookie], origins: [] }), { mode: 0o600 });
 }
 
-async function advanceVersion(browser) {
+async function advanceVersion(browser, fromVersion, toVersion) {
     const visitor = await pageIn(browser);
     assert.equal((await visitor.goto(origin + '/')).status(), 503);
     await visitor.getByRole('heading', { name: 'Causette maintenance' }).waitFor();
@@ -132,13 +132,26 @@ async function advanceVersion(browser) {
 
     assert.equal((await administrator.goto(origin + '/update')).status(), 200);
     await administrator.getByRole('heading', { name: 'Update Causette' }).waitFor();
-    assert.deepEqual(await administrator.locator('dl dd').allTextContents(), ['1.0.1', '1.0.2']);
+    assert.deepEqual(await administrator.locator('dl dd').allTextContents(), [fromVersion, toVersion]);
     assert.equal(await apply.evaluate((form) => form.checkValidity()), false, 'Backup confirmation is required');
     await apply.getByRole('checkbox').check();
     await submit(administrator, '/update', apply.getByRole('button', { name: 'Apply update' }), 302);
     assert.equal((await administrator.goto(origin + '/')).status(), 200);
     assert.equal((await administrator.goto(origin + '/update')).status(), 404);
     console.log('A remembered administrator had to sign in again. The backed-up update reopened the site and closed the update page.');
+}
+
+async function interruptReactionUpgrade(browser, fromVersion, toVersion) {
+    const page = await pageIn(browser);
+    await login(page, 'fixtureadmin', 'fixture-only-password');
+    assert.equal((await page.goto(origin + '/update')).status(), 200);
+    assert.deepEqual(await page.locator('dl dd').allTextContents(), [fromVersion, toVersion]);
+    const apply = page.locator('form[action="/update"]');
+    await apply.getByRole('checkbox').check();
+    await submit(page, '/update', apply.getByRole('button', { name: 'Apply update' }), 503);
+    assert.equal((await page.goto(origin + '/update')).status(), 200);
+    await page.getByText('Reaction tables updated: 1 of 2.', { exact: true }).waitFor();
+    assert.equal((await page.goto(origin + '/')).status(), 503);
 }
 
 async function upgradeCredentials(browser) {
@@ -159,7 +172,8 @@ async function run() {
             case 'install': return await installPredecessor(browser);
             case 'before': return await verifyAttachment(browser, false);
             case 'remember': return await rememberAdministrator(browser);
-            case 'advance': return await advanceVersion(browser);
+            case 'advance': return await advanceVersion(browser, process.argv[3], process.argv[4]);
+            case 'reaction-interrupt': return await interruptReactionUpgrade(browser, process.argv[3], process.argv[4]);
             case 'credentials': return await upgradeCredentials(browser);
             case 'after': return await verifyAttachment(browser, true);
             default: throw new Error('Unknown update browser scenario');

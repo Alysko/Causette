@@ -258,6 +258,46 @@ async function checkLocalAssets(browser, errors) {
     console.log('The login and dashboard use local CSS and icons with all external requests blocked.');
 }
 
+async function checkReactions(browser, errors) {
+    const page = await login(browser, 'fixtureadmin', adminPassword, errors, 'fr');
+    const message = page.locator('#messages [data-message-id="50"]').first();
+    const messageBadge = code => message.locator(`.js-reaction-badge[data-reaction-code="${code}"]`);
+    await messageBadge('1F44D').waitFor();
+    await message.hover();
+    await message.locator('.js-react-link').click();
+    const options = message.locator('.js-reaction-option');
+    assert.equal(await options.count(), 21, 'The message reaction picker should offer all 21 choices');
+    const party = options.filter({ has: page.locator('img[src$="/emojis/1F389.svg"]') });
+    assert.equal(await party.getAttribute('aria-label'), 'Célébrer');
+    assert.equal(await page.evaluate(async () => (await fetch('/emojis/1F389.svg')).status), 200);
+    await post(page, '/api/messages/react', () => party.click());
+    await messageBadge('1F389').waitFor();
+    await page.reload();
+    await messageBadge('1F389').waitFor();
+    await messageBadge('1F44D').waitFor();
+    await post(page, '/api/messages/react', () => messageBadge('1F389').click());
+    await messageBadge('1F389').waitFor({ state: 'hidden' });
+
+    await page.goto(origin + '/posts?scope=server');
+    const postBadge = code => page.locator(`.js-profile-post-reaction-badge[data-post-id="50"][data-reaction-code="${code}"]`);
+    await postBadge('2665').waitFor();
+    await page.locator('.js-profile-post-react-link[data-post-id="50"]').click();
+    const postOptions = page.locator('.js-profile-post-reaction-option[data-post-id="50"]');
+    assert.equal(await postOptions.count(), 21);
+    await post(page, '/api/posts/react', () => postOptions.and(page.locator('[data-reaction-code="1F525"]')).click());
+    await postBadge('1F525').waitFor();
+    await page.goto(origin + '/u/0111-2222-3333-4444');
+    await postBadge('1F525').waitFor();
+    await postBadge('2665').waitFor();
+    const recipient = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const notifications = await recipient.evaluate(async () => {
+        const response = await fetch('/notifications', { headers: { Accept: 'application/json' } });
+        return (await response.json()).notifications;
+    });
+    assert.ok(notifications.some(item => item.message.includes('🔥 Fire')));
+    console.log('Both reaction pickers offer 21 local emoji choices. Existing reactions remain visible after voting and reload.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -275,6 +315,11 @@ async function run() {
         }
         if (process.argv.includes('--local-assets')) {
             await checkLocalAssets(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--reactions')) {
+            await checkReactions(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

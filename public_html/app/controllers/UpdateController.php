@@ -3,6 +3,9 @@
 declare(strict_types=1);
 
 use Causette\Installation\SetupConfiguration;
+use Causette\Installation\ReactionSchemaUpgrade;
+
+require_once __DIR__ . '/../install/ReactionSchemaUpgrade.php';
 
 class UpdateController extends Controller
 {
@@ -38,6 +41,7 @@ class UpdateController extends Controller
             'dbVersion' => $version,
             'appVersion' => APP_VERSION,
             'recentAuthentication' => $this->hasRecentPasswordAuthentication(),
+            'reactionSteps' => $this->reactionUpgradeProgress(),
         ]);
     }
 
@@ -54,9 +58,9 @@ class UpdateController extends Controller
         }
 
         try {
-            $advanced = Setting::advanceDatabaseVersion($version, APP_VERSION);
+            $advanced = $this->advanceVersion($version);
         } catch (Throwable) {
-            error_log('[Causette] Could not save the database version during a code-only update.');
+            error_log('[Causette] The database update could not complete. Check the reaction table constraints and ALTER permissions.');
             ErrorHandler::abort(503);
         }
         if (!$advanced) {
@@ -65,6 +69,20 @@ class UpdateController extends Controller
 
         $this->flash('success', 'update_complete');
         $this->redirect('/');
+    }
+
+    protected function advanceVersion(string $version): bool
+    {
+        return APP_VERSION === ReactionSchemaUpgrade::TARGET
+            ? ReactionSchemaUpgrade::apply($version)
+            : Setting::advanceDatabaseVersion($version, APP_VERSION);
+    }
+
+    protected function reactionUpgradeProgress(): ?int
+    {
+        return APP_VERSION === ReactionSchemaUpgrade::TARGET
+            ? (int)Setting::get(ReactionSchemaUpgrade::PROGRESS_KEY)
+            : null;
     }
 
     public function reauthenticate(): void

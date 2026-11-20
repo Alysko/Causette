@@ -259,14 +259,6 @@ function hydrateProfilePostReactionEmojiMarkup(root = document) {
         return;
     }
 
-    const options = Array.from(root.querySelectorAll('.js-profile-post-reaction-option'));
-    options.forEach((option) => {
-        const reactionCode = String(option.getAttribute('data-reaction-code') || '');
-        const markup = renderReactionEmojiMarkup(reactionCode, 'w-7 h-7');
-        if (!markup) return;
-        option.innerHTML = markup;
-    });
-
     const badges = Array.from(root.querySelectorAll('.js-profile-post-reaction-badge'));
     badges.forEach((badge) => {
         const reactionCode = String(badge.getAttribute('data-reaction-code') || '');
@@ -300,7 +292,7 @@ function toggleProfilePostReactionPicker(postId) {
     closeAllProfilePostReactionPickers(false);
 
     if (willOpen) {
-        picker.classList.remove('hidden');
+        showReactionPalette(picker, safePostId, 'post');
         openProfilePostReactionPickerId = safePostId;
         return;
     }
@@ -308,19 +300,9 @@ function toggleProfilePostReactionPicker(postId) {
     openProfilePostReactionPickerId = 0;
 }
 
-function normalizeProfilePostReactionCode(value) {
-    if (typeof normalizeReactionCode === 'function') {
-        return normalizeReactionCode(value);
-    }
-
-    const normalized = String(value || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-    const allowed = new Set(['1F44D', '1F44E', '2665', '1F923', '1F622', '1F436', '1F4A9']);
-    return allowed.has(normalized) ? normalized : '';
-}
-
 async function reactToProfilePost(postId, reactionCode) {
     const safePostId = Number(postId || 0);
-    const safeReactionCode = normalizeProfilePostReactionCode(reactionCode);
+    const safeReactionCode = normalizeReactionCode(reactionCode);
     if (!Number.isFinite(safePostId) || safePostId <= 0 || !safeReactionCode) {
         return;
     }

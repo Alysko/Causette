@@ -541,4 +541,6 @@ return [
     'credential_backup_required' => 'Confirm that you saved a backup before continuing.',
     'credential_busy' => 'Another credential operation is in progress. Try again after it finishes.',
     'credential_failed' => 'The batch could not finish. Check the matching private key file and database, then retry.',
+    'reaction_upgrade_progress' => 'Reaction tables updated: {count} of 2.',
+    'reaction_upgrade_permissions' => 'This update requires ALTER permission for both reaction tables. Keep the site in maintenance and retry if the update stops.',
 ];

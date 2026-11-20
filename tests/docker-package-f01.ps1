@@ -9,7 +9,9 @@ param(
 
     [switch]$Localization,
 
-    [switch]$LocalAssets
+    [switch]$LocalAssets,
+
+    [switch]$Reactions
 )
 
 $ErrorActionPreference = 'Stop'
@@ -113,6 +115,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
 
     Run-Browser '--install'
     Invoke-Docker exec $app sh -c 'tr -d "\015" </fixture.sh | sh -s -- seed'
+    if ($Reactions) {
+        Run-Browser '--reactions'
+    }
     if ($LocalAssets) {
         Run-Browser '--local-assets'
     }

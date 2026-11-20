@@ -14,8 +14,8 @@ case "$1" in
             test -f /case/MANIFEST.json
             php -r '
                 $metadata = require "/case/public_html/version.php";
-                if ($metadata["app_version"] !== "1.0.1" || $metadata["compatible_database_versions"] !== []) exit(1);
-            '
+                if ($metadata["app_version"] !== $argv[1]) exit(1);
+            ' "$3"
         else
             test -f /case/public_html/app/core/UpdateChecker.php
         fi
@@ -120,12 +120,14 @@ PHP
         if [ "$mode" = upgrade ]; then
             php -r '
                 $metadata = require "/stage/public_html/version.php";
-                if ($metadata["app_version"] !== "1.0.2" || !in_array("1.0.1", $metadata["compatible_database_versions"], true)) {
-                    fwrite(STDERR, "The successor must be version 1.0.2 and accept database version 1.0.1.\n");
+                if ($metadata["app_version"] !== $argv[2] || !in_array($argv[1], $metadata["compatible_database_versions"], true)) {
+                    fwrite(STDERR, "The successor does not match the expected version or accept the predecessor.\n");
                     exit(1);
                 }
-            '
-            cmp /case/public_html/app/install/schema-v1.sql /stage/public_html/app/install/schema-v1.sql
+            ' "$3" "$4"
+            if [ "$4" = 1.0.2 ]; then
+                cmp /case/public_html/app/install/schema-v1.sql /stage/public_html/app/install/schema-v1.sql
+            fi
         else
             test ! -e /case/storage/integration-keys.json
             php -r '

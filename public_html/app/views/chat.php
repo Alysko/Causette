@@ -1,12 +1,13 @@
-<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <?php
 use Causette\Localization\Locale;
 use Causette\View\HtmlJson;
 
 require_once __DIR__ . '/../core/HtmlJson.php';
 require_once __DIR__ . '/../core/Locale.php';
+require_once __DIR__ . '/../core/ReactionCatalog.php';
 
 $chatLocale = Locale::current();
+$tr = $chatLocale->html(...);
 $chatLabel = static fn(string $key): string => $chatLocale->html('chat.' . $key);
 
 $emojiDirs = [];
@@ -129,16 +130,7 @@ if ($currentUserUsername === '') {
     }
 }
 
-$reactionCodes = Message::REACTION_CODES;
-$reactionCodeToLabel = [
-    '1F44D' => 'Like',
-    '1F44E' => 'Dislike',
-    '2665' => 'Love',
-    '1F923' => 'Laugh',
-    '1F622' => 'Cry',
-    '1F436' => 'Pup',
-    '1F4A9' => 'Poop'
-];
+$reactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels($chatLocale);
 
 $resolveEmojiFilenameByCode = static function (string $reactionCode) use ($emojiFileKeys): string {
     $key = strtoupper(trim($reactionCode));
@@ -825,21 +817,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         </div>
                     <?php endif; ?>
                     <div class="relative mt-0.5">
-                        <div class="hidden js-reaction-picker absolute left-0 bottom-full mb-1.5 z-30" data-reaction-picker-for="<?= (int)$message->id ?>">
-                            <div class="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded-full px-2 py-1">
-                                <?php foreach ($reactionCodes as $reactionCode): ?>
-                                    <?php $emojiFilename = $resolveEmojiFilenameByCode($reactionCode); ?>
-                                    <?php $emojiChar = $unicodeCharForCode($reactionCode); ?>
-                                    <button type="button" class="w-10 h-10 rounded-full hover:bg-zinc-800 flex items-center justify-center js-reaction-option" data-reaction-message-id="<?= (int)$message->id ?>" data-reaction-code="<?= htmlspecialchars($reactionCode, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($reactionCodeToLabel[$reactionCode] ?? 'Reaction', ENT_QUOTES, 'UTF-8') ?>">
-                                        <?php if ($emojiFilename !== ''): ?>
-                                            <img src="<?= htmlspecialchars(base_url('/emojis/' . $emojiFilename), ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($emojiChar !== '' ? $emojiChar : ($reactionCodeToLabel[$reactionCode] ?? 'Reaction'), ENT_QUOTES, 'UTF-8') ?>" class="w-7 h-7" loading="lazy" decoding="async">
-                                        <?php else: ?>
-                                            <span><?= htmlspecialchars($emojiChar !== '' ? $emojiChar : ($reactionCodeToLabel[$reactionCode] ?? 'Reaction'), ENT_QUOTES, 'UTF-8') ?></span>
-                                        <?php endif; ?>
-                                    </button>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
+                        <div class="hidden js-reaction-picker mb-2" data-reaction-picker-for="<?= (int)$message->id ?>"></div>
 
                         <div class="text-xs flex items-center gap-3">
                             <span class="text-zinc-500" data-utc="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($compactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
