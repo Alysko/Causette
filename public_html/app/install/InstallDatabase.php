@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Causette\Installation;
 
+use Causette\Security\IntegrationKeyring;
 use PDO;
-use RuntimeException;
 use Throwable;
+
+require_once __DIR__ . '/../core/IntegrationKeyring.php';
+require_once __DIR__ . '/SetupFailure.php';
 
 final class InstallDatabase
 {
@@ -28,14 +31,14 @@ final class InstallDatabase
                 . '@@lower_case_table_names AS case_mode, @@innodb_page_size AS page_size',
         )->fetch(PDO::FETCH_ASSOC);
         if (!is_array($server) || !is_string($server['database_name']) || (int)$server['page_size'] < 16384) {
-            throw new RuntimeException('Setup requires a selected database with InnoDB pages of at least 16 KiB.');
+            throw new SetupFailure('install.innodb');
         }
         $databaseName = (int)$server['case_mode'] === 0 ? $server['database_name'] : strtolower($server['database_name']);
         $lock = 'causette:install:' . substr(hash('sha256', $databaseName), 0, 47);
         $acquire = $connection->prepare('SELECT GET_LOCK(?, 0)');
         $acquire->execute([$lock]);
         if ((string)$acquire->fetchColumn() !== '1') {
-            throw new RuntimeException('The database setup lock is unavailable. Try again after the other request finishes.', 409);
+            throw new SetupFailure('install.database_lock', 409);
         }
 
         try {
@@ -60,7 +63,7 @@ final class InstallDatabase
     ): void {
         $schemaFile = file_get_contents(__DIR__ . '/schema-v1.sql');
         if ($schemaFile === false) {
-            throw new RuntimeException('The installation package is missing its initial schema.');
+            throw new SetupFailure('install.schema_missing');
         }
         $schema = str_replace("\r\n", "\n", $schemaFile);
         $tables = [];
@@ -72,11 +75,11 @@ final class InstallDatabase
             } elseif (str_starts_with($statement, 'INSERT INTO settings ')) {
                 $defaults[] = $statement;
             } elseif ($statement !== '') {
-                throw new RuntimeException('The installation package contains an unrecognized schema step.');
+                throw new SetupFailure('install.schema_step');
             }
         }
         if (!isset($tables['settings'], $tables['users'], $tables['username_history'])) {
-            throw new RuntimeException('The installation package contains an incomplete schema.');
+            throw new SetupFailure('install.schema_incomplete');
         }
 
         $journalPath = $this->storage . '/install-state.json';
@@ -92,11 +95,11 @@ final class InstallDatabase
                 || !is_string($journal['id']) || !preg_match('/\A[a-f0-9]{32}\z/D', $journal['id'])
                 || !is_int($journal['step']) || $journal['step'] < 0 || $journal['step'] > count($tables)
             ) {
-                throw new RuntimeException('The saved setup progress does not match this database and package.');
+                throw new SetupFailure('install.progress_mismatch');
             }
         } else {
             if ($existingTables !== []) {
-                throw new RuntimeException('Select a new, empty database for a fresh installation.');
+                throw new SetupFailure('install.database_not_empty');
             }
             $journal = ['target' => $target, 'schema' => $schemaHash, 'id' => bin2hex(random_bytes(16)), 'step' => 0];
             SetupConfiguration::write($journalPath, $journal);
@@ -105,7 +108,7 @@ final class InstallDatabase
         $completed = array_slice($knownTables, 0, $journal['step']);
         $possible = array_slice($knownTables, 0, $journal['step'] + 1);
         if (array_diff($completed, $existingTables) || array_diff($existingTables, $possible)) {
-            throw new RuntimeException('The database tables do not match the interrupted setup. Restore the test database or select a new one.');
+            throw new SetupFailure('install.interrupted_schema');
         }
 
         foreach (array_slice($tables, $journal['step']) as $statement) {
@@ -116,7 +119,7 @@ final class InstallDatabase
         }
 
         if (array_diff($knownTables, $this->tablesInDatabase($connection))) {
-            throw new RuntimeException('The initial schema could not be verified after creation.');
+            throw new SetupFailure('install.schema_verification');
         }
         $installId = $connection->query("SELECT `value` FROM settings WHERE `key` = 'causette_installation_id'")->fetchColumn();
         if ($installId === false) {
@@ -125,7 +128,7 @@ final class InstallDatabase
             if ($installId !== $journal['id']
                 || $connection->query("SELECT `value` FROM settings WHERE `key` = 'database_version'")->fetchColumn() !== $this->appVersion()
             ) {
-                throw new RuntimeException('The database has a different installation identity.');
+                throw new SetupFailure('install.database_identity');
             }
             $administrators = $connection->query(
                 "SELECT username, email, password FROM users WHERE role = 'admin' AND is_banned = 0 AND email_verified_at IS NOT NULL LIMIT 2",
@@ -133,16 +136,22 @@ final class InstallDatabase
             if (count($administrators) !== 1 || $administrators[0]['username'] !== $username
                 || $administrators[0]['email'] !== $email || !password_verify($password, $administrators[0]['password'])
             ) {
-                throw new RuntimeException('Resume setup with the administrator details from the original submission.');
+                throw new SetupFailure('install.original_administrator');
             }
         }
 
-        SetupConfiguration::write($this->storage . '/' . SetupConfiguration::RUNTIME_FILE, [
+        IntegrationKeyring::initialize($this->storage . '/' . IntegrationKeyring::FILE);
+        $runtime = [
             'url' => $configuration['url'],
             'database' => $database,
+            'installation_id' => $journal['id'],
             'csrf_secret' => bin2hex(random_bytes(32)),
             'totp_key' => bin2hex(random_bytes(32)),
-        ]);
+        ];
+        if (isset($configuration['trusted_proxies'])) {
+            $runtime['trusted_proxies'] = $configuration['trusted_proxies'];
+        }
+        SetupConfiguration::write($this->storage . '/' . SetupConfiguration::RUNTIME_FILE, $runtime);
     }
 
     private function tablesInDatabase(PDO $connection): array
@@ -153,7 +162,7 @@ final class InstallDatabase
         )->fetchAll(PDO::FETCH_ASSOC);
         foreach ($tables as $table) {
             if ($table['table_engine'] !== 'InnoDB' || $table['table_collation'] !== 'utf8mb4_unicode_ci') {
-                throw new RuntimeException('The database contains a table outside the expected installation layout.');
+                throw new SetupFailure('install.unexpected_table');
             }
         }
         return array_column($tables, 'table_name');
@@ -170,7 +179,7 @@ final class InstallDatabase
         if ((int)$connection->query('SELECT COUNT(*) FROM users')->fetchColumn() !== 0
             || (int)$connection->query('SELECT COUNT(*) FROM settings')->fetchColumn() !== 0
         ) {
-            throw new RuntimeException('The database was modified outside the installer. Restore it or select a dedicated database.');
+            throw new SetupFailure('install.database_changed');
         }
 
         $connection->beginTransaction();

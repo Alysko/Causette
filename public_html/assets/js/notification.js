@@ -230,9 +230,9 @@ function appendTextWithOpenMojiNodes(container, value) {
 
         if (deleteChatPattern.test(matchedUrl)) {
             anchor.className = 'text-red-400 hover:text-red-300 hover:underline underline-offset-2';
-            anchor.textContent = 'Delete chat';
+            anchor.textContent = uiText('delete_chat');
         } else {
-            anchor.className = 'prologue-accent hover:text-emerald-300 hover:underline underline-offset-2';
+            anchor.className = 'causette-accent hover:text-emerald-300 hover:underline underline-offset-2';
             anchor.target = '_blank';
             anchor.rel = 'noopener noreferrer';
             anchor.textContent = matchedUrl;
@@ -321,7 +321,7 @@ function getBaseDocumentTitle() {
     if (baseDocumentTitle) return baseDocumentTitle;
 
     const currentTitle = String(document.title || '').trim();
-    baseDocumentTitle = currentTitle.replace(/^\(\d+\+?\)\s*/, '').trim() || 'Prologue';
+    baseDocumentTitle = currentTitle.replace(/^\(\d+\+?\)\s*/, '').trim() || 'Causette';
     return baseDocumentTitle;
 }
 
@@ -682,7 +682,7 @@ function bindNotificationSettingsToggles() {
                 }
 
                 setNotificationSettingsStatus('Failed to save. Please try again.', 'error');
-                showToast(error.message || 'Unable to save notification setting', 'error');
+                showToast(uiActionError(error.message, 'unable_to_save_notification_setting'), 'error');
             } finally {
                 toggleNode.disabled = false;
             }
@@ -801,7 +801,7 @@ function bindNotificationSoundPreviewButtons() {
             activeAudio.currentTime = 0;
         }
         if (activeButton) {
-            activeButton.textContent = 'Preview';
+            activeButton.textContent = uiText('preview');
         }
         activeButton = null;
         activeAudio = null;
@@ -839,7 +839,7 @@ function bindNotificationSoundPreviewButtons() {
 
             activeButton = previewButton;
             activeAudio = audio;
-            previewButton.textContent = 'Pause';
+            previewButton.textContent = uiText('pause');
 
             audio.addEventListener('ended', function onEnded() {
                 audio.removeEventListener('ended', onEnded);
@@ -1037,7 +1037,7 @@ function bindBrowserPermissionChecks() {
 
             const previousText = buttonNode.textContent;
             buttonNode.disabled = true;
-            buttonNode.textContent = 'Testing…';
+            buttonNode.textContent = uiText('testing');
 
             try {
                 await testBrowserPermission(type);
@@ -1045,7 +1045,7 @@ function bindBrowserPermissionChecks() {
                 const errorName = String(error?.name || '').trim();
                 const isDenied = errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError';
                 if (!isDenied) {
-                    showToast(error.message || 'Unable to test permission', 'error');
+                    showToast(uiActionError(error.message, 'unable_to_test_permission'), 'error');
                 }
             } finally {
                 await updateBrowserPermissionsStatuses().catch(() => {});
@@ -1296,7 +1296,7 @@ function renderToastHistory() {
                 ${expiryBorder}
             </div>
         `;
-    }).join('') || '<div class="px-4 py-3 text-zinc-400 text-sm">No notifications yet</div>';
+    }).join('') || `<div class="px-4 py-3 text-zinc-400 text-sm">${escapeHtml(uiText('no_notifications_yet'))}</div>`;
 
     const messageNodes = list.querySelectorAll('[data-toast-message-index]');
     messageNodes.forEach((node) => {
@@ -1342,8 +1342,8 @@ function getNotificationAction(toast) {
         return { href: meta.link };
     }
 
-    if (type === 'report' && title === 'update available' && String(meta.link).includes('github.com/michaelstaake/Prologue/releases')) {
-        return { href: meta.link, openInNewTab: true };
+    if (type === 'report' && title === 'update available') {
+        return null;
     }
 
     if (type === 'report' || title === 'new report') {
@@ -1405,20 +1405,16 @@ async function handleToastHistoryClick(event) {
             window.collapseNotificationPanel();
         }
 
-        if (action.openInNewTab) {
-            window.open(action.href, '_blank', 'noopener,noreferrer');
-        } else {
-            const targetUrl = new URL(action.href, window.location.origin);
-            if (targetUrl.origin === window.location.origin && typeof window.navigateApp === 'function') {
-                window.navigateApp(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
-                    source: 'notification-click',
-                    updateHistory: true
-                }).catch(() => {
-                    window.location.href = action.href;
-                });
-            } else {
+        const targetUrl = new URL(action.href, window.location.origin);
+        if (targetUrl.origin === window.location.origin && typeof window.navigateApp === 'function') {
+            window.navigateApp(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
+                source: 'notification-click',
+                updateHistory: true
+            }).catch(() => {
                 window.location.href = action.href;
-            }
+            });
+        } else {
+            window.location.href = action.href;
         }
     }
 }
@@ -1645,21 +1641,6 @@ async function clearCurrentChatMessageNotifications() {
 }
 
 
-function setTwofaSettingsStatus(text, kind) {
-    var statusEl = document.getElementById('twofa-settings-status');
-    if (!statusEl) return;
-
-    var kindClassMap = {
-        info: 'text-zinc-500',
-        success: 'text-emerald-400',
-        error: 'text-red-400'
-    };
-
-    statusEl.classList.remove('text-zinc-500', 'text-emerald-400', 'text-red-400');
-    statusEl.classList.add(kindClassMap[kind] || kindClassMap.info);
-    statusEl.textContent = text;
-}
-
 async function clearAllNotifications() {
     const btn = document.getElementById('notification-clear-all-btn');
     if (btn) btn.disabled = true;
@@ -1669,7 +1650,7 @@ async function clearAllNotifications() {
             csrf_token: getCsrfToken()
         });
     } catch (e) {
-        showToast('Failed to clear notifications', 'error');
+        showToast(uiText('failed_to_clear_notifications'), 'error');
         if (btn) btn.disabled = false;
         return;
     }
@@ -1686,37 +1667,3 @@ async function clearAllNotifications() {
 }
 
 window.initWebPushNotifications = initWebPushNotifications;
-
-function bindTwofaFrequencyRadios() {
-    const radios = Array.from(document.querySelectorAll('[data-twofa-frequency]'));
-    if (radios.length === 0) return;
-
-    radios.forEach((radio) => {
-        radio.addEventListener('change', async () => {
-            const frequency = radio.value;
-            radios.forEach((r) => { r.disabled = true; });
-            setTwofaSettingsStatus('Saving…', 'info');
-
-            try {
-                const result = await postForm('/settings/2fa/frequency', {
-                    csrf_token: getCsrfToken(),
-                    frequency
-                });
-
-                if (!result.success) {
-                    throw new Error(result.error || 'Unable to save 2FA frequency');
-                }
-
-                setTwofaSettingsStatus('Saved', 'success');
-            } catch (error) {
-                const previous = frequency === 'always' ? 'trusted' : 'always';
-                const previousRadio = radios.find((r) => r.value === previous);
-                if (previousRadio) previousRadio.checked = true;
-                setTwofaSettingsStatus('Failed to save', 'error');
-                showToast(error.message || 'Unable to save 2FA frequency', 'error');
-            } finally {
-                radios.forEach((r) => { r.disabled = false; });
-            }
-        });
-    });
-}

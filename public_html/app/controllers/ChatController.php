@@ -1,4 +1,10 @@
 <?php
+use Causette\Http\ChatResponse;
+use Causette\Security\ConversationRead;
+
+require_once __DIR__ . '/../core/ChatResponse.php';
+require_once __DIR__ . '/../core/ConversationRead.php';
+
 class ChatController extends Controller {
     private const GROUP_CHAT_USER_LIMIT = 999;
     private const USER_LIMIT_REACHED_MESSAGE = 'User limit reached. Please try again later.';
@@ -338,7 +344,7 @@ class ChatController extends Controller {
         $messages = [$message];
         Message::attachMentionMaps($messages);
 
-        return $message;
+        return ChatResponse::pinned($message);
     }
 
     private function isAcceptedFriendship(int $userId, int $otherUserId): bool {
@@ -575,7 +581,7 @@ class ChatController extends Controller {
                 $this->redirect('/');
             }
 
-            if ($groupVisibility === self::GROUP_VISIBILITY_PUBLIC) {
+            if (ConversationRead::allows($chat, false)) {
                 $isReadOnlyPublicViewer = true;
             } elseif ($groupVisibility === self::GROUP_VISIBILITY_REQUESTABLE) {
                 $isRequestablePreview = true;
@@ -809,7 +815,7 @@ class ChatController extends Controller {
         $this->view('chat', [
             'chat' => $chat,
             'chatTitle' => $chatTitle,
-            'messages' => array_reverse($messages),
+            'messages' => ChatResponse::messages(array_reverse($messages)),
             'members' => $members,
             'pendingAttachments' => $pendingAttachments,
             'currentUserId' => $currentUserId,
@@ -1480,7 +1486,7 @@ class ChatController extends Controller {
         }
 
         $this->json([
-            'messages' => $messages,
+            'messages' => ChatResponse::messages($messages),
             'first_unseen_message_id' => $firstUnseenMessageId,
             'can_send_message' => $canSendMessage,
             'can_send_message_reason' => $messageRestrictionReason,

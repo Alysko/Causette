@@ -9,42 +9,9 @@ class TwoFAManager {
             return self::$providers;
         }
 
-        self::$providers = [];
-        $baseDir = __DIR__;
-        $entries = @scandir($baseDir);
-        if ($entries === false) {
-            return self::$providers;
-        }
-
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-
-            $dir = $baseDir . '/' . $entry;
-            if (!is_dir($dir)) {
-                continue;
-            }
-
-            $files = @scandir($dir);
-            if ($files === false) {
-                continue;
-            }
-
-            foreach ($files as $file) {
-                if (str_ends_with($file, 'TwoFAProvider.php')) {
-                    $filePath = $dir . '/' . $file;
-                    $className = basename($file, '.php');
-                    require_once $filePath;
-                    if (class_exists($className) && is_subclass_of($className, 'TwoFAProviderInterface')) {
-                        self::$providers[] = new $className();
-                    }
-                    break;
-                }
-            }
-        }
-
-        usort(self::$providers, fn($a, $b) => $b->getPriority() - $a->getPriority());
+        require_once __DIR__ . '/totp/TOTPTwoFAProvider.php';
+        require_once __DIR__ . '/email/EmailTwoFAProvider.php';
+        self::$providers = [new TOTPTwoFAProvider(), new EmailTwoFAProvider()];
 
         return self::$providers;
     }

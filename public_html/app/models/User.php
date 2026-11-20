@@ -1,4 +1,8 @@
 <?php
+require_once __DIR__ . '/../core/BrowserSession.php';
+
+use Causette\Security\BrowserSession;
+
 class User extends Model {
     public static function normalizeUsername($username) {
         return strtolower(trim((string)$username));
@@ -283,17 +287,15 @@ class User extends Model {
 
     public static function activeSessionCount($userId) {
         return (int) self::query(
-            "SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND revoked_at IS NULL",
+            'SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND ' . BrowserSession::ACTIVE,
             [(int)$userId]
         )->fetchColumn();
     }
 
     public static function getActiveSessions($userId) {
         return self::query(
-            "SELECT id, ip_address, browser, logged_in_at, last_seen_at, session_token
-             FROM user_sessions
-             WHERE user_id = ? AND revoked_at IS NULL
-             ORDER BY logged_in_at DESC",
+            'SELECT id, ip_address, browser, logged_in_at, last_seen_at, session_token
+             FROM user_sessions WHERE user_id = ? AND ' . BrowserSession::AVAILABLE . ' ORDER BY logged_in_at DESC',
             [(int)$userId]
         )->fetchAll();
     }
@@ -301,7 +303,7 @@ class User extends Model {
     public static function revokeSessionById($userId, $sessionId) {
         $result = self::query(
             "UPDATE user_sessions
-             SET revoked_at = NOW()
+             SET revoked_at = NOW(), remember_token = NULL
              WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
             [(int)$sessionId, (int)$userId]
         );
@@ -310,11 +312,15 @@ class User extends Model {
     }
 
     public static function revokeSessionByToken($userId, $sessionToken) {
+        $digest = BrowserSession::sessionDigest($sessionToken);
+        if ($digest === null) {
+            return false;
+        }
         $result = self::query(
             "UPDATE user_sessions
-             SET revoked_at = NOW()
-             WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL",
-            [(int)$userId, (string)$sessionToken]
+             SET revoked_at = NOW(), remember_token = NULL
+             WHERE user_id = ? AND session_token = CAST(? AS BINARY) AND revoked_at IS NULL",
+            [(int)$userId, $digest]
         );
 
         return $result->rowCount() > 0;

@@ -2,7 +2,9 @@
 require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
+require_once __DIR__ . '/../core/SecretSettings.php';
 
+use Causette\Security\SecretSettings;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as MailException;
 
@@ -74,7 +76,6 @@ class AdminController extends Controller {
         Setting::set('error_display', isset($_POST['error_display']) ? '1' : '0');
         ErrorHandler::setDebugMode(isset($_POST['error_display']));
         Setting::set('attachment_logging', isset($_POST['attachment_logging']) ? '1' : '0');
-        Setting::set('check_for_updates', isset($_POST['check_for_updates']) ? '1' : '0');
 
         $this->flash('success', 'more_saved');
         $this->redirect('/settings');
@@ -132,18 +133,26 @@ class AdminController extends Controller {
         $mailHost = trim((string)($_POST['mail_host'] ?? ''));
         $mailPort = trim((string)($_POST['mail_port'] ?? ''));
         $mailUser = trim((string)($_POST['mail_user'] ?? ''));
-        $mailPass = trim((string)($_POST['mail_pass'] ?? ''));
+        $mailPass = $_POST['mail_pass'] ?? '';
         $mailFrom = trim((string)($_POST['mail_from'] ?? ''));
         $mailFromName = trim((string)($_POST['mail_from_name'] ?? ''));
 
-        Setting::set('mail_host', $mailHost);
-        Setting::set('mail_port', $mailPort !== '' ? $mailPort : '587');
-        Setting::set('mail_user', $mailUser);
-        if ($mailPass !== '') {
-            Setting::set('mail_pass', $mailPass);
+        try {
+            if (!is_string($mailPass)) {
+                throw new RuntimeException('Invalid password field.');
+            }
+            SecretSettings::save([
+                'mail_host' => $mailHost,
+                'mail_port' => $mailPort !== '' ? $mailPort : '587',
+                'mail_user' => $mailUser,
+                'mail_from' => $mailFrom,
+                'mail_from_name' => $mailFromName,
+            ], SecretSettings::SMTP, $mailPass);
+        } catch (RuntimeException) {
+            $this->flash('error', 'integration_storage_error');
+            $this->redirect('/settings');
+            return;
         }
-        Setting::set('mail_from', $mailFrom);
-        Setting::set('mail_from_name', $mailFromName);
 
         $this->flash('success', 'mail_saved');
         $this->redirect('/settings');
@@ -154,13 +163,18 @@ class AdminController extends Controller {
         Auth::csrfValidate();
 
         $publicKey = trim((string)($_POST['push_vapid_public_key'] ?? ''));
-        $privateKey = trim((string)($_POST['push_vapid_private_key'] ?? ''));
+        $privateKey = $_POST['push_vapid_private_key'] ?? '';
 
-        Setting::set('push_vapid_public_key', $publicKey);
-        if ($privateKey !== '') {
-            Setting::set('push_vapid_private_key', $privateKey);
+        try {
+            if (!is_string($privateKey)) {
+                throw new RuntimeException('Invalid private key field.');
+            }
+            SecretSettings::save(['push_vapid_public_key' => $publicKey], SecretSettings::VAPID, trim($privateKey));
+        } catch (RuntimeException) {
+            $this->flash('error', 'integration_storage_error');
+            $this->redirect('/settings');
+            return;
         }
-
         $this->flash('success', 'push_saved');
         $this->redirect('/settings');
     }
@@ -178,7 +192,6 @@ class AdminController extends Controller {
         }
 
         $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailPass = (string)(Setting::get('mail_pass') ?? '');
         $mailFrom = (string)(Setting::get('mail_from') ?? '');
         $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
 
@@ -188,20 +201,20 @@ class AdminController extends Controller {
             $mail->Host = $mailHost;
             $mail->SMTPAuth = true;
             $mail->Username = $mailUser;
-            $mail->Password = $mailPass;
+            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port = $mailPort;
 
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($user->email);
             $mail->isHTML(false);
-            $mail->Subject = 'Prologue mail test';
-            $mail->Body = 'This is a test email from your Prologue installation. If you received this, mail is configured correctly.';
+            $mail->Subject = 'Causette mail test';
+            $mail->Body = 'This is a test email from your Causette installation. If you received this, mail is configured correctly.';
             $mail->send();
 
             $this->flash('success', 'mail_test_sent');
-        } catch (MailException $e) {
-            $this->flash('mail_test_error', $e->getMessage());
+        } catch (MailException | RuntimeException) {
+            $this->flash('mail_test_error', 'The SMTP credential is unavailable or the mail server refused the test message.');
         }
 
         $this->redirect('/settings');
@@ -227,23 +240,9 @@ class AdminController extends Controller {
         }
 
     public function checkForUpdatesNow() {
-        $user = $this->requireAdminUser();
+        $this->requireAdminUser();
         Auth::csrfValidate();
-
-        $result = UpdateChecker::checkForAdminUser((int)$user->id, true);
-
-        if (($result['status'] ?? '') === 'update_available') {
-            $latestVersion = (string)($result['latest_version'] ?? '');
-            $this->flash('success', 'update_check_update_available:' . $latestVersion);
-            $this->redirect('/settings');
-        }
-
-        if (($result['status'] ?? '') === 'up_to_date') {
-            $this->flash('success', 'update_check_up_to_date');
-            $this->redirect('/settings');
-        }
-
-        $this->flash('error', 'update_check_failed');
+        $this->flash('error', 'update_check_unconfigured');
         $this->redirect('/settings');
     }
 

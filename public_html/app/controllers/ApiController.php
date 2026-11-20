@@ -1,4 +1,10 @@
 <?php
+use Causette\Http\ChatResponse;
+use Causette\Security\ConversationRead;
+
+require_once __DIR__ . '/../core/ChatResponse.php';
+require_once __DIR__ . '/../core/ConversationRead.php';
+
 class ApiController extends Controller {
     private const SIDEBAR_CUSTOM_MAX_CHATS = 8;
     private const SIDEBAR_CUSTOM_DEFAULT_LABEL = 'Custom';
@@ -182,7 +188,7 @@ class ApiController extends Controller {
         $messages = [$message];
         Message::attachMentionMaps($messages);
 
-        return $message;
+        return ChatResponse::pinned($message);
     }
 
     private function supportsChatSoftDelete(): bool {
@@ -191,20 +197,6 @@ class ApiController extends Controller {
 
     private function chatIsSoftDeleted($chat): bool {
         return Chat::isSoftDeleted($chat);
-    }
-
-    private function supportsGroupVisibility(): bool {
-        static $supports = null;
-        if ($supports !== null) {
-            return $supports;
-        }
-
-        $result = Database::query(
-            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'chats' AND COLUMN_NAME = 'non_member_visibility'"
-        )->fetchColumn();
-
-        $supports = ((int)$result) > 0;
-        return $supports;
     }
 
     private function supportsChatMemberMute(): bool {
@@ -262,14 +254,6 @@ class ApiController extends Controller {
         }
 
         return $this->isGroupModerator($chatId, $userId);
-    }
-
-    private function isGroupPublicVisibility($chatRow): bool {
-        if (!$chatRow || !Chat::isGroupType($chatRow->type ?? null) || !$this->supportsGroupVisibility()) {
-            return false;
-        }
-
-        return strtolower(trim((string)($chatRow->non_member_visibility ?? 'none'))) === 'public';
     }
 
     private function isGroupMemberMuted(int $chatId, int $userId): bool {
@@ -511,7 +495,7 @@ class ApiController extends Controller {
             ]);
         }
 
-        $this->json(['messages' => $results, 'total' => $total, 'total_pages' => $totalPages, 'page' => $page]);
+        $this->json(['messages' => ChatResponse::searchResults($results), 'total' => $total, 'total_pages' => $totalPages, 'page' => $page]);
     }
 
     public function searchUsers() {
@@ -718,7 +702,7 @@ class ApiController extends Controller {
             }
         }
 
-        $this->json(['chats' => $chats]);
+        $this->json(['chats' => ChatResponse::conversations($chats)]);
     }
 
     public function getSidebarCustomChats() {
@@ -796,10 +780,10 @@ class ApiController extends Controller {
         }
 
         $allowed = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
-        $isPublicGroupViewer = !$allowed && $this->isGroupPublicVisibility($chatRow);
-        if (!$allowed && !$isPublicGroupViewer) {
+        if (!ConversationRead::allows($chatRow ?: null, (bool)$allowed)) {
             $this->json(['error' => 'Access denied'], 403);
         }
+        $isPublicGroupViewer = !$allowed;
 
         Attachment::cleanupExpiredForChat($chatId);
 
@@ -949,7 +933,7 @@ class ApiController extends Controller {
         }
 
         $response = [
-            'messages' => $messages,
+            'messages' => ChatResponse::messages($messages),
             'typing_users' => $typingUsers,
             'pinned_message' => $pinnedMessage,
             'active_poll' => $activePoll,

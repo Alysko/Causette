@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Causette\Installation\InstallDatabase;
 use Causette\Installation\SetupConfiguration;
+use Causette\Installation\SetupFailure;
+use Causette\Localization\Locale;
 
 require_once __DIR__ . '/../install/SetupConfiguration.php';
 require_once __DIR__ . '/../install/InstallDatabase.php';
@@ -14,7 +16,7 @@ class InstallController extends Controller
     {
         $prepared = $this->prepared();
         if ($prepared === null) {
-            $this->renderSetup('closed', 404, 'Causette setup is unavailable.');
+            $this->renderSetup('closed', 404, 'install.unavailable');
             return;
         }
 
@@ -26,13 +28,13 @@ class InstallController extends Controller
     {
         $prepared = $this->prepared();
         if ($prepared === null) {
-            $this->renderSetup('closed', 404, 'Causette setup is unavailable.');
+            $this->renderSetup('closed', 404, 'install.unavailable');
             return;
         }
 
         $csrf = $_POST['csrf_token'] ?? null;
         if (!is_string($csrf) || !isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $csrf)) {
-            $this->renderSetup('operator', 403, 'Reload the setup page before submitting the form.');
+            $this->renderSetup('operator', 403, 'install.csrf');
             return;
         }
 
@@ -43,18 +45,25 @@ class InstallController extends Controller
             return;
         }
         if ($stage !== 'install' || !$this->authorized($configuration)) {
-            $this->renderSetup('operator', 403, 'Enter the operator token before starting setup.');
+            $this->renderSetup('operator', 403, 'install.token_required');
             return;
         }
 
         $username = $_POST['username'] ?? null;
         $email = $_POST['email'] ?? null;
         $password = $_POST['password'] ?? null;
-        if (!is_string($username) || !preg_match('/\A[a-z][a-z0-9]{3,31}\z/D', $username)
-            || !is_string($email) || strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)
-            || !is_string($password) || strlen($password) < 15 || strlen($password) > 72 || str_contains($password, "\0")
-        ) {
-            $this->renderSetup('administrator', 422, 'Check the administrator details and password length.');
+        $fieldErrors = [];
+        if (!is_string($username) || !preg_match('/\A[a-z][a-z0-9]{3,31}\z/D', $username)) {
+            $fieldErrors['admin-username'] = 'install.username_invalid';
+        }
+        if (!is_string($email) || strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $fieldErrors['admin-email'] = 'install.email_invalid';
+        }
+        if (!is_string($password) || strlen($password) < 15 || strlen($password) > 72 || str_contains($password, "\0")) {
+            $fieldErrors['admin-password'] = 'install.password_invalid';
+        }
+        if ($fieldErrors !== []) {
+            $this->renderSetup('administrator', 422, fieldErrors: $fieldErrors);
             return;
         }
 
@@ -76,7 +85,7 @@ class InstallController extends Controller
             SetupConfiguration::validateSite($configuration);
             $operatorToken = $configuration['bootstrap_token'] ?? null;
             if (!is_string($operatorToken) || !preg_match('/\A[A-Za-z0-9_-]{48,128}\z/D', $operatorToken)
-                || !SetupConfiguration::acceptsRequest($configuration['url'])
+                || !SetupConfiguration::acceptsRequest($configuration['url'], $configuration['trusted_proxies'] ?? [])
             ) {
                 return null;
             }
@@ -105,7 +114,7 @@ class InstallController extends Controller
             $_SESSION['setup_attempts'] = 0;
         }
         if ($_SESSION['setup_attempts'] >= 5) {
-            $this->renderSetup('operator', 429, 'Too many attempts in this session. Try again in 15 minutes.');
+            $this->renderSetup('operator', 429, 'install.rate_limit');
             return;
         }
 
@@ -113,12 +122,12 @@ class InstallController extends Controller
         if (!is_string($token) || strlen($token) > 128 || !hash_equals($configuration['bootstrap_token'], $token)) {
             $_SESSION['setup_attempts']++;
             unset($_SESSION['setup_authorization'], $_SESSION['setup_authorized_until']);
-            $this->renderSetup('operator', 403, 'The operator token was not accepted.');
+            $this->renderSetup('operator', 403, 'install.token_rejected');
             return;
         }
 
         if (!session_regenerate_id(true)) {
-            $this->renderSetup('operator', 503, 'Setup could not start a protected session.');
+            $this->renderSetup('operator', 503, 'install.protected_session');
             return;
         }
         $_SESSION = [
@@ -136,17 +145,19 @@ class InstallController extends Controller
     ): void {
         $required = ['pdo_mysql', 'mbstring', 'fileinfo', 'gd', 'openssl', 'ctype', 'session'];
         $missing = array_values(array_filter($required, static fn(string $extension): bool => !extension_loaded($extension)));
-        if (PHP_VERSION_ID < 80500 || $missing !== []) {
-            $message = PHP_VERSION_ID < 80500 ? 'Select PHP 8.5 or later in the hosting panel.' :
-                'Enable the required PHP extensions in the hosting panel: ' . implode(', ', $missing) . '.';
-            $this->renderSetup('administrator', 503, $message);
+        if (PHP_VERSION_ID < 80500) {
+            $this->renderSetup('administrator', 503, 'install.php_version');
+            return;
+        }
+        if ($missing !== []) {
+            $this->renderSetup('administrator', 503, 'install.extensions', parameters: ['extensions' => implode(', ', $missing)]);
             return;
         }
 
         foreach (['', '/attachments', '/avatars', '/logs'] as $directory) {
             $path = $storage . $directory;
             if (is_link($path) || realpath($path) !== $path || !is_dir($path) || !is_writable($path)) {
-                $this->renderSetup('administrator', 503, 'The private storage directories must exist and be writable.');
+                $this->renderSetup('administrator', 503, 'install.storage_writable');
                 return;
             }
         }
@@ -154,20 +165,20 @@ class InstallController extends Controller
         $lockPath = $storage . '/install.lock';
         $lock = is_link($lockPath) ? false : @fopen($lockPath, 'c');
         if ($lock === false) {
-            $this->renderSetup('administrator', 503, 'The private setup lock could not be opened.');
+            $this->renderSetup('administrator', 503, 'install.lock_open');
             return;
         }
 
         try {
             if (!flock($lock, LOCK_EX | LOCK_NB)) {
-                $this->renderSetup('administrator', 409, 'Setup is already running. Try again after it finishes.');
+                $this->renderSetup('administrator', 409, 'install.lock_busy');
                 return;
             }
 
             // Recheck the operator file and completion state while holding the installation lock.
             $current = $this->prepared();
             if ($current === null || !$this->authorized($current['configuration'])) {
-                $this->renderSetup('closed', 404, 'Causette setup is unavailable.');
+                $this->renderSetup('closed', 404, 'install.unavailable');
                 return;
             }
 
@@ -176,11 +187,11 @@ class InstallController extends Controller
             $_SESSION = [];
             $this->renderSetup('success', databaseVersion: $databaseVersion);
         } catch (PDOException) {
-            $this->renderSetup('administrator', 503, 'MySQL could not complete setup. Check the dedicated database account and permissions in the hosting panel.');
-        } catch (RuntimeException $failure) {
-            $this->renderSetup('administrator', $failure->getCode() === 409 ? 409 : 503, $failure->getMessage());
+            $this->renderSetup('administrator', 503, 'install.database_error');
+        } catch (SetupFailure $failure) {
+            $this->renderSetup('administrator', $failure->getCode() === 409 ? 409 : 503, $failure->translationKey);
         } catch (Throwable) {
-            $this->renderSetup('administrator', 503, 'Setup stopped. Use the same private file and database to retry.');
+            $this->renderSetup('administrator', 503, 'install.retry');
         } finally {
             fclose($lock);
         }
@@ -189,11 +200,16 @@ class InstallController extends Controller
     private function renderSetup(
         string $screen,
         int $status = 200,
-        string $message = '',
+        string $messageKey = '',
         string $databaseVersion = '',
+        array $parameters = [],
+        array $fieldErrors = [],
     ): void {
         http_response_code($status);
+        $locale = Locale::current();
+        header('Content-Language: ' . $locale->language());
         $csrfToken = $screen === 'operator' || $screen === 'administrator' ? $this->csrfToken() : '';
+        $setupBasePath = defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '';
         require __DIR__ . '/../views/install.php';
     }
 }

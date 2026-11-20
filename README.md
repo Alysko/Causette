@@ -17,6 +17,7 @@ Causette targets ordinary Apache/PHP hosting with MySQL. An operator uses the ho
 PHP 8.5 is the target minimum for the first release. The verification matrix includes PHP 8.5 and 8.6. Use the latest security patch available from the hosting provider. The release archive will specify tested versions, extensions and server settings.
 
 See the [shared-hosting installation procedure](docs/install.md) for the fresh installation and recovery workflow.
+See [backup, update and restore](docs/maintenance.md) for hosting-panel maintenance and a disposable restore rehearsal.
 
 ## Development checks
 
@@ -31,4 +32,4 @@ Set `CAUSETTE_PHP` to the PHP executable path if `php` is unavailable on PATH. T
 
 ## License and upstream
 
-Causette is derived from [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms and the existing source notices for component attribution.
+Causette is derived from [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms, the source notices for component attribution and the [branding record](docs/branding.md) for the remaining compatibility references.

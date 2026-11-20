@@ -47,6 +47,10 @@ jobs:
               php -n /project/tests/mfa-delivery.test.php
               php -n /project/tests/installer-authorization.test.php
               php -n /project/tests/installer-keys.test.php
+              php -n /project/tests/update-authorization.test.php
+              php -n /project/tests/message-response.test.php
+              php -n /project/tests/attachment-access.test.php
+              php -n /project/tests/request-origin.test.php
             '
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'

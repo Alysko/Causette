@@ -1,18 +1,16 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <?php
-$title = 'Update Required — Prologue';
+$title = \Causette\Localization\Locale::current()->text('ui.causette_maintenance');
 ob_start();
 ?>
-<div class="w-full max-w-md bg-zinc-900 p-8 rounded-3xl border border-zinc-700 text-center">
-    <h1 class="text-2xl font-bold mb-2">Database Update Required</h1>
-    <p class="text-zinc-400 mb-6">
-        This installation has been updated to a new version. To continue using Prologue, please run the database update process.
-    </p>
-    <?php if ($showUpdateButton ?? false): ?>
-    <a href="<?= htmlspecialchars(base_url('/update'), ENT_QUOTES, 'UTF-8') ?>" class="inline-block w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-semibold transition">
-        Run Database Update
-    </a>
-    <?php endif; ?>
-</div>
+<h1><?= $tr('ui.causette_maintenance') ?></h1>
+<?php if ($updateAvailable): ?>
+    <p><?= $tr('ui.an_administrator_needs_to_confirm_the') ?></p>
+    <p><a href="<?= htmlspecialchars(base_path('/login'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.sign_in_as_an_administrator') ?></a></p>
+    <p><a href="<?= htmlspecialchars(base_path('/update'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.open_the_update_page') ?></a></p>
+<?php else: ?>
+    <p><?= $tr('ui.the_application_and_database_versions_differ') ?></p>
+<?php endif; ?>
 <?php
 $content = ob_get_clean();
-require __DIR__ . '/layouts/standalone.php';
+require __DIR__ . '/layouts/maintenance.php';

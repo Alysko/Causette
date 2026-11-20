@@ -1,5 +1,6 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <div class="p-8 overflow-auto">
-    <h1 class="text-3xl font-bold mb-6">Reports</h1>
+    <h1 class="text-3xl font-bold mb-6"><?= $tr('ui.reports') ?></h1>
 
     <?php
         $filter = $selectedFilter ?? 'new';
@@ -83,15 +84,15 @@
     <?php endif; ?>
 
     <div class="flex flex-wrap items-center gap-3 mb-4">
-        <a href="<?= htmlspecialchars(base_url('/reports?filter=new'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'new'), ENT_QUOTES, 'UTF-8') ?>">New</a>
-        <a href="<?= htmlspecialchars(base_url('/reports?filter=handled'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'handled'), ENT_QUOTES, 'UTF-8') ?>">Handled</a>
-        <a href="<?= htmlspecialchars(base_url('/reports?filter=all'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'all'), ENT_QUOTES, 'UTF-8') ?>">All</a>
+        <a href="<?= htmlspecialchars(base_url('/reports?filter=new'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'new'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.new') ?></a>
+        <a href="<?= htmlspecialchars(base_url('/reports?filter=handled'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'handled'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.handled') ?></a>
+        <a href="<?= htmlspecialchars(base_url('/reports?filter=all'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($filter === 'all'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.all') ?></a>
     </div>
 
     <section class="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-5xl">
         <div class="space-y-3">
             <?php if (empty($reportList)): ?>
-                <p class="text-zinc-400 text-sm">No reports in this list.</p>
+                <p class="text-zinc-400 text-sm"><?= $tr('ui.no_reports_in_this_list') ?></p>
             <?php else: ?>
                 <?php foreach ($reportList as $report): ?>
                     <?php
@@ -116,17 +117,17 @@
                                         </div>
                                     <?php endif; ?>
                                     <div class="min-w-0">
-                                        <div class="text-sm text-zinc-400">Reporter</div>
-                                        <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber((string)$report->reporter_user_number)), ENT_QUOTES, 'UTF-8') ?>" class="font-medium prologue-accent hover:text-emerald-300 hover:underline underline-offset-2">
+                                        <div class="text-sm text-zinc-400"><?= $tr('ui.reporter') ?></div>
+                                        <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber((string)$report->reporter_user_number)), ENT_QUOTES, 'UTF-8') ?>" class="font-medium causette-accent hover:text-emerald-300 hover:underline underline-offset-2">
                                             <?= htmlspecialchars($report->reporter_username, ENT_QUOTES, 'UTF-8') ?>
                                         </a>
                                     </div>
                                 </div>
 
                                 <div class="text-sm text-zinc-300 mb-1">
-                                    <span class="text-zinc-500">Target:</span>
+                                    <span class="text-zinc-500"><?= $tr('ui.target') ?></span>
                                     <?php if (!empty($target['href'])): ?>
-                                        <a href="<?= htmlspecialchars($target['href'], ENT_QUOTES, 'UTF-8') ?>" class="prologue-accent hover:text-emerald-300 hover:underline underline-offset-2">
+                                        <a href="<?= htmlspecialchars($target['href'], ENT_QUOTES, 'UTF-8') ?>" class="causette-accent hover:text-emerald-300 hover:underline underline-offset-2">
                                             <?= htmlspecialchars($target['label'], ENT_QUOTES, 'UTF-8') ?>
                                         </a>
                                     <?php else: ?>
@@ -135,7 +136,7 @@
                                 </div>
 
                                 <div class="text-sm text-zinc-300 mb-1">
-                                    <span class="text-zinc-500">Reason:</span>
+                                    <span class="text-zinc-500"><?= $tr('ui.reason') ?></span>
                                     <span><?= nl2br(htmlspecialchars($report->reason, ENT_QUOTES, 'UTF-8')) ?></span>
                                 </div>
 
@@ -154,7 +155,7 @@
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                                         <input type="hidden" name="report_id" value="<?= (int)$report->id ?>">
                                         <input type="hidden" name="filter" value="<?= htmlspecialchars($filter, ENT_QUOTES, 'UTF-8') ?>">
-                                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg">Mark as Handled</button>
+                                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg"><?= $tr('ui.mark_as_handled') ?></button>
                                     </form>
                                 <?php endif; ?>
                             </div>

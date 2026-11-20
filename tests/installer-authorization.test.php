@@ -119,6 +119,39 @@ $run('Correct operator proof shows the administrator form', static function () u
     $_POST = ['csrf_token' => $_SESSION['csrf_token'], 'stage' => 'authorize', 'bootstrap_token' => $token];
     expectSetup('POST', $controller->install(...), 200, 'name="username"');
 });
+$run('The French installer labels its form, explains the username rule and reports a specific error', static function () use ($controller): void {
+    $_GET = ['lang' => 'fr'];
+    try {
+        expectSetup('French document language', $controller->showInstall(...), 200, '<html lang="fr">');
+        expectSetup('French username label', $controller->showInstall(...), 200, 'Nom d’utilisateur de l’administrateur');
+        expectSetup('Username help', $controller->showInstall(...), 200, 'aria-describedby="username-format"');
+        $_POST = [
+            'csrf_token' => $_SESSION['csrf_token'],
+            'stage' => 'install',
+            'username' => 'bad_name',
+            'email' => 'admin@example.test',
+            'password' => 'fixture-only-password',
+        ];
+        expectSetup('French username validation', $controller->install(...), 422, 'Le nom d’utilisateur doit contenir');
+        expectSetup('Accessible error summary', $controller->install(...), 422, 'aria-labelledby="setup-errors-title"');
+    } finally {
+        $_GET = [];
+    }
+});
+$run('Language selection honors explicit and saved choices before browser preferences', static function (): void {
+    $locale = \Causette\Localization\Locale::class;
+    $cases = [
+        ['fr', 'en', 'en-US,en;q=0.9', 'fr'],
+        [null, 'en', 'fr-CA,en;q=0.8', 'en'],
+        [['fr'], 'unsupported', 'de, en;q=0.6, fr-CA;q=0.9', 'fr'],
+        [null, null, 'fr;q=0, de;q=1', 'en'],
+    ];
+    foreach ($cases as [$requested, $saved, $browser, $expected]) {
+        if ($locale::resolve($requested, $saved, $browser)->language() !== $expected) {
+            throw new RuntimeException('Unexpected language selection.');
+        }
+    }
+});
 $run('An expired authorization cannot start installation', static function () use ($controller): void {
     $_SESSION['setup_authorized_until'] = time() - 1;
     $_POST = ['csrf_token' => $_SESSION['csrf_token'], 'stage' => 'install'];

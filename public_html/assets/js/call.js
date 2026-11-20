@@ -79,7 +79,7 @@ function startOutgoingPrivateRingingLabelCycle(labelElement) {
 
     stopOutgoingPrivateRingingLabelCycle();
     outgoingPrivateRingingLabelElement = labelElement;
-    labelElement.textContent = 'Ringing...';
+    labelElement.textContent = uiText('ringing');
 
     outgoingPrivateRingingLabelInterval = setInterval(() => {
         if (!outgoingPrivateRingingLabelElement) {
@@ -129,17 +129,17 @@ async function pokeGroupMember(userId, username) {
     }
 
     if (chatId <= 0) {
-        showToast('Chat ID missing', 'error');
+        showToast(uiText('chat_id_missing'), 'error');
         return;
     }
 
     if (chatType !== 'group') {
-        showToast('Poke is only available in group chats', 'error');
+        showToast(uiText('poke_is_only_available_in_group_chats'), 'error');
         return;
     }
 
     if (targetUserId <= 0) {
-        showToast('Invalid user selected', 'error');
+        showToast(uiText('invalid_user_selected'), 'error');
         return;
     }
 
@@ -161,7 +161,7 @@ async function pokeGroupMember(userId, username) {
         return;
     }
 
-    showToast(result?.error || 'Unable to send poke', 'error');
+    showToast(uiActionError(result?.error, 'unable_to_send_poke'), 'error');
 }
 
 window.pokeGroupMember = pokeGroupMember;
@@ -219,12 +219,12 @@ async function maybeJoinGroupCallFromPokeIntent() {
 
     const activeCallId = Number(activeCall?.id || 0);
     if (activeCallId <= 0) {
-        showToast('That call already ended', 'info');
+        showToast(uiText('that_call_already_ended'), 'info');
         return;
     }
 
     if (intent.expectedCallId > 0 && intent.expectedCallId !== activeCallId) {
-        showToast('That call already ended', 'info');
+        showToast(uiText('that_call_already_ended'), 'info');
         return;
     }
 
@@ -251,10 +251,10 @@ function hideCallConnectingOverlay() {
         overlay.classList.add('hidden');
     }
     if (title) {
-        title.textContent = 'Connecting call';
+        title.textContent = uiText('connecting_call');
     }
     if (subtitle) {
-        subtitle.textContent = 'Please wait...';
+        subtitle.textContent = uiText('please_wait');
     }
 }
 
@@ -272,7 +272,7 @@ function showCallConnectingOverlay(options = {}) {
         title.textContent = overlayTitle;
     }
     if (subtitle) {
-        subtitle.textContent = 'Please wait...';
+        subtitle.textContent = uiText('please_wait');
     }
 
     overlay.classList.remove('hidden');
@@ -346,7 +346,7 @@ async function declineIncomingCallById(callId) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to decline call', 'error');
+        showToast(uiActionError(result.error, 'unable_to_decline_call'), 'error');
         return { success: false, ended: false };
     }
 
@@ -726,7 +726,7 @@ function setChatCallStatusBar(state, incomingAlert = false) {
             startOutgoingPrivateRingingLabelCycle(label);
         } else {
             stopOutgoingPrivateRingingLabelCycle();
-            label.textContent = 'Ringing...';
+            label.textContent = uiText('ringing');
         }
         bar.classList.add('bg-zinc-700/50', 'border-zinc-600', 'text-zinc-200');
         updateCallDurationUI();
@@ -735,7 +735,7 @@ function setChatCallStatusBar(state, incomingAlert = false) {
 
     if (state === 'joinable') {
         stopOutgoingPrivateRingingLabelCycle();
-        label.textContent = 'Call in progress';
+        label.textContent = uiText('call_in_progress');
         bar.classList.add('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-200');
         updateCallDurationUI();
         return;
@@ -743,14 +743,14 @@ function setChatCallStatusBar(state, incomingAlert = false) {
 
     if (state === 'muted') {
         stopOutgoingPrivateRingingLabelCycle();
-        label.textContent = 'Call muted';
+        label.textContent = uiText('call_muted');
         bar.classList.add('bg-amber-500/20', 'border-amber-500/50', 'text-amber-200');
         updateCallDurationUI();
         return;
     }
 
     stopOutgoingPrivateRingingLabelCycle();
-    label.textContent = 'Call in progress';
+    label.textContent = uiText('call_in_progress');
     bar.classList.add('bg-emerald-500/20', 'border-emerald-500/50', 'text-emerald-200');
     updateCallDurationUI();
 }
@@ -1148,7 +1148,7 @@ function syncCallRingingState(callState) {
 
     if (callState.incomingAlert && callState.callId !== lastIncomingCallAlertId) {
         lastIncomingCallAlertId = callState.callId;
-        showToast('Incoming call', 'info');
+        showToast(uiText('incoming_call'), 'info');
         if (window.BROWSER_NOTIFICATIONS_ENABLED && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             new Notification('Incoming call', { body: 'Someone is calling you.' });
         }
@@ -1413,11 +1413,11 @@ async function startVoiceCall(options = {}) {
     if (!currentChat) return;
     const chatType = normalizeChatType(currentChat?.type || 'personal');
     if (currentChat.user_in_active_call === true || currentUserInActiveCall) {
-        showToast('You are already in an active call', 'error');
+        showToast(uiText('you_are_already_in_an_active_call'), 'error');
         return;
     }
     if (chatType === 'personal' && currentChat.can_start_calls === false) {
-        showToast("You can't call a banned user", 'error');
+        showToast(uiText('you_can_t_call_a_banned_user'), 'error');
         return;
     }
 
@@ -1427,7 +1427,7 @@ async function startVoiceCall(options = {}) {
     });
 
     if (!start.call_id) {
-        showToast(start.error || 'Unable to start call', 'error');
+        showToast(uiActionError(start.error, 'unable_to_start_call'), 'error');
         return;
     }
 
@@ -1527,7 +1527,7 @@ async function startVoiceCall(options = {}) {
     refreshChatCallStatusBar({ force: true });
     const isNewPrivateCallStart = chatType === 'personal' && !start.joined_existing;
     if (!options.silentStart && !isNewPrivateCallStart) {
-        showToast('Call started', 'success');
+        showToast(uiText('call_started'), 'success');
     }
 }
 
@@ -1650,7 +1650,7 @@ async function toggleVideoInCall() {
 
             syncOutgoingVideoTracksAcrossPeers();
         } catch (e) {
-            showToast('Could not enable camera', 'error');
+            showToast(uiText('could_not_enable_camera'), 'error');
             return;
         }
     } else {
@@ -1996,7 +1996,7 @@ function toggleScreenShare() {
         return;
     }
     if (!currentCallId) {
-        showToast('Start a call first', 'info');
+        showToast(uiText('start_a_call_first'), 'info');
         return;
     }
     if (isScreenSharing) {
@@ -2151,7 +2151,7 @@ async function populateCallSettingsDevices() {
     try {
         devices = await navigator.mediaDevices.enumerateDevices();
     } catch (e) {
-        showToast('Could not list media devices', 'error');
+        showToast(uiText('could_not_list_media_devices'), 'error');
         return;
     }
 
@@ -2265,7 +2265,7 @@ async function handleMicChange() {
                 try { track.stop(); } catch (stopError) {}
             });
         }
-        showToast('Could not switch microphone', 'error');
+        showToast(uiText('could_not_switch_microphone'), 'error');
     }
 }
 
@@ -2301,7 +2301,7 @@ async function handleCameraChange() {
 
         syncOutgoingVideoTracksAcrossPeers();
     } catch (e) {
-        showToast('Could not switch camera', 'error');
+        showToast(uiText('could_not_switch_camera'), 'error');
     }
 }
 
@@ -2337,14 +2337,14 @@ async function startScreenShare(quality) {
         screenStream = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints, audio: false });
     } catch (e) {
         if (e.name !== 'NotAllowedError') {
-            showToast('Could not start screen share', 'error');
+            showToast(uiText('could_not_start_screen_share'), 'error');
         }
         return;
     }
 
     const screenTrack = screenStream.getVideoTracks()[0];
     if (!screenTrack) {
-        showToast('No screen selected', 'error');
+        showToast(uiText('no_screen_selected'), 'error');
         screenStream = null;
         return;
     }
@@ -2806,10 +2806,10 @@ function updateDynamicRemotePeerTiles(primaryPeerId = 0) {
         const statusIcons = [];
 
         if (hasLiveVideo) {
-            statusIcons.push('<i class="fa fa-video" title="Video calling"></i>');
+            statusIcons.push(`<i class="fa fa-video" title="${escapeHtml(uiText('video_calling'))}"></i>`);
         }
         if (participant.screenSharing) {
-            statusIcons.push('<i class="fa fa-display" title="Screen sharing"></i>');
+            statusIcons.push(`<i class="fa fa-display" title="${escapeHtml(uiText('screen_sharing'))}"></i>`);
         }
 
         if (statusIcons.length > 0) {
@@ -3275,7 +3275,7 @@ async function acceptCall() {
 async function joinCall() {
     const joinId = Number(latestChatCallId || lastIncomingCallAlertId || declinedCallId || 0);
     if (!joinId) {
-        showToast('No active call to join', 'info');
+        showToast(uiText('no_active_call_to_join'), 'info');
         return;
     }
 

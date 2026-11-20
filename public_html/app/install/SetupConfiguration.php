@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace Causette\Installation;
 
-use RuntimeException;
+use Causette\Security\RequestOrigin;
+use Throwable;
+
+require_once __DIR__ . '/../core/RequestOrigin.php';
+require_once __DIR__ . '/SetupFailure.php';
 
 final class SetupConfiguration
 {
@@ -39,17 +43,17 @@ final class SetupConfiguration
     {
         $mode = @fileperms($path);
         if (is_link($path) || !is_file($path) || $mode === false || ($mode & 0077) !== 0) {
-            throw new RuntimeException('A private setup file is missing or its permissions are too broad.');
+            throw new SetupFailure('install.private_permissions');
         }
 
         $data = @file_get_contents($path, false, null, 0, 8193);
         if ($data === false || strlen($data) > 8192) {
-            throw new RuntimeException('A private setup file is unreadable or exceeds its size limit.');
+            throw new SetupFailure('install.private_read');
         }
 
         $values = json_decode($data, true, 32, JSON_THROW_ON_ERROR);
         if (!is_array($values)) {
-            throw new RuntimeException('A private setup file is invalid.');
+            throw new SetupFailure('install.private_invalid');
         }
         return $values;
     }
@@ -59,16 +63,16 @@ final class SetupConfiguration
         $directory = dirname($path);
         $temporary = @tempnam($directory, '.causette-');
         if ($temporary === false) {
-            throw new RuntimeException('The private directory is not writable.');
+            throw new SetupFailure('install.private_writable');
         }
 
         try {
             if (dirname($temporary) !== $directory || !chmod($temporary, 0600)) {
-                throw new RuntimeException('Could not protect a private setup file.');
+                throw new SetupFailure('install.private_protect');
             }
             $json = json_encode($values, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
             if (file_put_contents($temporary, $json) !== strlen($json) || !rename($temporary, $path)) {
-                throw new RuntimeException('Could not write a private setup file.');
+                throw new SetupFailure('install.private_write');
             }
         } finally {
             if (is_file($temporary)) {
@@ -79,14 +83,10 @@ final class SetupConfiguration
 
     public static function validateSite(array $values): void
     {
-        $url = $values['url'] ?? null;
         $database = $values['database'] ?? null;
-        if (!is_string($url) || !preg_match('~\Ahttps://([a-z0-9.-]+)(?::([1-9][0-9]{0,4}))?\z~D', $url, $parts)
-            || !filter_var($parts[1], FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)
-            || (isset($parts[2]) && (int)$parts[2] > 65535)
-            || !is_array($database)
-        ) {
-            throw new RuntimeException('Configure the HTTPS origin and database in the private setup file.');
+        self::siteOrigin($values);
+        if (!is_array($database)) {
+            throw new SetupFailure('install.database_config');
         }
 
         $host = $database['host'] ?? null;
@@ -99,17 +99,43 @@ final class SetupConfiguration
             || !is_string($password) || strlen($password) < 12 || strlen($password) > 512
             || str_contains($password, "\0")
         ) {
-            throw new RuntimeException('Configure a dedicated MySQL account in the private setup file.');
+            throw new SetupFailure('install.database_account');
         }
     }
 
-    public static function acceptsRequest(string $origin): bool
+    public static function validateRuntime(array $values): void
     {
-        if (!in_array(strtolower((string)($_SERVER['HTTPS'] ?? '')), ['on', '1'], true)) {
+        self::validateSite($values);
+        foreach (['csrf_secret', 'totp_key'] as $key) {
+            if (!is_string($values[$key] ?? null) || !preg_match('/\A[a-f0-9]{64}\z/', $values[$key])) {
+                throw new SetupFailure('install.private_key');
+            }
+        }
+
+        if (array_key_exists('installation_id', $values)
+            && (!is_string($values['installation_id']) || !preg_match('/\A[a-f0-9]{32}\z/', $values['installation_id']))
+        ) {
+            throw new SetupFailure('install.installation_identity');
+        }
+    }
+
+    public static function siteOrigin(array $values): RequestOrigin
+    {
+        $url = $values['url'] ?? null;
+        $proxies = array_key_exists('trusted_proxies', $values) ? $values['trusted_proxies'] : [];
+        if (!is_string($url) || !is_array($proxies)) {
+            throw new SetupFailure('install.canonical_https');
+        }
+        return new RequestOrigin($url, $proxies);
+    }
+
+    public static function acceptsRequest(string $url, array $trustedProxies = []): bool
+    {
+        try {
+            $origin = new RequestOrigin($url, $trustedProxies);
+        } catch (Throwable) {
             return false;
         }
-        $requestHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
-        $authority = substr($origin, strlen('https://'));
-        return preg_replace('/:443\z/D', '', $requestHost) === preg_replace('/:443\z/D', '', $authority);
+        return $origin->scheme($_SERVER) === 'https' && $origin->acceptsHost($_SERVER, 'https');
     }
 }

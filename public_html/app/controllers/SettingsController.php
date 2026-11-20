@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/../modules/2fa/totp/TOTP.php';
 require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
+require_once __DIR__ . '/../core/AuthChallenge.php';
+
+use Causette\Security\AuthChallenge;
+use Causette\Security\BrowserSession;
 
 class SettingsController extends Controller {
     public function index() {
@@ -12,8 +16,11 @@ class SettingsController extends Controller {
 
         // --- Account data (all users) ---
 
-        $this->clearExpiredEmailChangeRequest($userId);
-        $pendingEmailChange = $this->getPendingEmailChangeRequest($userId);
+        $emailChallenge = AuthChallenge::active($user, AuthChallenge::CHANGE_EMAIL, $_SESSION['email_change_challenge'] ?? '');
+        $pendingEmailChange = $emailChallenge === null ? null : (object) [
+            'new_email' => $emailChallenge['context'],
+            'seconds_remaining' => max(0, $emailChallenge['expires'] - time()),
+        ];
 
         $browserNotif = (string)(Setting::get('browser_notifications_' . $settingPrefix) ?? '0');
         $webPushNotif = (string)(Setting::get('web_push_notifications_' . $settingPrefix) ?? '0');
@@ -37,10 +44,11 @@ class SettingsController extends Controller {
             $invites = Database::query("SELECT ic.code, ic.used_by, u.username AS used_by_username, ic.used_at, ic.created_at FROM invite_codes ic LEFT JOIN users u ON u.id = ic.used_by WHERE ic.creator_id = ? ORDER BY ic.created_at DESC", [$userId])->fetchAll();
         }
 
-        $currentSessionToken = (string)($_SESSION['auth_session_token'] ?? '');
+        $currentSessionDigest = BrowserSession::sessionDigest($_SESSION['auth_session_token'] ?? null);
         $sessions = User::getActiveSessions($userId);
         foreach ($sessions as $session) {
-            $session->is_current = ($currentSessionToken !== '' && hash_equals($currentSessionToken, (string)$session->session_token));
+            $session->is_current = $currentSessionDigest !== null && hash_equals($currentSessionDigest, (string)$session->session_token);
+            unset($session->session_token);
         }
 
         $userTimezone = (string)(Setting::get('timezone_' . $settingPrefix) ?? 'UTC+0');
@@ -59,7 +67,12 @@ class SettingsController extends Controller {
             [$userId]
         )->fetch();
 
-        $totpSetupPending = isset($_SESSION['totp_setup_secret']);
+        $totpSetupPending = !$totpEnabled && isset($_SESSION['totp_setup_secret']) && AuthChallenge::active(
+            $user, AuthChallenge::ENROLL_TOTP, $_SESSION['totp_setup_challenge'] ?? '',
+        ) !== null;
+        if (!$totpSetupPending) {
+            unset($_SESSION['totp_setup_secret'], $_SESSION['totp_setup_challenge']);
+        }
 
         $totpRecoveryCodesRemaining = 0;
         if ($totpEnabled) {
@@ -74,7 +87,7 @@ class SettingsController extends Controller {
         if ($totpSetupPending) {
             $secret = $_SESSION['totp_setup_secret'];
             $totpSecretDisplay = $secret;
-            $uri = TOTP::getProvisioningUri($secret, $user->email, APP_NAME);
+            $uri = TOTP::getProvisioningUri($secret, $user->email, 'Causette');
             ob_start();
             $qr = new QRCode($uri, ['s' => 'qrm', 'sf' => 6]);
             $image = $qr->render_image();
@@ -88,7 +101,7 @@ class SettingsController extends Controller {
             unset($_SESSION['totp_recovery_codes']);
         }
 
-        $twofaFrequency = (string)(Setting::get('twofa_frequency_' . $userId) ?? 'trusted');
+        $twofaFrequency = (string)(Setting::get('twofa_frequency_' . $userId) ?? 'always');
 
         $viewData = [
             'user' => $user,
@@ -174,7 +187,6 @@ class SettingsController extends Controller {
                 'attachments_maximum_file_size_mb' => (int)(Setting::get('attachments_maximum_file_size_mb') ?? 10),
                 'error_display' => (string)(Setting::get('error_display') ?? '0') === '1',
                 'attachment_logging' => (string)(Setting::get('attachment_logging') ?? '0') === '1',
-                'check_for_updates' => (string)(Setting::get('check_for_updates') ?? '0') === '1',
                 'new_user_notification' => (string)(Setting::get('new_user_notification') ?? '0') === '1',
                 'all_group_chats' => $allGroupChats,
                 'new_user_auto_join_group' => $newUserAutoJoinGroup,
@@ -221,17 +233,6 @@ class SettingsController extends Controller {
         }
 
         return date('F j, Y \a\t g:i A', $availableAt);
-    }
-
-    private function clearExpiredEmailChangeRequest($userId) {
-        Database::query("DELETE FROM email_change_requests WHERE user_id = ? AND expires_at <= NOW()", [(int)$userId]);
-    }
-
-    private function getPendingEmailChangeRequest($userId) {
-        return Database::query(
-            "SELECT new_email, expires_at, GREATEST(TIMESTAMPDIFF(SECOND, NOW(), expires_at), 0) AS seconds_remaining FROM email_change_requests WHERE user_id = ? AND expires_at > NOW() LIMIT 1",
-            [(int)$userId]
-        )->fetch();
     }
 
     private function storageRoot(): string {

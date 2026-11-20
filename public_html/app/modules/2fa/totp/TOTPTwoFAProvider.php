@@ -10,10 +10,6 @@ class TOTPTwoFAProvider implements TwoFAProviderInterface {
         return 'Authenticator App';
     }
 
-    public function getPriority(): int {
-        return 20;
-    }
-
     public function isAvailable(int $userId): bool {
         $row = Database::query(
             "SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL",
@@ -22,12 +18,12 @@ class TOTPTwoFAProvider implements TwoFAProviderInterface {
         return (bool)$row;
     }
 
-    public function sendChallenge(int $userId, string $ip): bool {
+    public function sendChallenge(int $userId, ?string $deliveryCode): bool {
         // No-op: TOTP codes are generated client-side by the authenticator app
         return true;
     }
 
-    public function verifyCode(int $userId, string $code, string $ip): bool {
+    public function verifyCode(int $userId, string $code, array $challenge): bool {
         $row = Database::query(
             "SELECT secret_encrypted FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL",
             [$userId]
@@ -42,35 +38,17 @@ class TOTPTwoFAProvider implements TwoFAProviderInterface {
             return false;
         }
 
-        // Try as a TOTP code first
-        if (preg_match('/^\d{6}$/', $code) && TOTP::verify($secret, $code, 1)) {
-            return true;
+        if (preg_match('/\A[0-9]{6}\z/', $code) === 1) {
+            $step = TOTP::matchingStep($secret, $code);
+            return $step !== null && TOTP::consumeStep($userId, $step);
         }
 
-        // Then try as a recovery code
-        return $this->verifyRecoveryCode($userId, $code);
-    }
-
-    public function cleanup(int $userId): void {
-        // No temporary state to clean up for TOTP
-    }
-
-    private function verifyRecoveryCode(int $userId, string $code): bool {
-        $codes = Database::query(
-            "SELECT id, code_hash FROM totp_recovery_codes WHERE user_id = ? AND used_at IS NULL",
-            [$userId]
-        )->fetchAll();
-
-        foreach ($codes as $row) {
-            if (hash_equals($row->code_hash, hash('sha256', strtolower($code)))) {
-                Database::query(
-                    "UPDATE totp_recovery_codes SET used_at = NOW() WHERE id = ?",
-                    [$row->id]
-                );
-                return true;
-            }
+        if (preg_match('/\A[a-zA-Z0-9]{8}\z/', $code) !== 1) {
+            return false;
         }
 
-        return false;
+        return Database::query('UPDATE totp_recovery_codes SET used_at = NOW()
+            WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',
+            [$userId, hash('sha256', strtolower($code))])->rowCount() > 0;
     }
 }

@@ -1,4 +1,8 @@
 <?php
+require_once __DIR__ . '/SecretSettings.php';
+
+use Causette\Security\SecretSettings;
+
 class WebPushService {
     private const PUSH_TTL_SECONDS = 60;
 
@@ -214,7 +218,11 @@ class WebPushService {
     private static function getVapidPrivateKeyPem(): ?string {
         $raw = trim((string)(getenv('PUSH_VAPID_PRIVATE_KEY') ?: ''));
         if ($raw === '') {
-            $raw = trim((string)(Setting::get('push_vapid_private_key') ?? ''));
+            try {
+                $raw = trim(SecretSettings::read(SecretSettings::VAPID) ?? '');
+            } catch (RuntimeException) {
+                return null;
+            }
         }
         if ($raw === '') {
             return null;

@@ -1,3 +1,4 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <?php
 $postReactionCodes = Post::REACTION_CODES;
 $postReactionCodeToLabel = [
@@ -113,23 +114,23 @@ $renderPostReactionPicker = static function (int $postId, int $postOwnerId) use 
         <a href="<?= htmlspecialchars(base_url('/'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-400 hover:text-zinc-200 transition">
             <i class="fa fa-arrow-left"></i>
         </a>
-        <h1 class="text-3xl font-bold">Posts</h1>
+        <h1 class="text-3xl font-bold"><?= $tr('ui.posts') ?></h1>
         <div class="ml-2 inline-flex items-center rounded-lg border border-zinc-700 p-1 text-xs">
             <a
                 href="<?= htmlspecialchars($friendsScopeUrl, ENT_QUOTES, 'UTF-8') ?>"
                 class="px-2.5 py-1 rounded-md transition <?= $selectedPostScope === 'friends' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200' ?>"
             >
-                Friends
+                <?= $tr('ui.friends') ?>
             </a>
             <a
                 href="<?= htmlspecialchars($serverScopeUrl, ENT_QUOTES, 'UTF-8') ?>"
                 class="px-2.5 py-1 rounded-md transition <?= $selectedPostScope === 'server' ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200' ?>"
             >
-                Server
+                <?= $tr('ui.server') ?>
             </a>
         </div>
         <button type="button" onclick="openNewPostModal()" class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
-            <i class="fa fa-plus text-xs"></i> New Post
+            <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
         </button>
     </div>
 
@@ -189,12 +190,12 @@ $renderPostReactionPicker = static function (int $postId, int $postOwnerId) use 
                                     class="text-zinc-400 hover:text-red-300 js-profile-post-delete-open"
                                     data-post-id="<?= $postId ?>"
                                     data-post-username="<?= htmlspecialchars($postAuthorUsername, ENT_QUOTES, 'UTF-8') ?>"
-                                    aria-label="Delete post"
+                                    aria-label="<?= $tr('ui.delete_post') ?>"
                                 >
-                                    Delete
+                                    <?= $tr('ui.delete') ?>
                                 </button>
                             <?php endif; ?>
-                            <button type="button" class="text-zinc-400 hover:text-zinc-300 js-profile-post-react-link" data-post-id="<?= $postId ?>">React</button>
+                            <button type="button" class="text-zinc-400 hover:text-zinc-300 js-profile-post-react-link" data-post-id="<?= $postId ?>"><?= $tr('ui.react') ?></button>
                             <?= $renderPostReactionBadges($postId, $postReactions) ?>
                         </div>
                     </div>
@@ -204,15 +205,15 @@ $renderPostReactionPicker = static function (int $postId, int $postOwnerId) use 
         <?php if ($totalPages > 1): ?>
             <div class="flex items-center justify-between mt-6 pt-4 border-t border-zinc-700">
                 <?php if ($currentPage > 1): ?>
-                    <a href="<?= htmlspecialchars(base_url('/posts?' . $scopeParam . '&page=' . ($currentPage - 1)), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition"><i class="fa fa-arrow-left text-xs"></i> Previous</a>
+                    <a href="<?= htmlspecialchars(base_url('/posts?' . $scopeParam . '&page=' . ($currentPage - 1)), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition"><i class="fa fa-arrow-left text-xs"></i> <?= $tr('ui.previous') ?></a>
                 <?php else: ?>
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default"><i class="fa fa-arrow-left text-xs"></i> Previous</span>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default"><i class="fa fa-arrow-left text-xs"></i> <?= $tr('ui.previous') ?></span>
                 <?php endif; ?>
                 <span class="text-zinc-400 text-sm">Page <?= $currentPage ?> of <?= $totalPages ?></span>
                 <?php if ($currentPage < $totalPages): ?>
-                    <a href="<?= htmlspecialchars(base_url('/posts?' . $scopeParam . '&page=' . ($currentPage + 1)), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition">Next <i class="fa fa-arrow-right text-xs"></i></a>
+                    <a href="<?= htmlspecialchars(base_url('/posts?' . $scopeParam . '&page=' . ($currentPage + 1)), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition"><?= $tr('ui.next') ?> <i class="fa fa-arrow-right text-xs"></i></a>
                 <?php else: ?>
-                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default">Next <i class="fa fa-arrow-right text-xs"></i></span>
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default"><?= $tr('ui.next') ?> <i class="fa fa-arrow-right text-xs"></i></span>
                 <?php endif; ?>
             </div>
         <?php endif; ?>

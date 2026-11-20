@@ -1,15 +1,19 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const trackedFiles = execFileSync('git', ['ls-files', '-z', '--', '*.php', '*.js', '*.mjs'], {
+const sourceFiles = execFileSync('git', [
+    'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', '*.php', '*.js', '*.mjs',
+], {
     cwd: root,
     encoding: 'utf8',
-}).split('\0').filter(Boolean);
+}).split('\0').filter(file => file && existsSync(join(root, file)));
 const php = process.env.CAUSETTE_PHP ?? 'php';
 let failures = 0;
 
-for (const file of trackedFiles) {
+for (const file of sourceFiles) {
     const isPhp = file.endsWith('.php');
     const check = spawnSync(
         isPhp ? php : process.execPath,
@@ -25,5 +29,5 @@ for (const file of trackedFiles) {
     }
 }
 
-console.log(`Syntax checked ${trackedFiles.length} tracked PHP and JavaScript files. Failures: ${failures}.`);
+console.log(`Syntax checked ${sourceFiles.length} PHP and JavaScript files. Failures: ${failures}.`);
 process.exitCode = failures === 0 ? 0 : 1;

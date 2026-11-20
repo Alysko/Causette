@@ -1,4 +1,8 @@
 <?php
+use Causette\Localization\Locale;
+
+require_once __DIR__ . '/Locale.php';
+
 class ErrorHandler {
     private static $debugMode = false;
 
@@ -113,7 +117,7 @@ class ErrorHandler {
         self::logError("HTTP {$status}", [
             'message' => $message,
             'debug' => $debug,
-            'uri' => $_SERVER['REQUEST_URI'] ?? 'unknown',
+            'uri' => explode('?', $uri, 2)[0],
             'method' => $_SERVER['REQUEST_METHOD'] ?? 'CLI'
         ]);
 
@@ -146,9 +150,10 @@ class ErrorHandler {
     }
 
     private static function render($status, $message, $debug = []) {
+        $key = self::statusKey($status);
         if (self::isApiRequest()) {
             header('Content-Type: application/json');
-            $payload = ['error' => self::statusLabel($status)];
+            $payload = ['error' => Locale::resolve('en')->text('error.' . $key)];
 
             if (self::$debugMode) {
                 $payload['debug'] = [
@@ -162,8 +167,9 @@ class ErrorHandler {
             return;
         }
 
-        $title = $status . ' - ' . self::statusLabel($status);
-        $description = self::statusDescription($status);
+        $locale = Locale::current();
+        $title = $status . ' - ' . $locale->text('error.' . $key);
+        $description = $locale->html('error.' . $key . '_help');
 
         $debugBlock = '';
         if (self::$debugMode) {
@@ -192,13 +198,13 @@ class ErrorHandler {
         }
 
         echo '<!doctype html>'
-            . '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            . '<html lang="' . htmlspecialchars($locale->language(), ENT_QUOTES, 'UTF-8') . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             . '<title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title>'
             . '<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f9fafb;color:#111827;display:flex;min-height:100vh;align-items:center;justify-content:center}main{max-width:680px;margin:24px;padding:36px;background:#fff;border-radius:14px;box-shadow:0 12px 30px rgba(17,24,39,.08)}h1{margin:0 0 10px;font-size:32px}p{margin:0;color:#4b5563;line-height:1.5}.home-link{display:inline-block;margin-top:18px;color:#059669;text-decoration:none;font-weight:600}.home-link:hover{text-decoration:underline}</style>'
             . '</head><body><main>'
             . '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
-            . '<p>' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p>'
-            . '<a class="home-link" href="/">Back to home</a>'
+            . '<p>' . $description . '</p>'
+            . '<a class="home-link" href="/">' . $locale->html('error.back_home') . '</a>'
             . $debugBlock
             . '</main></body></html>';
     }
@@ -206,12 +212,12 @@ class ErrorHandler {
     private static function logError($type, $context = []) {
         $context = array_merge($context, self::versionMetadata());
         $contextJson = json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        error_log('[Prologue][' . $type . '] ' . $contextJson);
+        error_log('[Causette][' . $type . '] ' . $contextJson);
     }
 
     public static function logToDirectory(string $filename, string $type, array $context = []): void {
         $contextJson = json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        $line = '[' . date('Y-m-d H:i:s') . '][Prologue][' . $type . '] ' . $contextJson . PHP_EOL;
+        $line = '[' . date('Y-m-d H:i:s') . '][Causette][' . $type . '] ' . $contextJson . PHP_EOL;
 
         if (defined('APP_LOG_DIRECTORY')) {
             $dir = rtrim((string)APP_LOG_DIRECTORY, '/');
@@ -223,7 +229,7 @@ class ErrorHandler {
             }
         }
 
-        error_log('[Prologue][' . $type . '][fallback:' . $filename . '] ' . $contextJson);
+        error_log('[Causette][' . $type . '][fallback:' . $filename . '] ' . $contextJson);
     }
 
     private static function isApiRequest() {
@@ -236,37 +242,14 @@ class ErrorHandler {
         return stripos($accept, 'application/json') !== false;
     }
 
-    private static function statusLabel($status) {
-        switch ((int) $status) {
-            case 403:
-                return 'Forbidden';
-            case 404:
-                return 'Not Found';
-            case 419:
-                return 'Session Expired';
-            case 424:
-                return 'Failed Dependency';
-            case 500:
-                return 'Server Error';
-            default:
-                return 'Error';
-        }
-    }
-
-    private static function statusDescription($status) {
-        switch ((int) $status) {
-            case 403:
-                return 'You do not have permission to access this resource.';
-            case 404:
-                return 'The page you are looking for could not be found.';
-            case 419:
-                return 'Your session has expired or the request could not be verified. Please go back and try again.';
-            case 424:
-                return 'Prologue has not been installed yet. Please initialize the application.';
-            case 500:
-                return 'Something went wrong on our side.';
-            default:
-                return 'An unexpected error occurred.';
-        }
+    private static function statusKey($status): string {
+        return match ((int) $status) {
+            403 => 'forbidden',
+            404 => 'not_found',
+            419 => 'session_expired',
+            424 => 'failed_dependency',
+            500 => 'server_error',
+            default => 'error',
+        };
     }
 }

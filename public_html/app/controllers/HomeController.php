@@ -4,7 +4,15 @@ require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
+require_once __DIR__ . '/../core/AccountPassword.php';
+require_once __DIR__ . '/../core/SecretSettings.php';
 
+use Causette\Security\AccountPassword;
+use Causette\Security\AuthBudget;
+use Causette\Security\AuthChallenge;
+use Causette\Security\BrowserSession;
+use Causette\Security\SecretSettings;
+use Causette\Security\TrustedBrowser;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -239,13 +247,13 @@ class HomeController extends Controller {
 
         $user = Auth::user();
         $sessionId = (int)($_POST['session_id'] ?? 0);
-        if ($sessionId <= 0) {
+        if (!$user || $sessionId <= 0) {
             $this->flash('error', 'session_not_found');
             $this->redirect('/settings');
         }
 
         $session = Database::query(
-            "SELECT id, session_token FROM user_sessions WHERE id = ? AND user_id = ? AND revoked_at IS NULL LIMIT 1",
+            'SELECT id, session_token FROM user_sessions WHERE id = ? AND user_id = ? AND ' . BrowserSession::AVAILABLE,
             [$sessionId, $user->id]
         )->fetch();
 
@@ -254,8 +262,8 @@ class HomeController extends Controller {
             $this->redirect('/settings');
         }
 
-        $currentToken = (string)($_SESSION['auth_session_token'] ?? '');
-        $isCurrentSession = $currentToken !== '' && hash_equals($currentToken, (string)$session->session_token);
+        $currentDigest = BrowserSession::sessionDigest($_SESSION['auth_session_token'] ?? null);
+        $isCurrentSession = $currentDigest !== null && hash_equals($currentDigest, (string)$session->session_token);
 
         if (!User::revokeSessionById((int)$user->id, $sessionId)) {
             $this->flash('error', 'session_not_found');
@@ -267,6 +275,7 @@ class HomeController extends Controller {
         }
 
         if ($isCurrentSession) {
+            Auth::clearRememberCookie();
             session_regenerate_id(true);
             $_SESSION = [];
             $this->flash('success', 'session_exited');
@@ -353,48 +362,42 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
-        $this->clearExpiredEmailChangeRequest((int)$user->id);
-        $email = trim($_POST['email'] ?? '');
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $this->requireSettingsPassword($user, 'email_change_password_invalid');
+        $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
             $this->flash('error', 'email_invalid');
             $this->redirect('/settings');
         }
 
         if (strcasecmp($email, (string)$user->email) === 0) {
-            Database::query("DELETE FROM email_change_requests WHERE user_id = ?", [$user->id]);
+            AuthChallenge::cancel($user, AuthChallenge::CHANGE_EMAIL, $_SESSION['email_change_challenge'] ?? '');
+            unset($_SESSION['email_change_challenge']);
             $this->flash('success', 'email_saved');
             $this->redirect('/settings');
         }
 
-        $existingEmail = Database::query("SELECT id FROM users WHERE email = ? AND id <> ?", [$email, $user->id])->fetch();
-        if ($existingEmail) {
+        if (User::findByEmail($email)) {
             $this->flash('error', 'email_taken');
             $this->redirect('/settings');
         }
 
-        $emailPendingForAnotherUser = Database::query(
-            "SELECT user_id FROM email_change_requests WHERE new_email = ? AND user_id <> ? AND expires_at > NOW() LIMIT 1",
-            [$email, $user->id]
-        )->fetch();
-        if ($emailPendingForAnotherUser) {
-            $this->flash('error', 'email_taken');
+        $code = AuthChallenge::generateCode();
+        $id = AuthChallenge::begin($user, AuthChallenge::CHANGE_EMAIL, $_SERVER['REMOTE_ADDR'] ?? '', $code, $email);
+        if ($id === null) {
+            $this->flash('error', 'email_change_limit');
             $this->redirect('/settings');
         }
-
-        $code = $this->generateSixDigitCode();
-        $expires = date('Y-m-d H:i:s', strtotime('+10 minutes'));
-
-        Database::query(
-            "INSERT INTO email_change_requests (user_id, new_email, code, expires_at) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE new_email = VALUES(new_email), code = VALUES(code), expires_at = VALUES(expires_at), created_at = CURRENT_TIMESTAMP",
-            [$user->id, $email, $code, $expires]
-        );
-
-        $this->sendEmail(
+        if (!$this->sendEmail(
             $email,
-            'Confirm your new Prologue email',
+            'Confirm your new Causette email',
             "Your email change verification code is <b>{$code}</b> (valid 10 minutes)."
-        );
+        )) {
+            AuthChallenge::cancel($user, AuthChallenge::CHANGE_EMAIL, $id);
+            $this->flash('error', 'email_change_delivery_failed');
+            $this->redirect('/settings');
+        }
 
+        $_SESSION['email_change_challenge'] = $id;
         $this->flash('success', 'email_change_sent');
         $this->redirect('/settings');
     }
@@ -404,51 +407,36 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
-        $this->clearExpiredEmailChangeRequest((int)$user->id);
-
-        $code = trim($_POST['code'] ?? '');
-        if (!preg_match('/^\d{6}$/', $code)) {
-            $this->flash('error', 'email_change_code_invalid');
-            $this->redirect('/settings');
+        if (!$user) {
+            $this->redirect('/login');
         }
+        $id = $_SESSION['email_change_challenge'] ?? '';
+        $code = is_string($_POST['code'] ?? null) ? trim($_POST['code']) : '';
+        try {
+            $verified = AuthChallenge::attempt($user, AuthChallenge::CHANGE_EMAIL, $id, $_SERVER['REMOTE_ADDR'] ?? '',
+                static function (object $account, array $challenge) use ($code): bool {
+                    if (!AuthChallenge::matchesCode($challenge, $code)) {
+                        return false;
+                    }
 
-        $pendingRequest = Database::query(
-            "SELECT new_email FROM email_change_requests WHERE user_id = ? AND code = ? AND expires_at > NOW() LIMIT 1",
-            [$user->id, $code]
-        )->fetch();
-
-        if (!$pendingRequest) {
-            $pendingExists = Database::query(
-                "SELECT id FROM email_change_requests WHERE user_id = ? AND expires_at > NOW() LIMIT 1",
-                [$user->id]
-            )->fetch();
-
-            if (!$pendingExists) {
-                $this->flash('error', 'email_change_expired');
-                $this->redirect('/settings');
+                    Database::query('UPDATE users SET email = ?, email_verified_at = NOW() WHERE id = ?',
+                        [$challenge['context'], $account->id]);
+                    Database::query('DELETE FROM password_resets WHERE user_id = ?', [$account->id]);
+                    return true;
+                });
+        } catch (PDOException $failure) {
+            if ($failure->getCode() !== '23000') {
+                throw $failure;
             }
-
-            $this->flash('error', 'email_change_code_invalid');
-            $this->redirect('/settings');
-        }
-
-        $newEmail = trim((string)$pendingRequest->new_email);
-        if (!filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
-            Database::query("DELETE FROM email_change_requests WHERE user_id = ?", [$user->id]);
-            $this->flash('error', 'email_change_expired');
-            $this->redirect('/settings');
-        }
-
-        $existingEmail = Database::query("SELECT id FROM users WHERE email = ? AND id <> ?", [$newEmail, $user->id])->fetch();
-        if ($existingEmail) {
-            Database::query("DELETE FROM email_change_requests WHERE user_id = ?", [$user->id]);
+            AuthChallenge::cancel($user, AuthChallenge::CHANGE_EMAIL, $id);
             $this->flash('error', 'email_taken');
             $this->redirect('/settings');
         }
-
-        Database::query("UPDATE users SET email = ?, email_verified_at = NOW() WHERE id = ?", [$newEmail, $user->id]);
-        Database::query("DELETE FROM email_change_requests WHERE user_id = ?", [$user->id]);
-
+        if ($verified !== true) {
+            $this->flash('error', $verified === null ? 'email_change_expired' : 'email_change_code_invalid');
+            $this->redirect('/settings');
+        }
+        unset($_SESSION['email_change_challenge']);
         $this->flash('success', 'email_saved');
         $this->redirect('/settings');
     }
@@ -458,27 +446,47 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
+        if (!$user) {
+            $this->redirect('/login');
+        }
         $currentPassword = $_POST['current_password'] ?? '';
         $newPassword = $_POST['new_password'] ?? '';
         $confirmPassword = $_POST['confirm_password'] ?? '';
 
-        if (!password_verify($currentPassword, (string)$user->password)) {
+        if (!is_string($currentPassword) || !password_verify($currentPassword, (string)$user->password)) {
             $this->flash('error', 'password_current_invalid');
             $this->redirect('/settings');
         }
 
-        if (strlen($newPassword) < 8) {
+        if (!is_string($newPassword) || strlen($newPassword) < 8 || str_contains($newPassword, "\0")) {
             $this->flash('error', 'password_invalid');
             $this->redirect('/settings');
         }
 
-        if (!hash_equals($newPassword, $confirmPassword)) {
+        if (!is_string($confirmPassword) || !hash_equals($newPassword, $confirmPassword)) {
             $this->flash('error', 'password_mismatch');
             $this->redirect('/settings');
         }
 
-        $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-        Database::query("UPDATE users SET password = ? WHERE id = ?", [$hashedPassword, $user->id]);
+        if (!session_regenerate_id(true)) {
+            ErrorHandler::abort(500, 'Could not renew the session');
+        }
+        $newSessionToken = AccountPassword::change(
+            (int)$user->id,
+            Auth::passwordBinding($user),
+            (string)($_SESSION['auth_session_token'] ?? ''),
+            $newPassword,
+        );
+        if ($newSessionToken === null) {
+            $this->flash('error', 'password_current_invalid');
+            $this->redirect('/settings');
+        }
+
+        $_SESSION['auth_session_token'] = $newSessionToken;
+        unset($_SESSION['csrf_token']);
+        Auth::recordPasswordAuthentication(time());
+        Auth::clearRememberCookie();
+        TrustedBrowser::clearCookie();
         $this->flash('success', 'password_saved');
         $this->redirect('/settings');
     }
@@ -840,31 +848,28 @@ class HomeController extends Controller {
         throw new RuntimeException('Failed to generate a unique invite code.');
     }
 
-    private function clearExpiredEmailChangeRequest($userId) {
-        Database::query("DELETE FROM email_change_requests WHERE user_id = ? AND expires_at <= NOW()", [(int)$userId]);
+    private function requireSettingsPassword(?object $account, string $error): void {
+        if (!$account) {
+            $this->redirect('/login');
+        }
+        $password = $_POST['password'] ?? '';
+        if (!AuthBudget::allow('settings_password', (int)$account->id, $_SERVER['REMOTE_ADDR'] ?? '', 8)
+            || !is_string($password) || !password_verify($password, (string)$account->password)
+        ) {
+            $this->flash('error', $error);
+            $this->redirect('/settings');
+        }
     }
 
-    private function getPendingEmailChangeRequest($userId) {
-        return Database::query(
-            "SELECT new_email, expires_at, GREATEST(TIMESTAMPDIFF(SECOND, NOW(), expires_at), 0) AS seconds_remaining FROM email_change_requests WHERE user_id = ? AND expires_at > NOW() LIMIT 1",
-            [(int)$userId]
-        )->fetch();
-    }
-
-    private function generateSixDigitCode() {
-        return str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-    }
-
-    private function sendEmail($to, $subject, $body) {
+    protected function sendEmail($to, $subject, $body): bool {
         $mailHost = (string)(Setting::get('mail_host') ?? '');
         $mailUser = (string)(Setting::get('mail_user') ?? '');
 
         if ($mailHost === '' || $mailUser === '') {
-            return;
+            return false;
         }
 
         $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailPass = (string)(Setting::get('mail_pass') ?? '');
         $mailFrom = (string)(Setting::get('mail_from') ?? '');
         $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
 
@@ -874,18 +879,19 @@ class HomeController extends Controller {
             $mail->Host = $mailHost;
             $mail->SMTPAuth = true;
             $mail->Username = $mailUser;
-            $mail->Password = $mailPass;
+            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port = $mailPort;
+            $mail->Timeout = 10;
 
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($to);
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body = $body;
-            $mail->send();
-        } catch (Exception $e) {
-            // log error in production
+            return $mail->send();
+        } catch (Exception | RuntimeException) {
+            return false;
         }
     }
 
@@ -894,30 +900,22 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
+        $this->requireSettingsPassword($user, 'totp_password_invalid');
         $userId = (int)$user->id;
-
-        // Check if already confirmed
-        $existing = Database::query(
-            "SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL",
-            [$userId]
-        )->fetch();
-
-        if ($existing) {
+        if (Database::query('SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL', [$userId])->fetch()) {
             $this->flash('error', 'totp_already_enabled');
             $this->redirect('/settings');
         }
 
         $secret = TOTP::generateSecret();
-        $encrypted = TOTP::encrypt($secret);
-
-        // Remove any unconfirmed secret and insert new one
-        Database::query("DELETE FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NULL", [$userId]);
-        Database::query(
-            "INSERT INTO totp_secrets (user_id, secret_encrypted) VALUES (?, ?)",
-            [$userId, $encrypted]
-        );
+        $id = AuthChallenge::begin($user, AuthChallenge::ENROLL_TOTP, $_SERVER['REMOTE_ADDR'] ?? '', null, hash('sha256', $secret));
+        if ($id === null) {
+            $this->flash('error', 'totp_challenge_limit');
+            $this->redirect('/settings');
+        }
 
         $_SESSION['totp_setup_secret'] = $secret;
+        $_SESSION['totp_setup_challenge'] = $id;
         $this->flash('success', 'totp_setup_started');
         $this->redirect('/settings');
     }
@@ -927,46 +925,50 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
-        $userId = (int)$user->id;
-
+        if (!$user) {
+            $this->redirect('/login');
+        }
         $secret = $_SESSION['totp_setup_secret'] ?? '';
-        if ($secret === '') {
-            $this->flash('error', 'totp_setup_expired');
+        $id = $_SESSION['totp_setup_challenge'] ?? '';
+        $code = is_string($_POST['totp_code'] ?? null) ? trim($_POST['totp_code']) : '';
+        $codes = [];
+        $verified = AuthChallenge::attempt($user, AuthChallenge::ENROLL_TOTP, $id, $_SERVER['REMOTE_ADDR'] ?? '',
+            static function (object $account, array $challenge) use ($secret, $code, &$codes): bool {
+                if ($secret === '' || !hash_equals($challenge['context'], hash('sha256', $secret))
+                    || preg_match('/\A[0-9]{6}\z/', $code) !== 1
+                ) {
+                    return false;
+                }
+
+                $step = TOTP::matchingStep($secret, $code);
+                $userId = (int)$account->id;
+                if ($step === null || Database::query(
+                    'SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL', [$userId]
+                )->fetch() || !TOTP::consumeStep($userId, $step)) {
+                    return false;
+                }
+
+                Database::query('DELETE FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NULL', [$userId]);
+                Database::query('INSERT INTO totp_secrets (user_id, secret_encrypted, confirmed_at) VALUES (?, ?, NOW())',
+                    [$userId, TOTP::encrypt($secret)]);
+                Database::query('DELETE FROM totp_recovery_codes WHERE user_id = ?', [$userId]);
+                $codes = TOTP::generateRecoveryCodes();
+                foreach ($codes as $recoveryCode) {
+                    Database::query('INSERT INTO totp_recovery_codes (user_id, code_hash) VALUES (?, ?)',
+                        [$userId, hash('sha256', $recoveryCode)]);
+                }
+                TrustedBrowser::revokeForAccount($userId);
+                return true;
+            });
+
+        if ($verified !== false) {
+            unset($_SESSION['totp_setup_secret'], $_SESSION['totp_setup_challenge']);
+        }
+        if ($verified !== true) {
+            $this->flash('error', $verified === null ? 'totp_setup_expired' : 'totp_invalid_code');
             $this->redirect('/settings');
         }
 
-        $code = trim($_POST['totp_code'] ?? '');
-        if (!preg_match('/^\d{6}$/', $code)) {
-            $this->flash('error', 'totp_invalid_code');
-            $this->redirect('/settings');
-        }
-
-        if (!TOTP::verify($secret, $code, 1)) {
-            $this->flash('error', 'totp_invalid_code');
-            $this->redirect('/settings');
-        }
-
-        // Confirm the secret
-        Database::query(
-            "UPDATE totp_secrets SET confirmed_at = NOW() WHERE user_id = ? AND confirmed_at IS NULL",
-            [$userId]
-        );
-
-        // Generate recovery codes
-        $codes = TOTP::generateRecoveryCodes(8);
-
-        // Clear any old recovery codes
-        Database::query("DELETE FROM totp_recovery_codes WHERE user_id = ?", [$userId]);
-
-        // Store hashed recovery codes
-        foreach ($codes as $code) {
-            Database::query(
-                "INSERT INTO totp_recovery_codes (user_id, code_hash) VALUES (?, ?)",
-                [$userId, hash('sha256', $code)]
-            );
-        }
-
-        unset($_SESSION['totp_setup_secret']);
         $_SESSION['totp_recovery_codes'] = $codes;
         $this->flash('success', 'totp_enabled');
         $this->redirect('/settings');
@@ -977,18 +979,24 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
+        $this->requireSettingsPassword($user, 'totp_password_invalid');
         $userId = (int)$user->id;
 
-        $password = $_POST['password'] ?? '';
-        if (!password_verify($password, (string)$user->password)) {
+        $changed = AuthChallenge::withAccount($user, static function () use ($userId): bool {
+            Database::query('DELETE FROM totp_secrets WHERE user_id = ?', [$userId]);
+            Database::query('DELETE FROM totp_recovery_codes WHERE user_id = ?', [$userId]);
+            Database::query('DELETE FROM settings WHERE `key` IN (?, ?)', ['twofa_frequency_' . $userId, 'auth_totp_step_' . $userId]);
+            TrustedBrowser::revokeForAccount($userId);
+            AuthChallenge::clearForAccount($userId);
+            return true;
+        });
+
+        if ($changed !== true) {
             $this->flash('error', 'totp_password_invalid');
             $this->redirect('/settings');
         }
-
-        Database::query("DELETE FROM totp_secrets WHERE user_id = ?", [$userId]);
-        Database::query("DELETE FROM totp_recovery_codes WHERE user_id = ?", [$userId]);
-        Database::query("DELETE FROM settings WHERE `key` = ?", ['twofa_frequency_' . $userId]);
-
+        TrustedBrowser::clearCookie();
+        unset($_SESSION['totp_setup_secret'], $_SESSION['totp_setup_challenge'], $_SESSION['totp_recovery_codes']);
         $this->flash('success', 'totp_disabled');
         $this->redirect('/settings');
     }
@@ -997,24 +1005,50 @@ class HomeController extends Controller {
         Auth::requireAuth();
         Auth::csrfValidate();
 
-        $userId = (int)Auth::user()->id;
-
-        $totpEnabled = (bool)Database::query(
-            "SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL",
-            [$userId]
-        )->fetch();
-
-        if (!$totpEnabled) {
-            $this->json(['error' => '2FA is not enabled'], 400);
+        $user = Auth::user();
+        $this->requireSettingsPassword($user, 'totp_password_invalid');
+        $userId = (int)$user->id;
+        $frequency = $_POST['frequency'] ?? '';
+        if (!in_array($frequency, ['always', 'trusted'], true) || ($user->role === 'admin' && $frequency === 'trusted')) {
+            $this->flash('error', 'totp_frequency_invalid');
+            $this->redirect('/settings');
         }
 
-        $frequency = trim((string)($_POST['frequency'] ?? ''));
-        if (!in_array($frequency, ['always', 'trusted'], true)) {
-            $this->json(['error' => 'Invalid frequency'], 400);
+        $changed = AuthChallenge::withAccount($user, static function () use ($userId, $frequency): bool {
+            if (!Database::query('SELECT id FROM totp_secrets WHERE user_id = ? AND confirmed_at IS NOT NULL', [$userId])->fetch()) {
+                return false;
+            }
+
+            Setting::set('twofa_frequency_' . $userId, $frequency);
+            if ($frequency === 'always') {
+                TrustedBrowser::revokeForAccount($userId);
+            }
+            return true;
+        });
+        if ($changed !== true) {
+            $this->flash('error', 'totp_frequency_invalid');
+            $this->redirect('/settings');
         }
+        if ($frequency === 'always') {
+            TrustedBrowser::clearCookie();
+        }
+        $this->flash('success', 'totp_frequency_saved');
+        $this->redirect('/settings');
+    }
 
-        Setting::set('twofa_frequency_' . $userId, $frequency);
+    public function revokeTrustedBrowsers() {
+        Auth::requireAuth();
+        Auth::csrfValidate();
 
-        $this->json(['success' => true, 'frequency' => $frequency]);
+        $user = Auth::user();
+        if (!$user) {
+            $this->redirect('/login');
+        }
+        AuthChallenge::withAccount($user, static function (object $locked): void {
+            TrustedBrowser::revokeForAccount((int)$locked->id);
+        });
+        TrustedBrowser::clearCookie();
+        $this->flash('success', 'totp_trust_revoked');
+        $this->redirect('/settings');
     }
 }

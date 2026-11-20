@@ -37,9 +37,9 @@ async function sendFriendRequestByValue(userNumber) {
     });
 
     if (result.success) {
-        showToast('Friend request sent', 'success');
+        showToast(uiText('friend_request_sent'), 'success');
     } else {
-        showToast(result.error || 'Unable to send friend request', 'error');
+        showToast(uiActionError(result.error, 'unable_to_send_friend_request'), 'error');
     }
 }
 
@@ -52,7 +52,7 @@ async function acceptFriendRequest(requesterId) {
         navigateWithFallback(`/c/${formatNumber(result.chat_number)}`, { source: 'accept-friend', updateHistory: true });
         return;
     }
-    showToast(result.error || 'Unable to accept request', 'error');
+    showToast(uiActionError(result.error, 'unable_to_accept_request'), 'error');
 }
 
 async function cancelFriendRequest(targetUserId) {
@@ -62,12 +62,12 @@ async function cancelFriendRequest(targetUserId) {
     });
 
     if (result.success) {
-        showToast('Friend request cancelled', 'success');
+        showToast(uiText('friend_request_cancelled'), 'success');
         await reloadCurrentView({ source: 'cancel-friend-request' });
         return;
     }
 
-    showToast(result.error || 'Unable to cancel request', 'error');
+    showToast(uiActionError(result.error, 'unable_to_cancel_request'), 'error');
 }
 
 function openInviteReferralModal() {
@@ -100,7 +100,7 @@ async function sendInviteReferralFriendRequest() {
 
     submitButton.disabled = true;
     const previousLabel = submitButton.textContent;
-    submitButton.textContent = 'Sending...';
+    submitButton.textContent = uiText('sending');
 
     try {
         const result = await postForm('/friends/request', {
@@ -111,7 +111,7 @@ async function sendInviteReferralFriendRequest() {
         if (result.success) {
             showToast(username ? `Friend request sent to ${username}` : 'Friend request sent', 'success');
         } else {
-            showToast(result.error || 'Unable to send friend request', 'error');
+            showToast(uiActionError(result.error, 'unable_to_send_friend_request'), 'error');
         }
 
         closeInviteReferralModal();
@@ -160,18 +160,18 @@ async function unfriendUser(userId) {
     });
 
     if (result.success) {
-        showToast('Friend removed', 'success');
+        showToast(uiText('friend_removed'), 'success');
         await reloadCurrentView({ source: 'unfriend-user' });
         return;
     }
 
-    showToast(result.error || 'Unable to unfriend user', 'error');
+    showToast(uiActionError(result.error, 'unable_to_unfriend_user'), 'error');
 }
 
 function openUnfriendModal(userId) {
     const safeUserId = Number(userId || 0);
     if (!Number.isFinite(safeUserId) || safeUserId <= 0) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -224,7 +224,7 @@ function bindUnfriendModal() {
 
         confirm.disabled = true;
         const previousLabel = confirm.textContent;
-        confirm.textContent = 'Removing...';
+        confirm.textContent = uiText('removing');
 
         try {
             await unfriendUser(pendingUnfriendUserId);
@@ -249,7 +249,7 @@ async function toggleFavoriteUser(userId, favorite) {
         return;
     }
 
-    showToast(result.error || 'Unable to update favorite', 'error');
+    showToast(uiActionError(result.error, 'unable_to_update_favorite'), 'error');
 }
 
 let openProfilePostReactionPickerId = 0;
@@ -332,7 +332,7 @@ async function reactToProfilePost(postId, reactionCode) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to react to post', 'error');
+        showToast(uiActionError(result.error, 'unable_to_react_to_post'), 'error');
         return;
     }
 
@@ -344,11 +344,11 @@ async function createProfilePost(content) {
     const length = Array.from(text).length;
 
     if (!text) {
-        showToast('Post content is required', 'error');
+        showToast(uiText('post_content_is_required'), 'error');
         return false;
     }
     if (length > 500) {
-        showToast('Posts can be at most 500 characters', 'error');
+        showToast(uiText('posts_can_be_at_most_500_characters'), 'error');
         return false;
     }
 
@@ -358,14 +358,14 @@ async function createProfilePost(content) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to create post', 'error');
+        showToast(uiActionError(result.error, 'unable_to_create_post'), 'error');
         return false;
     }
 
     if (typeof queuePendingPageToast === 'function') {
         queuePendingPageToast('Post published', 'success');
     } else {
-        showToast('Post published', 'success');
+        showToast(uiText('post_published'), 'success');
     }
     await reloadCurrentView({ source: 'create-profile-post' });
     return true;
@@ -374,7 +374,7 @@ async function createProfilePost(content) {
 async function deleteProfilePost(postId) {
     const safePostId = Number(postId || 0);
     if (!Number.isFinite(safePostId) || safePostId <= 0) {
-        showToast('Invalid post', 'error');
+        showToast(uiText('invalid_post'), 'error');
         return false;
     }
 
@@ -384,14 +384,14 @@ async function deleteProfilePost(postId) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to delete post', 'error');
+        showToast(uiActionError(result.error, 'unable_to_delete_post'), 'error');
         return false;
     }
 
     if (typeof queuePendingPageToast === 'function') {
         queuePendingPageToast('Post deleted', 'success');
     } else {
-        showToast('Post deleted', 'success');
+        showToast(uiText('post_deleted'), 'success');
     }
 
     await reloadCurrentView({ source: 'delete-profile-post' });
@@ -401,7 +401,7 @@ async function deleteProfilePost(postId) {
 function openProfilePostDeleteModal(postId, username = '') {
     const safePostId = Number(postId || 0);
     if (!Number.isFinite(safePostId) || safePostId <= 0) {
-        showToast('Invalid post', 'error');
+        showToast(uiText('invalid_post'), 'error');
         return;
     }
 
@@ -409,7 +409,7 @@ function openProfilePostDeleteModal(postId, username = '') {
     const description = document.getElementById('profile-post-delete-description');
     if (!modal) {
         deleteProfilePost(safePostId).catch(() => {
-            showToast('Unable to delete post', 'error');
+            showToast(uiText('unable_to_delete_post'), 'error');
         });
         return;
     }
@@ -467,7 +467,7 @@ function bindProfilePostDeleteModal() {
 
         submit.disabled = true;
         const previousLabel = submit.textContent;
-        submit.textContent = 'Deleting...';
+        submit.textContent = uiText('deleting');
 
         try {
             const success = await deleteProfilePost(pendingProfilePostDeleteId);
@@ -502,7 +502,7 @@ function closeNewPostModal() {
     const submit = document.getElementById('new-post-modal-submit');
     if (submit) {
         submit.disabled = false;
-        submit.textContent = 'Publish';
+        submit.textContent = uiText('publish');
     }
 }
 
@@ -548,7 +548,7 @@ function bindNewPostModal() {
 
         submit.disabled = true;
         const previousLabel = submit.textContent;
-        submit.textContent = 'Publishing...';
+        submit.textContent = uiText('publishing');
 
         try {
             const success = await createProfilePost(input.value);
@@ -596,7 +596,7 @@ function bindProfilePosts() {
             const postId = Number(option.getAttribute('data-post-id') || 0);
             const reactionCode = String(option.getAttribute('data-reaction-code') || '');
             reactToProfilePost(postId, reactionCode).catch(() => {
-                showToast('Unable to react to post', 'error');
+                showToast(uiText('unable_to_react_to_post'), 'error');
             });
             return;
         }
@@ -608,7 +608,7 @@ function bindProfilePosts() {
             const postId = Number(badge.getAttribute('data-post-id') || 0);
             const reactionCode = String(badge.getAttribute('data-reaction-code') || '');
             reactToProfilePost(postId, reactionCode).catch(() => {
-                showToast('Unable to update reaction', 'error');
+                showToast(uiText('unable_to_update_reaction'), 'error');
             });
             return;
         }
@@ -638,7 +638,7 @@ async function searchUsers(event) {
     if (!isValidSearch) {
         input.setCustomValidity('Use only letters, numbers, and dashes.');
         input.reportValidity();
-        showToast('Use only letters, numbers, and dashes.', 'error');
+        showToast(uiText('use_only_letters_numbers_and_dashes'), 'error');
         return;
     }
     input.setCustomValidity('');
@@ -880,7 +880,7 @@ async function performAdminUserRoleAction(userId) {
     const safeUserId = Number(userId || 0);
     const currentState = getAdminUserState(safeUserId);
     if (!currentState) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -893,7 +893,7 @@ async function performAdminUserRoleAction(userId) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to change user group', 'error');
+        showToast(uiActionError(result.error, 'unable_to_change_user_group'), 'error');
         return;
     }
 
@@ -907,7 +907,7 @@ async function performAdminUserBanAction(userId) {
     const safeUserId = Number(userId || 0);
     const currentState = getAdminUserState(safeUserId);
     if (!currentState) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -934,7 +934,7 @@ async function performAdminUserBanAction(userId) {
 async function performDeleteAdminUser(userId, retainMessages = false) {
     const safeUserId = Number(userId || 0);
     if (!Number.isFinite(safeUserId) || safeUserId <= 0) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -945,7 +945,7 @@ async function performDeleteAdminUser(userId, retainMessages = false) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to delete user', 'error');
+        showToast(uiActionError(result.error, 'unable_to_delete_user'), 'error');
         return;
     }
 
@@ -962,7 +962,7 @@ function confirmAdminUserRoleAction(userId) {
     const safeUserId = Number(userId || 0);
     const state = getAdminUserState(safeUserId);
     if (!state) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -988,7 +988,7 @@ function confirmAdminUserBanAction(userId) {
     const safeUserId = Number(userId || 0);
     const state = getAdminUserState(safeUserId);
     if (!state) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -1014,7 +1014,7 @@ function deleteAdminUser(userId) {
     const safeUserId = Number(userId || 0);
     const state = getAdminUserState(safeUserId);
     if (!state) {
-        showToast('Invalid user', 'error');
+        showToast(uiText('invalid_user'), 'error');
         return;
     }
 
@@ -1155,7 +1155,7 @@ async function reportTarget(targetType, targetId) {
     const safeTargetType = String(targetType || '').trim().toLowerCase();
     const safeTargetId = Number(targetId || 0);
     if (!safeTargetType || !Number.isFinite(safeTargetId) || safeTargetId <= 0) {
-        showToast('Unable to create report for this item', 'error');
+        showToast(uiText('unable_to_create_report_for_this_item'), 'error');
         return;
     }
 
@@ -1164,7 +1164,7 @@ async function reportTarget(targetType, targetId) {
         return;
     }
 
-    showToast('Report form is unavailable on this page', 'error');
+    showToast(uiText('report_form_is_unavailable_on_this_page'), 'error');
 }
 
 function bindReportModal() {
@@ -1210,7 +1210,7 @@ function bindReportModal() {
         }
 
         submit.disabled = false;
-        submit.textContent = 'Submit report';
+        submit.textContent = uiText('submit_report');
     };
 
     const closeModal = () => {
@@ -1245,18 +1245,18 @@ function bindReportModal() {
 
         const reason = String(input.value || '').trim().slice(0, REPORT_REASON_MAX_LENGTH);
         if (!reason) {
-            showToast('Please enter a reason', 'error');
+            showToast(uiText('please_enter_a_reason'), 'error');
             input.focus();
             return;
         }
 
         if (!pendingReportTargetType || !Number.isFinite(pendingReportTargetId) || pendingReportTargetId <= 0) {
-            showToast('Unable to submit report right now', 'error');
+            showToast(uiText('unable_to_submit_report_right_now'), 'error');
             return;
         }
 
         submit.disabled = true;
-        submit.textContent = 'Submitting...';
+        submit.textContent = uiText('submitting');
 
         try {
             const result = await postForm('/api/report', {
@@ -1267,15 +1267,15 @@ function bindReportModal() {
             });
 
             if (result.success) {
-                showToast('Report submitted', 'success');
+                showToast(uiText('report_submitted'), 'success');
                 closeModal();
                 return;
             }
 
-            showToast(result.error || 'Failed to submit report', 'error');
+            showToast(uiActionError(result.error, 'failed_to_submit_report'), 'error');
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Submit report';
+            submit.textContent = uiText('submit_report');
         }
     });
 
@@ -1283,7 +1283,7 @@ function bindReportModal() {
         pendingReportTargetType = String(targetType || '').trim().toLowerCase();
         pendingReportTargetId = Number(targetId || 0);
         if (!pendingReportTargetType || !Number.isFinite(pendingReportTargetId) || pendingReportTargetId <= 0) {
-            showToast('Unable to create report for this item', 'error');
+            showToast(uiText('unable_to_create_report_for_this_item'), 'error');
             return;
         }
 
@@ -1326,7 +1326,7 @@ async function savePresenceStatus(status, options = {}) {
 
     if (!result.success) {
         if (!options.silent) {
-            showToast(result.error || 'Unable to update status', 'error', { excludeFromHistory: true });
+            showToast(uiActionError(result.error, 'unable_to_update_status'), 'error', { excludeFromHistory: true });
         }
         return;
     }
@@ -1469,10 +1469,6 @@ function bindChatHeaderMenu() {
 }
 
 
-function logout() {
-    navigateWithFallback('/logout', { source: 'logout', updateHistory: true });
-}
-
 async function copyTextToClipboard(text) {
     if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
@@ -1523,9 +1519,9 @@ function bindInviteCopyButtons() {
                         button._copyTimer = null;
                     }, 1200);
                 }
-                showToast('Invite code copied', 'success');
+                showToast(uiText('invite_code_copied'), 'success');
             } catch {
-                showToast('Unable to copy invite code', 'error');
+                showToast(uiText('unable_to_copy_invite_code'), 'error');
             }
         });
     });
@@ -1562,7 +1558,7 @@ async function searchPostsPage(query, page) {
         const res = await fetch(`/api/posts/search?q=${encodeURIComponent(query)}&page=${page}`);
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            showToast(data.error || 'Search failed', 'error');
+            showToast(uiActionError(data.error, 'search_failed'), 'error');
             results.innerHTML = '';
             return;
         }
@@ -1642,7 +1638,7 @@ async function searchPostsPage(query, page) {
             });
         });
     } catch {
-        showToast('Search failed', 'error');
+        showToast(uiText('search_failed'), 'error');
         results.innerHTML = '';
     }
 }
@@ -1655,7 +1651,7 @@ async function searchPosts(event) {
 
     const query = input.value.trim();
     if (query.length < 2) {
-        showToast('Please enter at least 2 characters', 'error');
+        showToast(uiText('please_enter_at_least_2_characters'), 'error');
         return;
     }
 
@@ -1676,7 +1672,7 @@ async function searchMessagesPage(query, page) {
         const res = await fetch(`/api/messages/search?q=${encodeURIComponent(query)}&page=${page}`);
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            showToast(data.error || 'Search failed', 'error');
+            showToast(uiActionError(data.error, 'search_failed'), 'error');
             results.innerHTML = '';
             return;
         }
@@ -1748,7 +1744,7 @@ async function searchMessagesPage(query, page) {
             });
         });
     } catch {
-        showToast('Search failed', 'error');
+        showToast(uiText('search_failed'), 'error');
         results.innerHTML = '';
     }
 }
@@ -1761,7 +1757,7 @@ async function searchMessages(event) {
 
     const query = input.value.trim();
     if (query.length < 2) {
-        showToast('Please enter at least 2 characters', 'error');
+        showToast(uiText('please_enter_at_least_2_characters'), 'error');
         return;
     }
 

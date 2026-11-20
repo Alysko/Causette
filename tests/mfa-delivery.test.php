@@ -14,6 +14,18 @@ final class LoginRedirect extends RuntimeException
 
 final class FixtureLoginController extends AuthController
 {
+    public bool $challengeCancelled = false;
+
+    protected function prepareMfaChallenge(object $account, string $ip, ?string $code, string $provider): ?string
+    {
+        return 'fixture-challenge';
+    }
+
+    protected function cancelMfaChallenge(object $account, string $id): void
+    {
+        $this->challengeCancelled = $id === 'fixture-challenge';
+    }
+
     protected function redirect($url): never
     {
         throw new LoginRedirect($url);
@@ -94,17 +106,12 @@ final class FixtureFactor implements TwoFAProviderInterface
         return 'Fixture factor';
     }
 
-    public function getPriority(): int
-    {
-        return 10;
-    }
-
     public function isAvailable(int $userId): bool
     {
         return $userId === 2;
     }
 
-    public function sendChallenge(int $userId, string $ip): bool
+    public function sendChallenge(int $userId, ?string $deliveryCode): bool
     {
         $this->attempts++;
         return match ($this->outcome) {
@@ -114,20 +121,16 @@ final class FixtureFactor implements TwoFAProviderInterface
         };
     }
 
-    public function verifyCode(int $userId, string $code, string $ip): bool
+    public function verifyCode(int $userId, string $code, array $challenge): bool
     {
         throw new LogicException('Login must not verify a challenge');
     }
 
-    public function cleanup(int $userId): void
-    {
-        throw new LogicException('Login must not consume a challenge');
-    }
 }
 
 function checkMfaDelivery(DeliveryOutcome $outcome): void
 {
-    $pendingKeys = ['2fa_pending_user', '2fa_remember_me', '2fa_provider'];
+    $pendingKeys = ['2fa_pending_user', '2fa_remember_me', '2fa_provider', '2fa_password_checked_at', '2fa_password_binding', '2fa_challenge'];
     $token = 'fixture-csrf';
     $password = 'fixture-password';
     $_SESSION = [
@@ -135,6 +138,9 @@ function checkMfaDelivery(DeliveryOutcome $outcome): void
         '2fa_pending_user' => 9,
         '2fa_remember_me' => false,
         '2fa_provider' => 'previous-fixture',
+        '2fa_password_checked_at' => 1,
+        '2fa_password_binding' => 'fixture-stale-binding',
+        '2fa_challenge' => 'fixture-stale-id',
     ];
     $_POST = ['identifier' => 'fixture-user', 'password' => $password, 'csrf_token' => $token, 'remember_me' => '1'];
     $_SERVER['REMOTE_ADDR'] = '192.0.2.3';
@@ -149,8 +155,9 @@ function checkMfaDelivery(DeliveryOutcome $outcome): void
     $provider = new FixtureFactor($outcome);
     (new ReflectionProperty(TwoFAManager::class, 'providers'))->setValue(null, [$provider]);
 
+    $controller = new FixtureLoginController();
     try {
-        (new FixtureLoginController())->login();
+        $controller->login();
         throw new LogicException('Login returned without a redirect');
     } catch (LoginRedirect $redirect) {
         $destination = $redirect->getMessage();
@@ -159,26 +166,30 @@ function checkMfaDelivery(DeliveryOutcome $outcome): void
     if ($provider->attempts !== 1) {
         throw new LogicException('Login must attempt the required challenge once');
     }
-    $authenticatedKeys = ['user_id', 'auth_session_token', 'last_activity_touch_at'];
+    $authenticatedKeys = ['user_id', 'auth_session_token', 'last_activity_touch_at', 'password_authentication'];
     if (Database::$crossedFixtureBoundary || array_intersect($authenticatedKeys, array_keys($_SESSION)) || session_status() === PHP_SESSION_ACTIVE || session_id() !== '') {
         throw new LogicException('Login must remain unauthenticated while the required factor is incomplete');
     }
 
     $pending = array_intersect_key($_SESSION, array_flip($pendingKeys));
     if ($outcome === DeliveryOutcome::Accepted) {
+        $passwordCheckedAt = $pending['2fa_password_checked_at'] ?? null;
+        unset($pending['2fa_password_checked_at']);
         ksort($pending);
         if ($destination !== '/2fa' || $pending !== [
+            '2fa_challenge' => 'fixture-challenge',
+            '2fa_password_binding' => Auth::passwordBinding(Database::$account),
             '2fa_pending_user' => 2,
             '2fa_provider' => 'fixture-factor',
             '2fa_remember_me' => true,
-        ] || isset($_SESSION['_flash']['error'])) {
+        ] || $controller->challengeCancelled || !is_int($passwordCheckedAt) || abs(time() - $passwordCheckedAt) > 5 || isset($_SESSION['_flash']['error'])) {
             throw new LogicException('Successful delivery must replace the stale state and proceed to verification');
         }
         return;
     }
 
     $error = $_SESSION['_flash']['error'] ?? '';
-    if ($destination !== '/login' || $pending !== [] || $error === '' || str_contains($error, FixtureFactor::PRIVATE_DETAIL)) {
+    if ($destination !== '/login' || $pending !== [] || !$controller->challengeCancelled || $error === '' || str_contains($error, FixtureFactor::PRIVATE_DETAIL)) {
         throw new LogicException('Delivery failure must clear pending state and return a controlled login error');
     }
 }

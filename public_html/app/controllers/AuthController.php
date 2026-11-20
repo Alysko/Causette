@@ -4,7 +4,14 @@ require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../modules/2fa/TwoFAManager.php';
 require_once __DIR__ . '/../modules/captcha/CaptchaManager.php';
+require_once __DIR__ . '/../core/AccountPassword.php';
+require_once __DIR__ . '/../core/SecretSettings.php';
 
+use Causette\Security\AccountPassword;
+use Causette\Security\AuthBudget;
+use Causette\Security\AuthChallenge;
+use Causette\Security\SecretSettings;
+use Causette\Security\TrustedBrowser;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 
@@ -27,7 +34,7 @@ class AuthController extends Controller {
         }
 
         Auth::csrfValidate();
-        unset($_SESSION['2fa_pending_user'], $_SESSION['2fa_remember_me'], $_SESSION['2fa_provider']);
+        $this->clearPendingTwoFactor();
         $this->verifyCaptchaOrFail('/login');
         $identifier = trim($_POST['identifier'] ?? '');
         $password = $_POST['password'] ?? '';
@@ -52,6 +59,8 @@ class AuthController extends Controller {
             $this->flash('error', 'invalid');
             $this->redirect('/login');
         }
+        $passwordCheckedAt = time();
+        $passwordBinding = Auth::passwordBinding($user);
 
         $this->clearAuthAttempts($ip, self::AUTH_ATTEMPT_LOGIN_FAILED);
 
@@ -63,8 +72,7 @@ class AuthController extends Controller {
         if (empty($user->email_verified_at)) {
             $emailVerificationRequired = (string)(Setting::get('email_verification_required') ?? '1') === '1';
             if ($emailVerificationRequired) {
-                $this->startEmailVerificationFlow((int)$user->id);
-                $this->flash('success', 'sent');
+                $this->sendVerificationCode($user, 'sent');
                 $this->redirect('/verify-email');
             }
             // Verification not required — auto-verify and continue login
@@ -72,21 +80,31 @@ class AuthController extends Controller {
             $user->email_verified_at = date('Y-m-d H:i:s');
         }
 
-        $shouldBypassBootstrap2FA = $this->shouldBypassBootstrap2FA((int)$user->id);
-
         $rememberMe = !empty($_POST['remember_me']);
 
         $twofaProvider = TwoFAManager::getAvailableProvider((int)$user->id);
-        if (!$shouldBypassBootstrap2FA && $twofaProvider && Auth::needs2FA($user->id, $ip)) {
-            try {
-                $providerName = $twofaProvider->sendChallenge((int)$user->id, $ip)
-                    ? $twofaProvider->getName()
-                    : '';
-            } catch (\Throwable) {
-                $providerName = '';
+        $cookie = $_COOKIE[TrustedBrowser::cookieName()] ?? null;
+        $trustedBrowser = $twofaProvider?->getName() === 'totp' && is_string($cookie) && is_https_request()
+            ? $cookie : null;
+        if ($twofaProvider && Auth::needs2FA((int)$user->id, $trustedBrowser)) {
+            $providerName = $twofaProvider->getName();
+            $deliveryCode = $providerName === 'email' ? AuthChallenge::generateCode() : null;
+            $context = $providerName === 'email' ? 'email:' . $user->email : $providerName;
+            $challenge = $this->prepareMfaChallenge($user, $ip, $deliveryCode, $context);
+            if ($challenge === null) {
+                $this->flash('error', 'too_many_attempts');
+                $this->redirect('/login');
+                return;
             }
 
-            if ($providerName === '') {
+            try {
+                $delivered = $twofaProvider->sendChallenge((int)$user->id, $deliveryCode);
+            } catch (\Throwable) {
+                $delivered = false;
+            }
+
+            if (!$delivered) {
+                $this->cancelMfaChallenge($user, $challenge);
                 $this->flash('error', 'mfa_unavailable');
                 $this->redirect('/login');
                 return;
@@ -95,82 +113,79 @@ class AuthController extends Controller {
             $_SESSION['2fa_pending_user'] = $user->id;
             $_SESSION['2fa_remember_me'] = $rememberMe;
             $_SESSION['2fa_provider'] = $providerName;
+            $_SESSION['2fa_password_checked_at'] = $passwordCheckedAt;
+            $_SESSION['2fa_password_binding'] = $passwordBinding;
+            $_SESSION['2fa_challenge'] = $challenge;
             $this->redirect('/2fa');
             return;
         }
 
-        Auth::markTrustedIP($user->id, $ip);
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$user->id;
-        $_SESSION['auth_session_token'] = Auth::registerLoginSession((int)$user->id, $ip, $userAgent);
+        $this->openBoundSession((int)$user->id, $passwordBinding, $ip, $userAgent, $trustedBrowser);
+        Auth::recordPasswordAuthentication($passwordCheckedAt);
         if ($rememberMe) {
             Auth::setRememberCookie((int)$user->id, $_SESSION['auth_session_token']);
+        } else {
+            Auth::clearRememberCookie();
         }
         User::markLoggedIn((int)$user->id);
         Attachment::cleanupPendingForUser($user);
         $this->createSafariDesktopLoginNotice((int)$user->id, $userAgent);
-        $this->checkForAvailableUpdateOnAdminLogin((int)$user->id);
         $_SESSION['last_activity_touch_at'] = time();
         $this->redirect('/');
     }
 
     public function show2FA() {
-        if (!isset($_SESSION['2fa_pending_user'])) $this->redirect('/login');
-        $providerName = $_SESSION['2fa_provider'] ?? 'email';
-        $provider = TwoFAManager::getProviderByName($providerName);
+        $user = $this->requirePendingSecondFactor();
+        $provider = TwoFAManager::getProviderByName($_SESSION['2fa_provider']);
         $this->view('auth/twofa', [
             'csrf' => $this->csrfToken(),
-            'providerLabel' => $provider ? $provider->getLabel() : 'Email',
+            'providerLabel' => $provider?->getLabel() ?? '',
+            'mayTrustBrowser' => $provider?->getName() === 'totp' && TrustedBrowser::enabled($user),
         ]);
     }
 
     public function verify2FA() {
         Auth::csrfValidate();
-        if (!isset($_SESSION['2fa_pending_user'])) $this->redirect('/login');
-
-        $code = trim($_POST['code'] ?? '');
-        $userId = $_SESSION['2fa_pending_user'];
+        $pendingUser = $this->requirePendingSecondFactor();
+        $userId = (int)$pendingUser->id;
+        $code = is_string($_POST['code'] ?? null) ? trim($_POST['code']) : '';
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-
-        $pendingUser = User::find((int)$userId);
-        if (!$pendingUser || User::isBanned($pendingUser)) {
-            unset($_SESSION['2fa_pending_user']);
-            $this->flash('error', 'banned');
+        $providerName = $_SESSION['2fa_provider'];
+        $verified = AuthChallenge::attempt($pendingUser, AuthChallenge::LOGIN, $_SESSION['2fa_challenge'], $ip,
+            static function (object $account, array $challenge) use ($providerName, $code): bool {
+                $provider = TwoFAManager::getAvailableProvider((int)$account->id);
+                $context = $providerName === 'email' ? 'email:' . $account->email : $providerName;
+                return $provider !== null && $provider->getName() === $providerName && $challenge['context'] === $context
+                    && $provider->verifyCode((int)$account->id, $code, $challenge);
+            });
+        if ($verified === null) {
+            $this->clearPendingTwoFactor();
+            $this->flash('error', 'mfa_expired');
             $this->redirect('/login');
         }
-
-        $providerName = $_SESSION['2fa_provider'] ?? '';
-
-        if ($providerName === 'totp') {
-            if (!preg_match('/^[a-zA-Z0-9]{6,8}$/', $code)) {
-                $this->flash('error', 'invalid');
-                $this->redirect('/2fa');
-            }
-        } else {
-            if (!preg_match('/^\d{6}$/', $code)) {
-                $this->flash('error', 'invalid');
-                $this->redirect('/2fa');
-            }
-        }
-        $provider = TwoFAManager::getProviderByName($providerName);
-
-        if (!$provider || !$provider->verifyCode((int)$userId, $code, $ip)) {
+        if (!$verified) {
             $this->flash('error', 'invalid');
             $this->redirect('/2fa');
         }
 
-        $provider->cleanup((int)$userId);
-        Auth::markTrustedIP($userId, $ip);
-
         $rememberMe = !empty($_SESSION['2fa_remember_me']);
-        unset($_SESSION['2fa_pending_user'], $_SESSION['2fa_remember_me'], $_SESSION['2fa_provider']);
+        $trustBrowser = $providerName === 'totp' && ($_POST['trust_browser'] ?? null) === '1';
+        $passwordBinding = $_SESSION['2fa_password_binding'];
+        $passwordCheckedAt = $_SESSION['2fa_password_checked_at'] ?? null;
+        $this->clearPendingTwoFactor();
         $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$userId;
-        $_SESSION['auth_session_token'] = Auth::registerLoginSession((int)$userId, $ip, $userAgent);
+        $this->openBoundSession((int)$userId, $passwordBinding, $ip, $userAgent);
+        if (is_int($passwordCheckedAt)) {
+            Auth::recordPasswordAuthentication($passwordCheckedAt);
+        }
         if ($rememberMe) {
             Auth::setRememberCookie((int)$userId, $_SESSION['auth_session_token']);
+        } else {
+            Auth::clearRememberCookie();
+        }
+        if ($trustBrowser) {
+            TrustedBrowser::remember($userId, $_SESSION['auth_session_token']);
         }
         User::markLoggedIn((int)$userId);
         $authedUser = User::find((int)$userId);
@@ -178,7 +193,6 @@ class AuthController extends Controller {
             Attachment::cleanupPendingForUser($authedUser);
         }
         $this->createSafariDesktopLoginNotice((int)$userId, $userAgent);
-        $this->checkForAvailableUpdateOnAdminLogin((int)$userId);
         $_SESSION['last_activity_touch_at'] = time();
         $this->redirect('/');
     }
@@ -272,15 +286,17 @@ class AuthController extends Controller {
             $this->sendNewUserNotification($username, $email, $ip, $referredBy);
         }
 
+        $newAccount = (object) ['id' => $newUserId, 'email' => $email, 'password' => $password];
         if ($emailVerificationRequired) {
-            $this->startEmailVerificationFlow($newUserId);
-            $this->flash('success', 'sent');
+            $this->sendVerificationCode($newAccount, 'sent');
             $this->redirect('/verify-email');
         }
+        if (TwoFAManager::getAvailableProvider($newUserId) !== null) {
+            $this->flash('success', 'registered');
+            $this->redirect('/login');
+        }
 
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = $newUserId;
-        $_SESSION['auth_session_token'] = Auth::registerLoginSession($newUserId, $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
+        $this->openBoundSession($newUserId, Auth::passwordBinding($newAccount), $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
         $newUser = User::find($newUserId);
         if ($newUser) {
             User::markLoggedIn($newUserId);
@@ -294,38 +310,13 @@ class AuthController extends Controller {
     public function showVerifyEmail() {
         $loggedIn = Auth::user();
         if ($loggedIn && empty($loggedIn->email_verified_at)) {
-            $_SESSION['email_verification_user'] = $loggedIn->id;
-            unset($_SESSION['user_id']);
+            Auth::beginEmailVerification($loggedIn);
         }
 
-        $pendingUserId = $_SESSION['email_verification_user'] ?? null;
-        if (!$pendingUserId) {
-            $this->redirect('/login');
-        }
-
-        $pendingUser = User::find((int)$pendingUserId);
-        if (!$pendingUser) {
-            unset($_SESSION['email_verification_user']);
-            $this->redirect('/login');
-        }
-
-        if (User::isBanned($pendingUser)) {
-            unset($_SESSION['email_verification_user']);
-            $this->flash('error', 'banned');
-            $this->redirect('/login');
-        }
-
+        $pendingUser = $this->requirePendingEmailUser();
         if (!empty($pendingUser->email_verified_at)) {
-            unset($_SESSION['email_verification_user']);
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            session_regenerate_id(true);
-            $_SESSION['user_id'] = (int)$pendingUser->id;
-            $_SESSION['auth_session_token'] = Auth::registerLoginSession((int)$pendingUser->id, $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0', $userAgent);
-            User::markLoggedIn((int)$pendingUser->id);
-            Attachment::cleanupPendingForUser($pendingUser);
-            $this->createSafariDesktopLoginNotice((int)$pendingUser->id, $userAgent);
-            $_SESSION['last_activity_touch_at'] = time();
-            $this->redirect('/');
+            Auth::clearEmailVerification();
+            $this->redirect('/login');
         }
 
         $this->view('auth/verify_email', [
@@ -336,101 +327,50 @@ class AuthController extends Controller {
 
     public function verifyEmail() {
         Auth::csrfValidate();
+        $pendingUser = $this->requirePendingEmailUser();
+        $pendingUserId = (int)$pendingUser->id;
+        $id = $_SESSION['email_verification_challenge'] ?? '';
+        $code = is_string($_POST['code'] ?? null) ? trim($_POST['code']) : '';
+        $verified = AuthChallenge::attempt($pendingUser, AuthChallenge::VERIFY_EMAIL, $id, $_SERVER['REMOTE_ADDR'] ?? '',
+            static function (object $account, array $challenge) use ($code): bool {
+                if (!empty($account->email_verified_at) || $challenge['context'] !== $account->email
+                    || !AuthChallenge::matchesCode($challenge, $code)
+                ) {
+                    return false;
+                }
 
-        $pendingUserId = $_SESSION['email_verification_user'] ?? null;
-        if (!$pendingUserId) {
-            $this->redirect('/login');
-        }
-
-        $code = trim($_POST['code'] ?? '');
-        if (!preg_match('/^\d{6}$/', $code)) {
-            $this->flash('error', 'invalid');
+                Database::query('UPDATE users SET email_verified_at = NOW() WHERE id = ?', [$account->id]);
+                return true;
+            });
+        if ($verified !== true) {
+            $this->flash('error', $verified === null ? 'challenge_expired' : 'invalid');
             $this->redirect('/verify-email');
         }
 
-        $row = Database::query(
-            "SELECT id FROM email_verification_codes WHERE user_id = ? AND code = ? AND expires_at > NOW()",
-            [$pendingUserId, $code]
-        )->fetch();
-
-        if (!$row) {
-            $this->flash('error', 'invalid');
-            $this->redirect('/verify-email');
-        }
-
-        $pendingUser = User::find((int)$pendingUserId);
-        if (!$pendingUser || User::isBanned($pendingUser)) {
-            unset($_SESSION['email_verification_user']);
-            $this->flash('error', 'banned');
-            $this->redirect('/login');
-        }
-
-        Database::query("UPDATE users SET email_verified_at = NOW() WHERE id = ?", [$pendingUserId]);
-        Database::query("DELETE FROM email_verification_codes WHERE user_id = ?", [$pendingUserId]);
-
-        unset($_SESSION['email_verification_user']);
-        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$pendingUserId;
-        $_SESSION['auth_session_token'] = Auth::registerLoginSession((int)$pendingUserId, $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0', $userAgent);
-        User::markLoggedIn((int)$pendingUserId);
-        $authedUser = User::find((int)$pendingUserId);
-        if ($authedUser) {
-            Attachment::cleanupPendingForUser($authedUser);
-        }
-        $this->createSafariDesktopLoginNotice((int)$pendingUserId, $userAgent);
-        $this->checkForAvailableUpdateOnAdminLogin((int)$pendingUserId);
-        $_SESSION['last_activity_touch_at'] = time();
-        $this->autoJoinNewUserToGroup((int)$pendingUserId, (string)($pendingUser->username ?? ''));
-        $this->redirect('/');
+        Auth::clearEmailVerification();
+        $this->autoJoinNewUserToGroup($pendingUserId, (string)($pendingUser->username ?? ''));
+        $this->flash('success', 'email_verified');
+        $this->redirect('/login');
     }
 
     public function resendVerifyEmail() {
         Auth::csrfValidate();
-
-        $pendingUserId = $_SESSION['email_verification_user'] ?? null;
-        if (!$pendingUserId) {
-            $this->redirect('/login');
-        }
-
-        $pendingUser = User::find((int)$pendingUserId);
-        if (!$pendingUser) {
-            unset($_SESSION['email_verification_user']);
-            $this->redirect('/login');
-        }
-
-        if (User::isBanned($pendingUser)) {
-            unset($_SESSION['email_verification_user']);
-            $this->flash('error', 'banned');
-            $this->redirect('/login');
-        }
-
+        $pendingUser = $this->requirePendingEmailUser();
         if (!empty($pendingUser->email_verified_at)) {
-            unset($_SESSION['email_verification_user']);
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            session_regenerate_id(true);
-            $_SESSION['user_id'] = (int)$pendingUser->id;
-            $_SESSION['auth_session_token'] = Auth::registerLoginSession((int)$pendingUser->id, $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0', $userAgent);
-            User::markLoggedIn((int)$pendingUser->id);
-            Attachment::cleanupPendingForUser($pendingUser);
-            $this->createSafariDesktopLoginNotice((int)$pendingUser->id, $userAgent);
-            $this->checkForAvailableUpdateOnAdminLogin((int)$pendingUser->id);
-            $_SESSION['last_activity_touch_at'] = time();
-            $this->redirect('/');
+            Auth::clearEmailVerification();
+            $this->redirect('/login');
         }
 
-        $this->startEmailVerificationFlow((int)$pendingUserId);
-        $this->flash('success', 'resent');
+        $this->sendVerificationCode($pendingUser, 'resent');
         $this->redirect('/verify-email');
     }
 
     public function logout() {
+        Auth::csrfValidate(403);
         $userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
-        if ($userId > 0) {
-            Auth::revokeCurrentSession();
-            if (User::activeSessionCount($userId) === 0) {
-                User::markLoggedOut($userId);
-            }
+        Auth::revokeCurrentSession();
+        if ($userId > 0 && User::activeSessionCount($userId) === 0) {
+            User::markLoggedOut($userId);
         }
 
         Auth::clearRememberCookie();
@@ -454,70 +394,112 @@ class AuthController extends Controller {
     public function forgotPassword() {
         Auth::csrfValidate();
         $this->verifyCaptchaOrFail('/forgot-password');
-        $email = trim($_POST['email'] ?? '');
+        $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $this->flash('success', 'sent');
             $this->redirect('/forgot-password');
         }
 
-        $user = Database::query("SELECT id FROM users WHERE email = ?", [$email])->fetch();
-        if (!$user) {
+        $user = Database::query("SELECT id, email FROM users WHERE email = ?", [$email])->fetch();
+        if (!$user || !AuthBudget::allow('reset_issue', (int)$user->id, $_SERVER['REMOTE_ADDR'] ?? '', 3)) {
             $this->flash('success', 'sent');
             $this->redirect('/forgot-password');
         }
 
-        Database::query("DELETE FROM password_resets WHERE user_id = ?", [$user->id]);
-
-        $token = bin2hex(random_bytes(32));
-        $expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
-        Database::query("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)", [$user->id, $token, $expires]);
-
-        $resetLink = base_url('/reset-password?token=' . urlencode($token));
-        $this->sendEmail($email, 'Prologue Password Reset', "Reset your password: <a href='{$resetLink}'>{$resetLink}</a>");
+        $token = AccountPassword::issueReset((int)$user->id, $user->email);
+        if ($token !== null) {
+            $resetLink = CAUSETTE_CANONICAL_URL . '/reset-password?token=' . rawurlencode($token);
+            $safeLink = htmlspecialchars($resetLink, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $this->sendEmail($user->email, 'Causette Password Reset', "Reset your password: <a href=\"{$safeLink}\">{$safeLink}</a>");
+        }
 
         $this->flash('success', 'sent');
         $this->redirect('/forgot-password');
     }
 
     public function showReset() {
-        $this->view('auth/reset', ['csrf' => $this->csrfToken(), 'token' => $_GET['token'] ?? '']);
+        $token = $_GET['token'] ?? '';
+        $this->viewRaw('auth/reset', [
+            'csrf' => $this->csrfToken(),
+            'token' => is_string($token) && preg_match('/\A[a-f0-9]{64}\z/', $token) ? $token : '',
+        ]);
     }
 
     public function resetPassword() {
         Auth::csrfValidate();
-        $token = trim($_POST['token'] ?? '');
+        $token = $_POST['token'] ?? '';
         $newPassword = $_POST['password'] ?? '';
+        $revokeApiKeys = $_POST['revoke_api_keys'] ?? '0';
 
-        if (!preg_match('/^[a-f0-9]{64}$/', $token) || strlen($newPassword) < 8) {
+        if (!is_string($token) || !preg_match('/\A[a-f0-9]{64}\z/', trim($token))
+            || !is_string($newPassword) || strlen($newPassword) < 8 || str_contains($newPassword, "\0")
+            || !in_array($revokeApiKeys, ['0', '1'], true)
+            || !AccountPassword::reset(trim($token), $newPassword, $revokeApiKeys === '1')
+        ) {
             $this->flash('error', 'invalid');
             $this->redirect('/forgot-password');
         }
-
-        $password = password_hash($newPassword, PASSWORD_DEFAULT);
-
-        $row = Database::query("SELECT user_id FROM password_resets WHERE token = ? AND expires_at > NOW()", [$token])->fetch();
-        if (!$row) {
-            $this->flash('error', 'invalid');
-            $this->redirect('/forgot-password');
-        }
-
-        Database::query("UPDATE users SET password = ? WHERE id = ?", [$password, $row->user_id]);
-        Database::query("DELETE FROM password_resets WHERE token = ?", [$token]);
 
         $this->flash('success', 'reset');
         $this->redirect('/login');
     }
 
-    private function sendEmail($to, $subject, $body) {
+    private function openBoundSession(int $userId, string $passwordBinding, string $ip, string $userAgent, ?string $trustedBrowser = null): void {
+        $token = session_regenerate_id(true) ? Auth::registerBoundSession($userId, $passwordBinding, $ip, $userAgent, $trustedBrowser) : null;
+        if ($token === null) {
+            $this->flash('error', 'invalid');
+            $this->redirect('/login');
+        }
+
+        unset($_SESSION['password_authentication'], $_SESSION['auth_session_retired'], $_SESSION['csrf_token']);
+        $_SESSION['user_id'] = $userId;
+        $_SESSION['auth_session_token'] = $token;
+    }
+
+    private function clearPendingTwoFactor(): void {
+        unset(
+            $_SESSION['2fa_pending_user'],
+            $_SESSION['2fa_remember_me'],
+            $_SESSION['2fa_provider'],
+            $_SESSION['2fa_password_checked_at'],
+            $_SESSION['2fa_password_binding'],
+            $_SESSION['2fa_challenge'],
+        );
+    }
+
+    protected function prepareMfaChallenge(object $account, string $ip, ?string $code, string $context): ?string {
+        return AuthChallenge::begin($account, AuthChallenge::LOGIN, $ip, $code, $context);
+    }
+
+    protected function cancelMfaChallenge(object $account, string $id): void {
+        AuthChallenge::cancel($account, AuthChallenge::LOGIN, $id);
+    }
+
+    private function requirePendingSecondFactor(): object {
+        $userId = (int)($_SESSION['2fa_pending_user'] ?? 0);
+        $user = $userId > 0 ? User::find($userId) : null;
+        $binding = $_SESSION['2fa_password_binding'] ?? '';
+        $challenge = $_SESSION['2fa_challenge'] ?? '';
+        if (!$user || User::isBanned($user) || !is_string($binding) || !hash_equals(Auth::passwordBinding($user), $binding)
+            || !is_string($_SESSION['2fa_provider'] ?? null) || !is_string($challenge)
+            || AuthChallenge::active($user, AuthChallenge::LOGIN, $challenge) === null
+        ) {
+            $this->clearPendingTwoFactor();
+            $this->flash('error', 'mfa_expired');
+            $this->redirect('/login');
+        }
+        return $user;
+    }
+
+    protected function sendEmail($to, $subject, $body): bool {
         $mailHost = (string)(Setting::get('mail_host') ?? '');
         $mailUser = (string)(Setting::get('mail_user') ?? '');
 
         if ($mailHost === '' || $mailUser === '') {
-            return;
+            return false;
         }
 
         $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailPass = (string)(Setting::get('mail_pass') ?? '');
         $mailFrom = (string)(Setting::get('mail_from') ?? '');
         $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
 
@@ -527,18 +509,19 @@ class AuthController extends Controller {
             $mail->Host = $mailHost;
             $mail->SMTPAuth = true;
             $mail->Username = $mailUser;
-            $mail->Password = $mailPass;
+            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
             $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
             $mail->Port = $mailPort;
+            $mail->Timeout = 10;
 
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($to);
             $mail->isHTML(true);
             $mail->Subject = $subject;
             $mail->Body = $body;
-            $mail->send();
-        } catch (Exception $e) {
-            // log error in production
+            return $mail->send();
+        } catch (Exception | RuntimeException) {
+            return false;
         }
     }
 
@@ -549,7 +532,7 @@ class AuthController extends Controller {
             ? '<b>Referred by:</b> ' . htmlspecialchars($referredBy, ENT_QUOTES, 'UTF-8')
             : '<b>Referred by:</b> None';
 
-        $body = 'A new user has registered on Prologue.<br><br>'
+        $body = 'A new user has registered on Causette.<br><br>'
             . '<b>Username:</b> ' . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '<br>'
             . '<b>Email:</b> ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '<br>'
             . '<b>IP address:</b> ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8') . '<br>'
@@ -558,23 +541,6 @@ class AuthController extends Controller {
         foreach ($admins as $admin) {
             $this->sendEmail($admin->email, 'New user registered', $body);
         }
-    }
-
-    private function shouldBypassBootstrap2FA(int $userId): bool {
-        if ($userId !== 1) {
-            return false;
-        }
-
-        if (TwoFAManager::getAvailableProvider($userId) !== null) {
-            return false;
-        }
-
-        $hasAnyPriorSession = (int)Database::query(
-            "SELECT COUNT(*) FROM user_sessions WHERE user_id = ?",
-            [$userId]
-        )->fetchColumn() > 0;
-
-        return !$hasAnyPriorSession;
     }
 
     private function generateUserNumber() {
@@ -586,29 +552,38 @@ class AuthController extends Controller {
         return $userNumber;
     }
 
-    private function startEmailVerificationFlow($userId) {
-        $user = User::find((int)$userId);
-        if (!$user) {
+    private function sendVerificationCode(object $user, string $success): void {
+        Auth::beginEmailVerification($user);
+        $this->clearPendingTwoFactor();
+        $code = AuthChallenge::generateCode();
+        $id = AuthChallenge::begin($user, AuthChallenge::VERIFY_EMAIL, $_SERVER['REMOTE_ADDR'] ?? '', $code, $user->email);
+        if ($id === null) {
+            $this->flash('error', 'too_many_attempts');
             return;
         }
 
-        $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $expires = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+        if (!$this->sendEmail($user->email, 'Verify your Causette account', "Your verification code is <b>{$code}</b> (valid 10 minutes).")) {
+            AuthChallenge::cancel($user, AuthChallenge::VERIFY_EMAIL, $id);
+            $this->flash('error', 'delivery_failed');
+            return;
+        }
 
-        Database::query(
-            "INSERT INTO email_verification_codes (user_id, code, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), expires_at = VALUES(expires_at), created_at = CURRENT_TIMESTAMP",
-            [$user->id, $code, $expires]
-        );
+        $_SESSION['email_verification_challenge'] = $id;
+        $this->flash('success', $success);
+    }
 
-        $this->sendEmail(
-            $user->email,
-            'Verify your Prologue account',
-            "Your verification code is <b>{$code}</b> (valid 10 minutes)."
-        );
+    private function requirePendingEmailUser(): object {
+        $user = Auth::pendingEmailVerificationUser();
+        if (!$user) {
+            $this->redirect('/login');
+        }
+        if (User::isBanned($user)) {
+            Auth::clearEmailVerification();
+            $this->flash('error', 'banned');
+            $this->redirect('/login');
+        }
 
-        $_SESSION['email_verification_user'] = (int)$user->id;
-        unset($_SESSION['user_id']);
-        unset($_SESSION['2fa_pending_user']);
+        return $user;
     }
 
     private function createSafariDesktopLoginNotice(int $userId, string $userAgent): void {
@@ -622,10 +597,6 @@ class AuthController extends Controller {
             'Browser Notice',
             'Safari does not follow web standards and some features may be limited or function inconsistently. Recommended browsers include Firefox, Edge, and Chrome.'
         );
-    }
-
-    private function checkForAvailableUpdateOnAdminLogin(int $userId): void {
-        UpdateChecker::checkForAdminUser($userId, false);
     }
 
     private function isSafariDesktopUserAgent(string $userAgent): bool {

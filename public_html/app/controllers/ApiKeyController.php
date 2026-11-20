@@ -33,6 +33,10 @@ class ApiKeyController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
+        if (!$user) {
+            $this->json(['error' => 'Sign in again to create an API key'], 401);
+            return;
+        }
         $userId = (int)$user->id;
 
         $name = trim($_POST['name'] ?? '');
@@ -107,8 +111,15 @@ class ApiKeyController extends Controller {
         }
 
         $rawKey = ApiKey::generateKey();
-        $keyId = ApiKey::create($userId, $rawKey, $name, $type, $cleanedIps, $allowedChats, $expiresAt);
+        $keyId = ApiKey::createForSession(
+            $userId, (string)($_SESSION['auth_session_token'] ?? ''), $rawKey, $name, $type, $cleanedIps, $allowedChats, $expiresAt,
+        );
+        if ($keyId === null) {
+            $this->json(['error' => 'Sign in again to create an API key'], 401);
+            return;
+        }
 
+        header('Cache-Control: no-store');
         $this->json([
             'success' => true,
             'api_key' => $rawKey,
@@ -209,35 +220,6 @@ class ApiKeyController extends Controller {
         $this->json(['success' => true]);
     }
 
-    public function viewKey() {
-        Auth::requireAuth();
-        Auth::csrfValidate();
-
-        $userId = (int)Auth::user()->id;
-        $keyId = (int)($_POST['key_id'] ?? 0);
-
-        if ($keyId <= 0) {
-            $this->json(['error' => 'Invalid key'], 400);
-            return;
-        }
-
-        $key = ApiKey::getById($keyId, $userId);
-        if (!$key) {
-            $this->json(['error' => 'Key not found'], 404);
-            return;
-        }
-
-        if ($key->type !== 'bot') {
-            $this->json(['error' => 'User keys cannot be viewed after creation for security reasons'], 403);
-            return;
-        }
-
-        $this->json([
-            'success' => true,
-            'api_key' => $key->api_key,
-        ]);
-    }
-
     public function docs() {
         Auth::requireAuth();
         $this->view('apikeys_docs', [
@@ -247,12 +229,13 @@ class ApiKeyController extends Controller {
     }
 
     public function botSendMessage() {
-        $apiKeyRaw = trim($_POST['api_key'] ?? $_SERVER['HTTP_X_API_KEY'] ?? '');
+        $credential = $_POST['api_key'] ?? $_SERVER['HTTP_X_API_KEY'] ?? '';
+        $apiKeyRaw = is_string($credential) ? trim($credential) : '';
         $chatNumber = trim($_POST['chat_number'] ?? '');
         $text = trim($_POST['text'] ?? '');
         $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
-        if ($apiKeyRaw === '' || !preg_match('/^[a-f0-9]{64}$/', $apiKeyRaw)) {
+        if (!preg_match('/\A[a-f0-9]{64}\z/', $apiKeyRaw)) {
             $this->json(['error' => 'Invalid or missing API key'], 401);
             return;
         }

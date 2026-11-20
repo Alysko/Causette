@@ -9,6 +9,9 @@ let pendingPinReplaceMessageId = 0;
 let pinnedBannerLastScrollTop = 0;
 let pinnedBannerHiddenByScroll = false;
 let messageFormLastScrollTop = 0;
+let messageRefreshSequence = 0;
+let lastAppliedMessageRefresh = 0;
+let chatBannerRevision = 0;
 
 const PINNED_BANNER_MOBILE_BREAKPOINT_QUERY = '(max-width: 767.98px)';
 const MESSAGE_FORM_MOBILE_BREAKPOINT_QUERY = '(max-width: 639.98px)';
@@ -329,57 +332,75 @@ function findOpenMojiForGrapheme(grapheme) {
     return null;
 }
 
-function renderTextWithEmojiOnly(content) {
-    const graphemes = getGraphemeClusters(String(content ?? ''));
-    let html = '';
+function appendTextWithEmoji(container, content) {
+    if (!content) return;
+    let text = '';
+    for (const grapheme of getGraphemeClusters(content)) {
+        const emoji = findOpenMojiForGrapheme(grapheme);
+        const isLocalEmoji = emoji && /^\/emojis\/[0-9a-f]+(?:-[0-9a-f]+)*\.svg$/i.test(emoji.url);
 
-    for (const grapheme of graphemes) {
+        if (grapheme !== '\n' && !isLocalEmoji) {
+            text += grapheme;
+            continue;
+        }
+        if (text) {
+            container.append(text);
+            text = '';
+        }
         if (grapheme === '\n') {
-            html += '<br>';
-            continue;
+            container.append(document.createElement('br'));
+        } else {
+            const image = document.createElement('img');
+            image.src = emoji.url;
+            image.alt = grapheme;
+            image.className = 'inline-block w-7 h-7 align-[-0.2em] mx-[1px]';
+            image.loading = 'lazy';
+            image.decoding = 'async';
+            container.append(image);
         }
-
-        const emojiMatch = findOpenMojiForGrapheme(grapheme);
-        if (emojiMatch?.url) {
-            html += `<img src="${escapeHtml(emojiMatch.url)}" alt="${escapeHtml(grapheme)}" class="inline-block w-7 h-7 align-[-0.2em] mx-[1px]" loading="lazy" decoding="async">`;
-            continue;
-        }
-
-        html += escapeHtml(grapheme);
     }
+    if (text) container.append(text);
+}
 
-    return html;
+function appendPlainTextWithEmoji(container, source) {
+    const linkPattern = /(https?:\/\/[^\s<]+|\/c\/\d{4}-\d{4}-\d{4}-\d{4}\/delete)/gi;
+    let cursor = 0;
+    for (const match of source.matchAll(linkPattern)) {
+        appendTextWithEmoji(container, source.slice(cursor, match.index));
+        cursor = match.index + match[0].length;
+
+        const token = match[0];
+        const link = document.createElement('a');
+        if (/^\/c\//i.test(token)) {
+            link.className = 'text-red-400 hover:text-red-300 hover:underline underline-offset-2';
+            link.textContent = uiText('delete_chat');
+        } else {
+            let url;
+            try {
+                url = new URL(token);
+            } catch {
+                appendTextWithEmoji(container, token);
+                continue;
+            }
+            if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+                appendTextWithEmoji(container, token);
+                continue;
+            }
+            link.className = 'causette-accent hover:text-emerald-300 hover:underline underline-offset-2';
+            link.textContent = token;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
+        link.setAttribute('href', token);
+        container.append(link);
+    }
+    appendTextWithEmoji(container, source.slice(cursor));
 }
 
 function renderPlainTextWithEmoji(content) {
-    const source = String(content ?? '');
-    const linkPattern = /(https?:\/\/[^\s<]+|\/c\/\d{4}-\d{4}-\d{4}-\d{4}\/delete)/gi;
-    let html = '';
-    let cursor = 0;
-    let match = linkPattern.exec(source);
-
-    while (match) {
-        const tokenStart = match.index;
-        if (tokenStart > cursor) {
-            html += renderTextWithEmojiOnly(source.slice(cursor, tokenStart));
-        }
-
-        const matchedUrl = String(match[0] || '');
-        if (/^\/c\/\d{4}-\d{4}-\d{4}-\d{4}\/delete$/i.test(matchedUrl)) {
-            html += `<a href="${escapeHtml(matchedUrl)}" class="text-red-400 hover:text-red-300 hover:underline underline-offset-2">Delete chat</a>`;
-        } else {
-            html += `<a href="${escapeHtml(matchedUrl)}" target="_blank" rel="noopener noreferrer" class="prologue-accent hover:text-emerald-300 hover:underline underline-offset-2">${escapeHtml(matchedUrl)}</a>`;
-        }
-
-        cursor = linkPattern.lastIndex;
-        match = linkPattern.exec(source);
-    }
-
-    if (cursor < source.length) {
-        html += renderTextWithEmojiOnly(source.slice(cursor));
-    }
-
-    return html;
+    const container = document.createElement('div');
+    appendPlainTextWithEmoji(container, String(content ?? ''));
+    return container.innerHTML;
 }
 
 function normalizeMentionMap(mentionMap) {
@@ -390,7 +411,7 @@ function normalizeMentionMap(mentionMap) {
     const normalized = {};
     Object.entries(mentionMap).forEach(([userNumber, username]) => {
         const safeUserNumber = String(userNumber || '').replace(/\D/g, '').slice(0, 16);
-        const safeUsername = String(username || '').toLowerCase();
+        const safeUsername = bannerText(username).toLowerCase();
         if (!safeUserNumber || !/^[a-z][a-z0-9]{3,31}$/i.test(safeUsername)) {
             return;
         }
@@ -404,40 +425,37 @@ function decodeStoredMentionsToPlainText(content) {
     return String(content ?? '').replace(/@\[(\d{16})\|([a-z][a-z0-9]{3,31})\]/gi, '@$2');
 }
 
-function renderMessageContent(content, mentionMap = null) {
+function createMessageContent(content, mentionMap = null) {
+    const container = document.createDocumentFragment();
     const normalizedMentionMap = normalizeMentionMap(mentionMap);
     const source = String(content ?? '');
     const mentionPattern = /@\[(\d{16})\|([a-z][a-z0-9]{3,31})\]/gi;
-    let html = '';
     let cursor = 0;
-    let match = mentionPattern.exec(source);
+    for (const match of source.matchAll(mentionPattern)) {
+        appendPlainTextWithEmoji(container, source.slice(cursor, match.index));
+        cursor = match.index + match[0].length;
 
-    while (match) {
-        const tokenStart = match.index;
-        if (tokenStart > cursor) {
-            html += renderPlainTextWithEmoji(source.slice(cursor, tokenStart));
-        }
-
-        const userNumber = String(match[1] || '').replace(/\D/g, '').slice(0, 16);
-        const fallbackUsername = String(match[2] || '').toLowerCase();
-        const displayUsername = String(normalizedMentionMap[userNumber] || fallbackUsername).toLowerCase();
+        const userNumber = match[1];
+        const username = '@' + (normalizedMentionMap[userNumber] || match[2].toLowerCase());
         const profileUrl = getProfileUrlByUserNumber(userNumber);
-
         if (profileUrl) {
-            html += `<a href="${escapeHtml(profileUrl)}" class="prologue-accent hover:text-emerald-300 hover:underline underline-offset-2">@${escapeHtml(displayUsername)}</a>`;
+            const link = document.createElement('a');
+            link.setAttribute('href', profileUrl);
+            link.className = 'causette-accent hover:text-emerald-300 hover:underline underline-offset-2';
+            link.textContent = username;
+            container.append(link);
         } else {
-            html += `@${escapeHtml(displayUsername)}`;
+            container.append(username);
         }
-
-        cursor = mentionPattern.lastIndex;
-        match = mentionPattern.exec(source);
     }
+    appendPlainTextWithEmoji(container, source.slice(cursor));
+    return container;
+}
 
-    if (cursor < source.length) {
-        html += renderPlainTextWithEmoji(source.slice(cursor));
-    }
-
-    return html;
+function renderMessageContent(content, mentionMap = null) {
+    const container = document.createElement('div');
+    container.append(createMessageContent(content, mentionMap));
+    return container.innerHTML;
 }
 
 function normalizeReactionCode(value) {
@@ -515,7 +533,7 @@ function renderQuotedMessageBlock(msg) {
     const quotedProfileUrl = quotedUserNumber ? getProfileUrlByUserNumber(quotedUserNumber) : '';
 
     const blockAttributes = hasQuotedMessageTarget
-        ? ` class="js-quoted-message-link mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm hover:bg-zinc-800/70 transition-colors cursor-pointer" data-quoted-message-id="${quotedMessageId}" title="Go to quoted message"`
+        ? ` class="js-quoted-message-link mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm hover:bg-zinc-800/70 transition-colors cursor-pointer" data-quoted-message-id="${quotedMessageId}" title="${escapeHtml(uiText('goto_quoted_message'))}"`
         : ' class="mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm"';
 
     return `
@@ -614,7 +632,7 @@ function setQuoteDraft(quoteData) {
         hiddenInput.value = '';
         preview.classList.add('hidden');
         previewUsername.textContent = '';
-        previewContent.innerHTML = '';
+        previewContent.replaceChildren();
         return;
     }
 
@@ -624,7 +642,7 @@ function setQuoteDraft(quoteData) {
 
     hiddenInput.value = String(messageId);
     previewUsername.textContent = username;
-    previewContent.innerHTML = renderMessageContent(getQuotedPreviewText(content, mentionMap), mentionMap);
+    previewContent.replaceChildren(createMessageContent(getQuotedPreviewText(content, mentionMap), mentionMap));
     preview.classList.remove('hidden');
 }
 
@@ -646,7 +664,7 @@ async function reactToMessage(messageId, reactionCode) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to react to message', 'error');
+        showToast(uiActionError(result.error, 'unable_to_react_to_message'), 'error');
         return;
     }
 
@@ -654,24 +672,51 @@ async function reactToMessage(messageId, reactionCode) {
     await pollMessages({ scrollMode: 'preserve' });
 }
 
+function chatLabel(key, parameters = {}) {
+    const label = window.CAUSETTE_CHAT_I18N?.labels?.[key];
+    if (typeof label !== 'string') return '';
+    return label.replace(/\{([a-z_]+)\}/g, (token, name) => Object.hasOwn(parameters, name) ? String(parameters[name]) : token);
+}
+
+function chatActionError(result, fallbackKey) {
+    const language = window.CAUSETTE_CHAT_I18N?.language || 'en';
+    if (language === 'en' && typeof result.error === 'string' && result.error) {
+        return result.error;
+    }
+    return chatLabel(fallbackKey);
+}
+
+function bannerText(value) {
+    return typeof value === 'string' ? value : '';
+}
+
+function bannerInteger(value) {
+    const number = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    return Number.isSafeInteger(number) && number >= 0 ? number : 0;
+}
+
+function bannerFlag(value) {
+    return value === true || value === 1 || value === '1';
+}
+
 function normalizePinnedMessage(pinnedMessage) {
     if (!pinnedMessage || typeof pinnedMessage !== 'object') {
         return null;
     }
 
-    const id = Number(pinnedMessage.id || 0);
-    if (!Number.isFinite(id) || id <= 0) {
+    const id = bannerInteger(pinnedMessage.id);
+    if (!id) {
         return null;
     }
 
     return {
         id,
-        chat_id: Number(pinnedMessage.chat_id || 0),
-        user_id: Number(pinnedMessage.user_id || 0),
-        username: String(pinnedMessage.username || 'Unknown user').trim() || 'Unknown user',
-        user_number: String(pinnedMessage.user_number || ''),
-        created_at: String(pinnedMessage.created_at || ''),
-        content: String(pinnedMessage.content || ''),
+        chat_id: bannerInteger(pinnedMessage.chat_id),
+        user_id: bannerInteger(pinnedMessage.user_id),
+        username: bannerText(pinnedMessage.username).trim() || chatLabel('unknown_user'),
+        user_number: bannerText(pinnedMessage.user_number),
+        created_at: bannerText(pinnedMessage.created_at),
+        content: bannerText(pinnedMessage.content),
         mention_map: normalizeMentionMap(pinnedMessage.mention_map || {})
     };
 }
@@ -696,7 +741,7 @@ function renderPinnedMessageBanner(pinnedMessage) {
         delete timeNode.dataset.utc;
         timeNode.removeAttribute('title');
         timeNode.textContent = '';
-        contentNode.innerHTML = '';
+        contentNode.replaceChildren();
         contentNode.dataset.rawContent = '';
         contentNode.dataset.mentionMap = '{}';
         if (unpinButton) {
@@ -720,7 +765,7 @@ function renderPinnedMessageBanner(pinnedMessage) {
     timeNode.textContent = formatCompactMessageTimestamp(safePinnedMessage.created_at);
     contentNode.dataset.rawContent = safePinnedMessage.content;
     contentNode.dataset.mentionMap = JSON.stringify(safePinnedMessage.mention_map || {});
-    contentNode.innerHTML = renderMessageContent(safePinnedMessage.content, safePinnedMessage.mention_map || {});
+    contentNode.replaceChildren(createMessageContent(safePinnedMessage.content, safePinnedMessage.mention_map));
     if (typeof window.refreshUtcTimestamps === 'function') {
         window.refreshUtcTimestamps(timeNode);
     }
@@ -741,46 +786,42 @@ function normalizeActivePoll(activePoll) {
         return null;
     }
 
-    const id = Number(activePoll.id || 0);
-    if (!Number.isFinite(id) || id <= 0) {
+    const id = bannerInteger(activePoll.id);
+    const status = bannerText(activePoll.status).toLowerCase();
+    if (!id || (status !== 'active' && status !== 'expired')) {
         return null;
     }
 
-    const options = Array.isArray(activePoll.options)
-        ? activePoll.options.map((option) => {
-            const optionId = Number(option?.id || 0);
-            if (!Number.isFinite(optionId) || optionId <= 0) return null;
-
-            const voteCount = Number(option?.vote_count || 0);
-            const voters = Array.isArray(option?.voters)
-                ? option.voters.map((value) => String(value || '').trim()).filter(Boolean)
-                : [];
-
-            return {
-                id: optionId,
-                option_text: String(option?.option_text || ''),
-                sort_order: Number(option?.sort_order || 0),
-                vote_count: Number.isFinite(voteCount) ? Math.max(0, voteCount) : 0,
-                selected_by_current_user: Boolean(option?.selected_by_current_user),
-                voters
-            };
-        }).filter(Boolean)
-        : [];
+    if (!Array.isArray(activePoll.options) || activePoll.options.length < 2 || activePoll.options.length > 3) {
+        return null;
+    }
+    const options = activePoll.options.map((option) => ({
+        id: bannerInteger(option?.id),
+        option_text: bannerText(option?.option_text),
+        sort_order: bannerInteger(option?.sort_order),
+        vote_count: bannerInteger(option?.vote_count),
+        selected_by_current_user: bannerFlag(option?.selected_by_current_user),
+        voters: Array.isArray(option?.voters) ? option.voters.map(bannerText).filter(Boolean) : []
+    }));
+    if (options.some((option) => !option.id || !option.option_text)
+        || new Set(options.map((option) => option.id)).size !== options.length) {
+        return null;
+    }
 
     return {
         id,
-        chat_id: Number(activePoll.chat_id || 0),
-        creator_user_id: Number(activePoll.creator_user_id || 0),
-        creator_username: String(activePoll.creator_username || 'Unknown user').trim() || 'Unknown user',
-        question: String(activePoll.question || ''),
-        status: String(activePoll.status || 'active').toLowerCase(),
-        expires_at: String(activePoll.expires_at || ''),
-        expired_at: String(activePoll.expired_at || ''),
-        created_at: String(activePoll.created_at || ''),
-        total_votes: Math.max(0, Number(activePoll.total_votes || 0)),
-        user_has_voted: Boolean(activePoll.user_has_voted),
-        user_voted_option_id: Number(activePoll.user_voted_option_id || 0),
-        can_expire: Boolean(activePoll.can_expire),
+        chat_id: bannerInteger(activePoll.chat_id),
+        creator_user_id: bannerInteger(activePoll.creator_user_id),
+        creator_username: bannerText(activePoll.creator_username).trim() || chatLabel('unknown_user'),
+        question: bannerText(activePoll.question),
+        status,
+        expires_at: bannerText(activePoll.expires_at),
+        expired_at: bannerText(activePoll.expired_at),
+        created_at: bannerText(activePoll.created_at),
+        total_votes: bannerInteger(activePoll.total_votes),
+        user_has_voted: bannerFlag(activePoll.user_has_voted),
+        user_voted_option_id: bannerInteger(activePoll.user_voted_option_id),
+        can_expire: bannerFlag(activePoll.can_expire),
         options
     };
 }
@@ -792,7 +833,7 @@ function canCurrentUserCreatePoll() {
 
 function canCurrentUserExpirePoll(activePoll) {
     const poll = normalizeActivePoll(activePoll);
-    if (!poll || !currentChat) return false;
+    if (!poll || poll.status !== 'active' || !currentChat) return false;
     if (poll.can_expire) return true;
 
     const myUserId = Number(currentUserId || 0);
@@ -828,6 +869,7 @@ function renderActivePollBanner(activePoll) {
         metaNode.textContent = '';
         optionsNode.replaceChildren();
         if (expireButton) {
+            delete expireButton.dataset.pollId;
             expireButton.classList.add('hidden');
             expireButton.disabled = true;
             expireButton.classList.add('opacity-50', 'cursor-not-allowed');
@@ -837,31 +879,45 @@ function renderActivePollBanner(activePoll) {
 
     const isActive = poll.status === 'active';
     const canVote = isActive && !poll.user_has_voted && canCurrentUserCreatePoll();
-    const canExpire = isActive && canCurrentUserExpirePoll(poll);
+    const canExpire = canCurrentUserExpirePoll(poll);
 
     banner.classList.remove('hidden');
     banner.dataset.activePollId = String(poll.id);
 
     questionNode.textContent = poll.question;
 
-    const voteWord = poll.total_votes === 1 ? 'vote' : 'votes';
-    const expiryText = isActive
-        ? `Expires ${formatCompactMessageTimestamp(poll.expires_at)}`
-        : `Expired ${formatCompactMessageTimestamp(poll.expired_at || poll.expires_at)}`;
-    metaNode.textContent = `${expiryText} · ${poll.total_votes} ${voteWord} · by ${poll.creator_username}`;
+    const language = window.CAUSETTE_CHAT_I18N?.language || 'en';
+    const votePlural = new Intl.PluralRules(language);
+    const voteNumber = new Intl.NumberFormat(language);
+    const voteLabel = (count) => {
+        const parameters = { count: voteNumber.format(count) };
+        return chatLabel('vote_count_' + votePlural.select(count), parameters)
+            || chatLabel('vote_count_other', parameters);
+    };
+    const expiryTime = isActive ? poll.expires_at : poll.expired_at || poll.expires_at;
+    const expiryText = chatLabel(isActive ? 'poll_expires_at' : 'poll_expired_at', {
+        time: formatCompactMessageTimestamp(expiryTime, { relative: false })
+    });
+    metaNode.textContent = chatLabel('poll_meta', {
+        expiry: expiryText,
+        votes: voteLabel(poll.total_votes),
+        creator: poll.creator_username
+    });
 
     const optionButtons = poll.options.map((option) => {
         const button = document.createElement('button');
-        const isSelected = Number(option.id || 0) === Number(poll.user_voted_option_id || 0) || option.selected_by_current_user === true;
-        const votersTooltip = option.voters.length > 0 ? option.voters.join(', ') : 'No votes yet';
-        const totalVotes = Math.max(0, Number(poll.total_votes || 0));
-        const voteCount = Math.max(0, Number(option.vote_count || 0));
-        const votePercent = totalVotes > 0 ? Math.max(0, Math.min(100, (voteCount / totalVotes) * 100)) : 0;
+        const isSelected = option.id === poll.user_voted_option_id || option.selected_by_current_user;
+        const votersTooltip = option.voters.length > 0 ? option.voters.join(', ') : chatLabel('no_votes');
+        const totalVotes = poll.total_votes;
+        const votePercent = totalVotes > 0 ? Math.min(100, (option.vote_count / totalVotes) * 100) : 0;
 
         button.type = 'button';
         button.className = `w-full text-left border rounded-xl px-3 py-2 text-sm transition ${isSelected ? 'border-emerald-500/70 bg-emerald-500/10 text-zinc-100' : 'border-zinc-700 bg-zinc-800/80 text-zinc-200'} ${canVote ? 'hover:bg-zinc-700/80' : 'opacity-90'}`;
         button.setAttribute('title', votersTooltip);
-        button.setAttribute('aria-label', `${option.option_text} (${option.vote_count} votes)`);
+        button.setAttribute('aria-label', chatLabel('option_vote_label', {
+            option: option.option_text,
+            votes: voteLabel(option.vote_count)
+        }));
         button.dataset.pollVoteOptionId = String(option.id);
         button.dataset.pollId = String(poll.id);
         button.disabled = !canVote;
@@ -870,7 +926,7 @@ function renderActivePollBanner(activePoll) {
         left.textContent = option.option_text;
         const right = document.createElement('span');
         right.className = 'text-xs text-zinc-400';
-        right.textContent = `${option.vote_count}`;
+        right.textContent = voteNumber.format(option.vote_count);
 
         const row = document.createElement('span');
         row.className = 'flex items-center justify-between gap-3';
@@ -912,6 +968,7 @@ async function createCurrentGroupPoll() {
         return false;
     }
 
+    const chat = currentChat;
     const questionInput = document.getElementById('create-poll-question');
     const option1Input = document.getElementById('create-poll-option-1');
     const option2Input = document.getElementById('create-poll-option-2');
@@ -927,92 +984,94 @@ async function createCurrentGroupPoll() {
     const options = [option1, option2, option3].filter((value) => value !== '');
 
     if (!question) {
-        showToast('Enter a poll question', 'error');
+        showToast(chatLabel('poll_question_empty'), 'error');
         return false;
     }
     if (question.length > 40) {
-        showToast('Question must be 40 characters or fewer', 'error');
+        showToast(chatLabel('poll_question_length'), 'error');
         return false;
     }
     if (options.length < 2 || options.length > 3) {
-        showToast('Poll must include 2 or 3 options', 'error');
+        showToast(chatLabel('poll_options_count'), 'error');
         return false;
     }
     if (options.some((value) => value.length > 40)) {
-        showToast('Each option must be 40 characters or fewer', 'error');
+        showToast(chatLabel('poll_option_length'), 'error');
         return false;
     }
 
     const normalizedOptionSet = new Set(options.map((value) => value.toLowerCase()));
     if (normalizedOptionSet.size !== options.length) {
-        showToast('Poll options must be unique', 'error');
+        showToast(chatLabel('poll_options_unique'), 'error');
         return false;
     }
 
     const result = await postForm('/api/chats/group/poll/create', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         question,
         expiry,
         options: JSON.stringify(options)
     });
+    if (currentChat !== chat) return false;
 
     if (!result.success) {
-        showToast(result.error || 'Unable to create poll', 'error');
+        showToast(chatActionError(result, 'poll_create_error'), 'error');
         return false;
     }
 
     const poll = normalizeActivePoll(result.active_poll);
-    if (currentChat) {
-        currentChat.active_poll = poll;
-    }
+    chatBannerRevision++;
+    chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast('Poll created', 'success');
+    showToast(chatLabel('poll_created'), 'success');
     return true;
 }
 
 async function voteInActivePoll(pollId, optionId) {
-    if (!currentChat) return;
+    const chat = currentChat;
+    if (!chat) return;
 
     const result = await postForm('/api/chats/group/poll/vote', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         poll_id: String(pollId),
         option_id: String(optionId)
     });
+    if (currentChat !== chat) return;
 
     if (!result.success) {
-        showToast(result.error || 'Unable to submit vote', 'error');
+        showToast(chatActionError(result, 'poll_vote_error'), 'error');
         return;
     }
 
     const poll = normalizeActivePoll(result.active_poll);
-    if (currentChat) {
-        currentChat.active_poll = poll;
-    }
+    chatBannerRevision++;
+    chat.active_poll = poll;
     renderActivePollBanner(poll);
 }
 
 async function expireActivePoll(pollId) {
-    if (!currentChat) return;
+    const chat = currentChat;
+    if (!chat) return;
 
     const result = await postForm('/api/chats/group/poll/expire', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         poll_id: String(pollId)
     });
+    if (currentChat !== chat) return;
 
     if (!result.success) {
-        showToast(result.error || 'Unable to expire poll', 'error');
+        showToast(chatActionError(result, 'poll_expire_error'), 'error');
         return;
     }
 
     const poll = normalizeActivePoll(result.active_poll);
-    if (currentChat) {
-        currentChat.active_poll = poll;
-    }
+    chatBannerRevision++;
+    chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast('Poll expired', 'success');
+    showToast(chatLabel('poll_expired'), 'success');
 }
 
 function bindActivePollBannerActions() {
@@ -1035,7 +1094,7 @@ function bindActivePollBannerActions() {
             }
 
             voteInActivePoll(pollId, optionId).catch(() => {
-                showToast('Unable to submit vote', 'error');
+                showToast(chatLabel('poll_vote_error'), 'error');
             });
         });
     }
@@ -1054,11 +1113,11 @@ function bindActivePollBannerActions() {
             expireButton.disabled = true;
             expireActivePoll(pollId)
                 .catch(() => {
-                    showToast('Unable to expire poll', 'error');
+                    showToast(chatLabel('poll_expire_error'), 'error');
                 })
                 .finally(() => {
-                    const poll = normalizeActivePoll(currentChat?.active_poll || null);
-                    const canExpire = poll ? canCurrentUserExpirePoll(poll) : false;
+                    if (!expireButton.isConnected || currentChat?.active_poll?.id !== pollId) return;
+                    const canExpire = canCurrentUserExpirePoll(currentChat.active_poll);
                     expireButton.disabled = !canExpire;
                     expireButton.classList.toggle('opacity-50', !canExpire);
                     expireButton.classList.toggle('cursor-not-allowed', !canExpire);
@@ -1095,7 +1154,7 @@ function bindCreatePollModal() {
         }
 
         submit.disabled = false;
-        submit.textContent = 'Create';
+        submit.textContent = chatLabel('create');
     };
 
     const closeModal = () => setOpenState(false);
@@ -1121,7 +1180,7 @@ function bindCreatePollModal() {
         if (submit.disabled) return;
 
         submit.disabled = true;
-        submit.textContent = 'Creating...';
+        submit.textContent = chatLabel('creating');
 
         try {
             const created = await createCurrentGroupPoll();
@@ -1130,13 +1189,13 @@ function bindCreatePollModal() {
             }
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Create';
+            submit.textContent = chatLabel('create');
         }
     });
 
     window.openCreatePollModal = () => {
         if (!canCurrentUserCreatePoll()) {
-            showToast('Only group members can create polls', 'error');
+            showToast(chatLabel('poll_group_only'), 'error');
             return;
         }
         setOpenState(true);
@@ -1144,23 +1203,26 @@ function bindCreatePollModal() {
 }
 
 async function unpinCurrentChatMessage() {
-    if (!currentChat) {
+    const chat = currentChat;
+    if (!chat) {
         return;
     }
 
     const result = await postForm('/api/messages/unpin', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id)
+        chat_id: String(chat.id)
     });
+    if (currentChat !== chat) return;
 
     if (!result.success) {
-        showToast(result.error || 'Unable to unpin message', 'error');
+        showToast(chatActionError(result, 'unpin_error'), 'error');
         return;
     }
 
-    currentChat.pinned_message = null;
+    chatBannerRevision++;
+    chat.pinned_message = null;
     renderPinnedMessageBanner(null);
-    showToast('Pinned message removed', 'success');
+    showToast(chatLabel('pin_removed'), 'success');
 }
 
 function bindPinnedMessageBannerActions() {
@@ -1181,13 +1243,13 @@ function bindPinnedMessageBannerActions() {
             const box = document.getElementById('messages');
             const pinnedMessageId = Number(currentChat?.pinned_message?.id || 0);
             if (!box || !Number.isFinite(pinnedMessageId) || pinnedMessageId <= 0) {
-                showToast('Pinned message not available', 'error');
+                showToast(chatLabel('pin_not_available'), 'error');
                 return;
             }
 
             const focused = focusMessageById(pinnedMessageId);
             if (!focused) {
-                showToast('Pinned message is not in the loaded history', 'error');
+                showToast(chatLabel('pin_not_loaded'), 'error');
                 return;
             }
         });
@@ -1207,9 +1269,10 @@ function bindPinnedMessageBannerActions() {
         unpinButton.disabled = true;
         unpinCurrentChatMessage()
             .catch(() => {
-                showToast('Unable to unpin message', 'error');
+                showToast(chatLabel('unpin_error'), 'error');
             })
             .finally(() => {
+                if (!unpinButton.isConnected) return;
                 const hasPinnedMessage = Number(currentChat?.pinned_message?.id || 0) > 0;
                 unpinButton.disabled = !hasPinnedMessage;
                 unpinButton.classList.toggle('opacity-50', !hasPinnedMessage);
@@ -1240,7 +1303,7 @@ function bindPinReplaceModal() {
         if (!isOpen) {
             pendingPinReplaceMessageId = 0;
             submit.disabled = false;
-            submit.textContent = 'Replace';
+            submit.textContent = chatLabel('replace');
         }
     };
 
@@ -1275,7 +1338,7 @@ function bindPinReplaceModal() {
         }
 
         submit.disabled = true;
-        submit.textContent = 'Replacing...';
+        submit.textContent = chatLabel('replacing');
 
         try {
             await pinMessageInCurrentChat(messageId, true);
@@ -1296,23 +1359,26 @@ function bindPinReplaceModal() {
 }
 
 async function pinMessageInCurrentChat(messageId, forceReplace = false) {
+    const chat = currentChat;
     const safeMessageId = Number(messageId || 0);
-    if (!currentChat || !Number.isFinite(safeMessageId) || safeMessageId <= 0) {
+    if (!chat || !Number.isFinite(safeMessageId) || safeMessageId <= 0) {
         return;
     }
 
     const result = await postForm('/api/messages/pin', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         message_id: String(safeMessageId),
         force_replace: forceReplace ? '1' : '0'
     });
+    if (currentChat !== chat) return;
 
     if (result.success) {
         const pinnedMessage = normalizePinnedMessage(result.pinned_message);
-        currentChat.pinned_message = pinnedMessage;
+        chatBannerRevision++;
+        chat.pinned_message = pinnedMessage;
         renderPinnedMessageBanner(pinnedMessage);
-        showToast(result.replaced ? 'Pinned message replaced' : 'Message pinned', 'success');
+        showToast(chatLabel(result.replaced ? 'pin_replaced' : 'pinned_success'), 'success');
         return;
     }
 
@@ -1323,7 +1389,7 @@ async function pinMessageInCurrentChat(messageId, forceReplace = false) {
         return;
     }
 
-    showToast(result.error || 'Unable to pin message', 'error');
+    showToast(chatActionError(result, 'pin_error'), 'error');
 }
 
 function bindMessageQuotesAndReactions() {
@@ -1391,7 +1457,7 @@ function bindMessageQuotesAndReactions() {
             const quotedMessageId = Number(quotedMessageLink.getAttribute('data-quoted-message-id') || 0);
             const focused = focusMessageById(quotedMessageId);
             if (!focused) {
-                showToast('Quoted message is not in the loaded history', 'error');
+                showToast(uiText('quoted_message_is_not_in_the_loaded_history'), 'error');
             }
             closeAllReactionPickers();
             return;
@@ -1443,12 +1509,12 @@ function bindMessageQuotesAndReactions() {
             }
 
             if (activePinnedMessageId === messageId) {
-                showToast('That message is already pinned', 'success');
+                showToast(chatLabel('pin_already'), 'success');
                 return;
             }
 
             pinMessageInCurrentChat(messageId).catch(() => {
-                showToast('Unable to pin message', 'error');
+                showToast(chatLabel('pin_error'), 'error');
             });
             return;
         }
@@ -1459,7 +1525,7 @@ function bindMessageQuotesAndReactions() {
             const messageId = Number(reactionOption.getAttribute('data-reaction-message-id') || 0);
             const reactionCode = String(reactionOption.getAttribute('data-reaction-code') || '');
             reactToMessage(messageId, reactionCode).catch(() => {
-                showToast('Unable to react to message', 'error');
+                showToast(uiText('unable_to_react_to_message'), 'error');
             });
             return;
         }
@@ -1470,7 +1536,7 @@ function bindMessageQuotesAndReactions() {
             const messageId = Number(reactionBadge.getAttribute('data-reaction-message-id') || 0);
             const reactionCode = String(reactionBadge.getAttribute('data-reaction-code') || '');
             reactToMessage(messageId, reactionCode).catch(() => {
-                showToast('Unable to remove reaction', 'error');
+                showToast(uiText('unable_to_remove_reaction'), 'error');
             });
             return;
         }
@@ -1507,7 +1573,7 @@ function applyEmojiRenderingToExistingMessages() {
         } catch {
             mentionMap = {};
         }
-        messageNode.innerHTML = renderMessageContent(rawContent, mentionMap);
+        messageNode.replaceChildren(createMessageContent(rawContent, mentionMap));
     });
 }
 
@@ -1813,7 +1879,7 @@ function renderPendingAttachmentList() {
                 </div>
                 <div class="mt-1 text-xs text-zinc-500 flex items-center justify-between gap-2">
                     <span>${escapeHtml(formatFileSize(attachment.file_size))} · ${escapeHtml(formatAttachmentExpiryLabel(attachment.expiry_seconds || 0))}</span>
-                    <button type="button" class="text-red-300 hover:text-red-200" data-attachment-delete="${attachment.id}" title="Delete pending attachment" aria-label="Delete pending attachment">
+                    <button type="button" class="text-red-300 hover:text-red-200" data-attachment-delete="${attachment.id}" title="${escapeHtml(uiText('delete_pending_attachment'))}" aria-label="${escapeHtml(uiText('delete_pending_attachment'))}">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </div>
@@ -1863,7 +1929,7 @@ async function uploadAttachmentFile(file, expirySeconds = 0) {
 
     const normalized = normalizeAttachment(payload.attachment);
     if (!normalized) {
-        showToast('Attachment upload failed', 'error');
+        showToast(uiText('attachment_upload_failed'), 'error');
         return;
     }
 
@@ -1881,7 +1947,7 @@ async function deletePendingAttachment(attachmentId) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to delete attachment', 'error');
+        showToast(uiActionError(result.error, 'unable_to_delete_attachment'), 'error');
         return;
     }
 
@@ -1902,7 +1968,7 @@ async function updatePendingAttachmentExpiry(attachmentId, expirySeconds) {
     });
 
     if (!result.success) {
-        showToast(result.error || 'Unable to update attachment expiry', 'error');
+        showToast(uiActionError(result.error, 'unable_to_update_attachment_expiry'), 'error');
         renderPendingAttachmentList();
         return;
     }
@@ -1963,7 +2029,7 @@ function bindAttachmentsDrawer() {
         if (!deleteButton) return;
         event.preventDefault();
         deletePendingAttachment(deleteButton.getAttribute('data-attachment-delete')).catch(() => {
-            showToast('Unable to delete attachment', 'error');
+            showToast(uiText('unable_to_delete_attachment'), 'error');
         });
     });
 
@@ -1973,7 +2039,7 @@ function bindAttachmentsDrawer() {
         const attachmentId = Number(select.getAttribute('data-attachment-expiry') || 0);
         const expirySeconds = Number(select.value || 0);
         updatePendingAttachmentExpiry(attachmentId, expirySeconds).catch(() => {
-            showToast('Unable to update attachment expiry', 'error');
+            showToast(uiText('unable_to_update_attachment_expiry'), 'error');
         });
     });
 
@@ -2266,7 +2332,7 @@ function buildSidebarChatNode(chat, options = {}) {
     const sidebarTitle = getChatSidebarTitle(chat);
     const rawMessage = decodeStoredMentionsToPlainText(chat.last_message || '');
     const secondaryLine = (() => {
-        if (!rawMessage) return 'No messages yet';
+        if (!rawMessage) return uiText('no_messages_yet');
         const senderId = Number(chat.last_message_user_id || 0);
         const prefix = senderId && senderId === Number(currentUserId || 0)
             ? 'You'
@@ -2312,7 +2378,7 @@ function buildSidebarChatNode(chat, options = {}) {
     if (showFavoriteStar) {
         const star = document.createElement('i');
         star.className = 'fa-solid fa-star text-amber-400 text-[11px]';
-        star.title = 'Favorite';
+        star.title = uiText('favorite');
         primaryLine.appendChild(star);
     }
 
@@ -2425,7 +2491,7 @@ function renderSidebarList() {
     empty.className = 'text-zinc-500 text-sm px-3 py-1';
     empty.textContent = sidebarMode === 'custom'
         ? `${getSidebarCustomLabel()} list is empty`
-        : 'No chats yet';
+        : uiText('no_chats_yet');
     list.replaceChildren(empty);
 }
 
@@ -2454,7 +2520,7 @@ function bindSidebarCustomRenameModal() {
         }
 
         submit.disabled = false;
-        submit.textContent = 'Save';
+        submit.textContent = uiText('save');
     };
 
     const closeModal = () => {
@@ -2485,7 +2551,7 @@ function bindSidebarCustomRenameModal() {
         const isReset = submitted === '';
 
         submit.disabled = true;
-        submit.textContent = 'Saving...';
+        submit.textContent = uiText('saving');
 
         try {
             await persistSidebarCustomLabel(submitted);
@@ -2496,10 +2562,10 @@ function bindSidebarCustomRenameModal() {
             closeModal();
             showToast(isReset ? 'Category reset to Custom' : 'Category renamed', 'success');
         } catch {
-            showToast('Unable to rename category', 'error');
+            showToast(uiText('unable_to_rename_category'), 'error');
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Save';
+            submit.textContent = uiText('save');
         }
     });
 
@@ -2567,12 +2633,12 @@ async function addChatToCustomSidebar(chatNumber) {
     if (sidebarCustomChatNumbers.includes(number)) return;
 
     if (sidebarCustomChatNumbers.length >= SIDEBAR_CUSTOM_MAX_ITEMS) {
-        showToast('Custom list can have up to 8 chats', 'error');
+        showToast(uiText('custom_list_can_have_up_to_8_chats'), 'error');
         return;
     }
 
     if (!getChatByNumber(number)) {
-        showToast('Chat unavailable', 'error');
+        showToast(uiText('chat_unavailable'), 'error');
         return;
     }
 
@@ -2583,7 +2649,7 @@ async function addChatToCustomSidebar(chatNumber) {
         renderSidebarList();
     } catch {
         sidebarCustomChatNumbers = sidebarCustomChatNumbers.filter((value) => value !== number);
-        showToast('Unable to update custom list', 'error');
+        showToast(uiText('unable_to_update_custom_list'), 'error');
     }
 }
 
@@ -2602,7 +2668,7 @@ async function removeChatFromCustomSidebar(chatNumber) {
         renderSidebarList();
     } catch {
         sidebarCustomChatNumbers = previous;
-        showToast('Unable to update custom list', 'error');
+        showToast(uiText('unable_to_update_custom_list'), 'error');
     }
 }
 
@@ -2629,7 +2695,7 @@ async function reorderCustomSidebarChats(draggedChatNumber, targetChatNumber) {
     } catch {
         sidebarCustomChatNumbers = previous;
         renderSidebarList();
-        showToast('Unable to save custom order', 'error');
+        showToast(uiText('unable_to_save_custom_order'), 'error');
     }
 }
 
@@ -2731,15 +2797,15 @@ function bindSidebarCustomMenu() {
                 await addChatToCustomSidebar(chatNumber);
             } else if (action === 'copy-link') {
                 await copyTextFallback(`${window.location.origin}/c/${formatNumber(chatNumber)}`);
-                showToast('Group link copied', 'success');
+                showToast(uiText('group_link_copied'), 'success');
             } else if (action === 'copy-number') {
                 await copyTextFallback(formatNumber(chatNumber));
-                showToast('Group number copied', 'success');
+                showToast(uiText('group_number_copied'), 'success');
             } else if (action === 'remove') {
                 await removeChatFromCustomSidebar(chatNumber);
             }
         } catch {
-            showToast('Unable to complete action', 'error');
+            showToast(uiText('unable_to_complete_action'), 'error');
         }
 
         hideSidebarCustomContextMenu();
@@ -2950,7 +3016,7 @@ async function createGroupChat() {
         return;
     }
 
-    showToast(result.error || 'Unable to create group chat', 'error');
+    showToast(uiActionError(result.error, 'unable_to_create_group_chat'), 'error');
 }
 
 async function addGroupMemberByUsername(event, usernameOverride = null) {
@@ -2960,14 +3026,14 @@ async function addGroupMemberByUsername(event, usernameOverride = null) {
 
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can add or remove members', 'error');
+        showToast(uiText('only_group_chats_can_add_or_remove_members'), 'error');
         return;
     }
 
     const usernameInput = document.getElementById('group-add-username');
     const username = String(usernameOverride ?? (usernameInput?.value || '')).trim();
     if (!username) {
-        showToast('Enter a username', 'error');
+        showToast(uiText('enter_a_username'), 'error');
         return;
     }
 
@@ -2978,7 +3044,7 @@ async function addGroupMemberByUsername(event, usernameOverride = null) {
     });
 
     if (result.success) {
-        showToast('User added to group', 'success');
+        showToast(uiText('user_added_to_group'), 'success');
         if (usernameInput) {
             usernameInput.value = '';
         }
@@ -2986,7 +3052,7 @@ async function addGroupMemberByUsername(event, usernameOverride = null) {
         return;
     }
 
-    showToast(result.error || 'Unable to add member', 'error');
+    showToast(uiActionError(result.error, 'unable_to_add_member'), 'error');
 }
 
 function bindAddUserModal() {
@@ -3081,7 +3147,7 @@ function bindAddUserModal() {
         }
 
         submit.disabled = false;
-        submit.textContent = 'Add user';
+        submit.textContent = uiText('add_user');
         hideTypeahead();
     };
 
@@ -3152,14 +3218,14 @@ function bindAddUserModal() {
         if (submit.disabled) return;
 
         submit.disabled = true;
-        submit.textContent = 'Adding...';
+        submit.textContent = uiText('adding');
         hideTypeahead();
 
         try {
             await addGroupMemberByUsername(null, input.value);
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Add user';
+            submit.textContent = uiText('add_user');
         }
     });
 
@@ -3169,13 +3235,13 @@ function bindAddUserModal() {
 async function removeGroupMember(userId, username) {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can add or remove members', 'error');
+        showToast(uiText('only_group_chats_can_add_or_remove_members'), 'error');
         return;
     }
 
     const ownerUserId = Number(currentChat.owner_user_id || 0);
     if (ownerUserId > 0 && Number(userId) === ownerUserId) {
-        showToast('Group owner cannot be removed', 'error');
+        showToast(uiText('group_owner_cannot_be_removed'), 'error');
         return;
     }
 
@@ -3186,7 +3252,7 @@ async function removeGroupMember(userId, username) {
     });
 
     if (result.success) {
-        showToast('User removed from group', 'success');
+        showToast(uiText('user_removed_from_group'), 'success');
         const memberChip = document.querySelector(`[data-group-member-user-id="${Number(userId)}"]`);
         if (memberChip) {
             memberChip.remove();
@@ -3194,7 +3260,7 @@ async function removeGroupMember(userId, username) {
         return;
     }
 
-    showToast(result.error || 'Unable to remove member', 'error');
+    showToast(uiActionError(result.error, 'unable_to_remove_member'), 'error');
 }
 
 async function promoteGroupModerator(userId, username) {
@@ -3211,7 +3277,7 @@ async function promoteGroupModerator(userId, username) {
         return;
     }
 
-    showToast(result.error || 'Unable to promote moderator', 'error');
+    showToast(uiActionError(result.error, 'unable_to_promote_moderator'), 'error');
 }
 
 async function demoteGroupModerator(userId, username) {
@@ -3228,7 +3294,7 @@ async function demoteGroupModerator(userId, username) {
         return;
     }
 
-    showToast(result.error || 'Unable to demote moderator', 'error');
+    showToast(uiActionError(result.error, 'unable_to_demote_moderator'), 'error');
 }
 
 async function muteGroupMember(userId, username) {
@@ -3245,7 +3311,7 @@ async function muteGroupMember(userId, username) {
         return;
     }
 
-    showToast(result.error || 'Unable to mute member', 'error');
+    showToast(uiActionError(result.error, 'unable_to_mute_member'), 'error');
 }
 
 async function unmuteGroupMember(userId, username) {
@@ -3262,7 +3328,7 @@ async function unmuteGroupMember(userId, username) {
         return;
     }
 
-    showToast(result.error || 'Unable to unmute member', 'error');
+    showToast(uiActionError(result.error, 'unable_to_unmute_member'), 'error');
 }
 
 async function requestCurrentGroupJoin() {
@@ -3274,12 +3340,12 @@ async function requestCurrentGroupJoin() {
     });
 
     if (result.success) {
-        showToast('Join request sent', 'success');
+        showToast(uiText('join_request_sent'), 'success');
         await reloadCurrentView({ source: 'group-request-join' });
         return;
     }
 
-    showToast(result.error || 'Unable to request access', 'error');
+    showToast(uiActionError(result.error, 'unable_to_request_access'), 'error');
 }
 
 async function cancelCurrentGroupJoinRequest() {
@@ -3291,12 +3357,12 @@ async function cancelCurrentGroupJoinRequest() {
     });
 
     if (result.success) {
-        showToast('Join request cancelled', 'success');
+        showToast(uiText('join_request_cancelled'), 'success');
         await reloadCurrentView({ source: 'group-cancel-request' });
         return;
     }
 
-    showToast(result.error || 'Unable to cancel request', 'error');
+    showToast(uiActionError(result.error, 'unable_to_cancel_request'), 'error');
 }
 
 async function approveGroupJoinRequest(userId) {
@@ -3309,12 +3375,12 @@ async function approveGroupJoinRequest(userId) {
     });
 
     if (result.success) {
-        showToast('Join request approved', 'success');
+        showToast(uiText('join_request_approved'), 'success');
         await reloadCurrentView({ source: 'group-approve-request' });
         return;
     }
 
-    showToast(result.error || 'Unable to approve request', 'error');
+    showToast(uiActionError(result.error, 'unable_to_approve_request'), 'error');
 }
 
 async function denyGroupJoinRequest(userId) {
@@ -3327,12 +3393,12 @@ async function denyGroupJoinRequest(userId) {
     });
 
     if (result.success) {
-        showToast('Join request denied', 'success');
+        showToast(uiText('join_request_denied'), 'success');
         await reloadCurrentView({ source: 'group-deny-request' });
         return;
     }
 
-    showToast(result.error || 'Unable to deny request', 'error');
+    showToast(uiActionError(result.error, 'unable_to_deny_request'), 'error');
 }
 
 window.promoteGroupModerator = promoteGroupModerator;
@@ -3345,7 +3411,7 @@ window.denyGroupJoinRequest = denyGroupJoinRequest;
 async function leaveCurrentGroup() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can be left', 'error');
+        showToast(uiText('only_group_chats_can_be_left'), 'error');
         return;
     }
 
@@ -3375,7 +3441,7 @@ function getEligibleNewOwners() {
 async function submitLeaveGroup(newOwnerUserId = 0) {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can be left', 'error');
+        showToast(uiText('only_group_chats_can_be_left'), 'error');
         return;
     }
 
@@ -3390,13 +3456,13 @@ async function submitLeaveGroup(newOwnerUserId = 0) {
         const ownerOptions = getEligibleNewOwners();
 
         if (ownerOptions.length === 0) {
-            showToast('You cannot leave a group you own with no other members. Delete the group instead.', 'error');
+            showToast(uiText('you_cannot_leave_a_group_you_own_with'), 'error');
             return;
         }
 
         const ownerId = Number(newOwnerUserId || 0);
         if (!ownerOptions.some((option) => option.userId === ownerId)) {
-            showToast('Choose a current group member to transfer ownership before leaving.', 'error');
+            showToast(uiText('choose_a_current_group_member_to_transfer_ownership'), 'error');
             return;
         }
 
@@ -3411,13 +3477,13 @@ async function submitLeaveGroup(newOwnerUserId = 0) {
         return;
     }
 
-    showToast(result.error || 'Unable to leave group', 'error');
+    showToast(uiActionError(result.error, 'unable_to_leave_group'), 'error');
 }
 
 async function deleteCurrentGroup() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can be deleted', 'error');
+        showToast(uiText('only_group_chats_can_be_deleted'), 'error');
         return;
     }
 
@@ -3429,7 +3495,7 @@ async function deleteCurrentGroup() {
 async function submitDeleteGroup() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can be deleted', 'error');
+        showToast(uiText('only_group_chats_can_be_deleted'), 'error');
         return;
     }
 
@@ -3443,19 +3509,19 @@ async function submitDeleteGroup() {
         return;
     }
 
-    showToast(result.error || 'Unable to delete group', 'error');
+    showToast(uiActionError(result.error, 'unable_to_delete_group'), 'error');
 }
 
 async function takeCurrentGroupOwnership() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can change ownership', 'error');
+        showToast(uiText('only_group_chats_can_change_ownership'), 'error');
         return;
     }
 
     const ownerUserId = Number(currentChat.owner_user_id || 0);
     if (ownerUserId > 0 && ownerUserId === Number(currentUserId || 0)) {
-        showToast('You already own this group', 'error');
+        showToast(uiText('you_already_own_this_group'), 'error');
         return;
     }
 
@@ -3470,13 +3536,13 @@ async function takeCurrentGroupOwnership() {
 async function submitTakeCurrentGroupOwnership() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can change ownership', 'error');
+        showToast(uiText('only_group_chats_can_change_ownership'), 'error');
         return;
     }
 
     const ownerUserId = Number(currentChat.owner_user_id || 0);
     if (ownerUserId > 0 && ownerUserId === Number(currentUserId || 0)) {
-        showToast('You already own this group', 'error');
+        showToast(uiText('you_already_own_this_group'), 'error');
         return;
     }
 
@@ -3486,12 +3552,12 @@ async function submitTakeCurrentGroupOwnership() {
     });
 
     if (result.success) {
-        showToast('You now own this group', 'success');
+        showToast(uiText('you_now_own_this_group'), 'success');
         await reloadCurrentView({ source: 'take-group-ownership' });
         return;
     }
 
-    showToast(result.error || 'Unable to take ownership', 'error');
+    showToast(uiActionError(result.error, 'unable_to_take_ownership'), 'error');
 }
 
 window.takeCurrentGroupOwnership = takeCurrentGroupOwnership;
@@ -3507,7 +3573,7 @@ function bindTakeOwnershipModal() {
         modal.classList.toggle('hidden', !isOpen);
         if (!isOpen) {
             submit.disabled = false;
-            submit.textContent = 'Take Ownership';
+            submit.textContent = uiText('take_ownership');
         }
     };
 
@@ -3536,13 +3602,13 @@ function bindTakeOwnershipModal() {
         if (submit.disabled) return;
 
         submit.disabled = true;
-        submit.textContent = 'Taking...';
+        submit.textContent = uiText('taking');
 
         try {
             await submitTakeCurrentGroupOwnership();
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Take Ownership';
+            submit.textContent = uiText('take_ownership');
             closeModal();
         }
     });
@@ -3572,7 +3638,7 @@ function bindLeaveGroupModal() {
 
         if (!isOpen) {
             submit.disabled = false;
-            submit.textContent = 'Leave Group';
+            submit.textContent = uiText('leave_group');
             return;
         }
 
@@ -3593,7 +3659,7 @@ function bindLeaveGroupModal() {
         }
 
         ownerSelect.innerHTML = '<option value="">Select member</option>';
-        description.textContent = 'Are you sure you want to leave this group?';
+        description.textContent = uiText('are_you_sure_you_want_to_leave_this');
     };
 
     const closeModal = () => {
@@ -3621,14 +3687,14 @@ function bindLeaveGroupModal() {
         if (submit.disabled) return;
 
         submit.disabled = true;
-        submit.textContent = 'Leaving...';
+        submit.textContent = uiText('leaving');
 
         try {
             const selectedOwnerUserId = Number(ownerSelect.value || 0);
             await submitLeaveGroup(selectedOwnerUserId);
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Leave Group';
+            submit.textContent = uiText('leave_group');
         }
     });
 
@@ -3646,7 +3712,7 @@ function bindDeleteGroupModal() {
         modal.classList.toggle('hidden', !isOpen);
         if (!isOpen) {
             submit.disabled = false;
-            submit.textContent = 'Delete Group';
+            submit.textContent = uiText('delete_group');
         }
     };
 
@@ -3675,13 +3741,13 @@ function bindDeleteGroupModal() {
         if (submit.disabled) return;
 
         submit.disabled = true;
-        submit.textContent = 'Deleting...';
+        submit.textContent = uiText('deleting');
 
         try {
             await submitDeleteGroup();
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Delete Group';
+            submit.textContent = uiText('delete_group');
         }
     });
 
@@ -3691,7 +3757,7 @@ function bindDeleteGroupModal() {
 async function renameCurrentChat() {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) !== 'group') {
-        showToast('Only group chats can be renamed', 'error');
+        showToast(uiText('only_group_chats_can_be_renamed'), 'error');
         return;
     }
 
@@ -3713,7 +3779,7 @@ async function renameCurrentChat() {
         return;
     }
 
-    showToast(result.error || 'Unable to rename chat', 'error');
+    showToast(uiActionError(result.error, 'unable_to_rename_chat'), 'error');
 }
 
 function bindRenameChatModal() {
@@ -3743,7 +3809,7 @@ function bindRenameChatModal() {
         }
 
         submit.disabled = false;
-        submit.textContent = 'Save';
+        submit.textContent = uiText('save');
         cancel.textContent = defaultCancelLabel;
         modal.dataset.preferGroupNumberPrompt = '0';
     };
@@ -3781,13 +3847,13 @@ function bindRenameChatModal() {
         }
 
         submit.disabled = true;
-        submit.textContent = 'Saving...';
+        submit.textContent = uiText('saving');
 
         try {
             await renameCurrentChat();
         } finally {
             submit.disabled = false;
-            submit.textContent = 'Save';
+            submit.textContent = uiText('save');
         }
     });
 
@@ -3795,11 +3861,17 @@ function bindRenameChatModal() {
 }
 
 async function pollMessages(options = {}) {
-    if (!currentChat) return;
-    const res = await fetch(`/api/messages/${currentChat.id}`);
+    const chat = currentChat;
+    if (!chat) return;
+    const sequence = ++messageRefreshSequence;
+    const bannerRevision = chatBannerRevision;
+    const res = await fetch(`/api/messages/${chat.id}`);
+    if (!res.ok) return;
     const data = await res.json();
-    const messages = data.messages || [];
-    const typingUsers = data.typing_users || [];
+    if (currentChat !== chat || sequence < lastAppliedMessageRefresh || !Array.isArray(data?.messages)) return;
+    lastAppliedMessageRefresh = sequence;
+    const messages = data.messages;
+    const typingUsers = Array.isArray(data.typing_users) ? data.typing_users : [];
     const pinnedMessage = normalizePinnedMessage(data.pinned_message);
     const activePoll = normalizeActivePoll(data.active_poll);
     if (currentChat && data.group_edit_window !== undefined) {
@@ -3833,12 +3905,13 @@ async function pollMessages(options = {}) {
 
     updatePersonalChatHeaderStatusFromMessages(messages);
     renderTypingIndicator(typingUsers);
-    if (currentChat) {
-        currentChat.pinned_message = pinnedMessage;
-        currentChat.active_poll = activePoll;
+    // A refresh already in flight may predate a successful pin or poll action.
+    if (bannerRevision === chatBannerRevision) {
+        chat.pinned_message = pinnedMessage;
+        chat.active_poll = activePoll;
+        renderPinnedMessageBanner(pinnedMessage);
+        renderActivePollBanner(activePoll);
     }
-    renderPinnedMessageBanner(pinnedMessage);
-    renderActivePollBanner(activePoll);
     refreshChatCallStatusBar();
 
     if (hasCanSendMessage) {
@@ -4123,7 +4196,7 @@ function setChatComposerEnabled(enabled, restrictionReason = '') {
     if (input) {
         input.disabled = !isEnabled;
         input.required = isEnabled;
-        input.placeholder = 'Message...';
+        input.placeholder = uiText('message');
     }
     if (sendButton) {
         sendButton.disabled = !isEnabled;
@@ -4447,7 +4520,7 @@ function renderMessages(messages, options = {}) {
             const isPollCreatedEvent = systemEventType === 'poll_created';
             const isPollExpiredEvent = systemEventType === 'poll_expired';
             const isStandalonePollEvent = isPollCreatedEvent || isPollExpiredEvent;
-            const isNewPrologueCluster = isStandalonePollEvent ? true : !previousWasSystemEvent;
+            const isNewSystemCluster = isStandalonePollEvent ? true : !previousWasSystemEvent;
             const isCallSystemEvent = systemEventType.startsWith('call_');
             const sysFullTimestamp = String(msg.created_at || '');
             const sysCompactTimestamp = formatCompactMessageTimestamp(sysFullTimestamp);
@@ -4459,7 +4532,7 @@ function renderMessages(messages, options = {}) {
                 : '';
 
             let systemAvatarIcon = 'fa-comments';
-            let systemHeaderLabel = 'Prologue';
+            let systemHeaderLabel = 'Causette';
             let systemContent = String(msg.content || '');
 
             if (isPollCreatedEvent) {
@@ -4471,22 +4544,22 @@ function renderMessages(messages, options = {}) {
                 if (match) {
                     const creatorName = String(match[1] || '').trim();
                     const question = String(match[2] || '').trim();
-                    systemHeaderLabel = `Poll created by ${creatorName || 'Unknown user'}`;
+                    systemHeaderLabel = chatLabel('poll_created_by', { creator: creatorName || chatLabel('unknown_user') });
                     lines[0] = question;
                     systemContent = lines.join('\n').trim();
                 }
             } else if (isPollExpiredEvent) {
                 systemAvatarIcon = 'fa-square-poll-horizontal';
-                systemHeaderLabel = 'Poll expired';
+                systemHeaderLabel = chatLabel('poll_expired');
             }
 
             chunks.push(`
-                <div class="flex gap-3 ${isNewPrologueCluster ? 'mt-4' : 'mt-1'}${isHiddenByDefault ? ' hidden' : ''}"${middleAttrs}>
+                <div class="flex gap-3 ${isNewSystemCluster ? 'mt-4' : 'mt-1'}${isHiddenByDefault ? ' hidden' : ''}"${middleAttrs}>
                     <div class="w-10 shrink-0">
-                        ${isNewPrologueCluster ? `<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center font-semibold mt-0.5"><i class="fa-solid ${escapeHtml(systemAvatarIcon)} text-xs" aria-hidden="true"></i></div>` : '<div class="w-10 h-10"></div>'}
+                        ${isNewSystemCluster ? `<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center font-semibold mt-0.5"><i class="fa-solid ${escapeHtml(systemAvatarIcon)} text-xs" aria-hidden="true"></i></div>` : '<div class="w-10 h-10"></div>'}
                     </div>
                     <div class="min-w-0 flex-1">
-                        ${isNewPrologueCluster ? `<div class="flex items-center gap-2 mb-0.5"><span class="text-sm font-semibold leading-5 text-zinc-400">${escapeHtml(systemHeaderLabel)}</span></div>` : ''}
+                        ${isNewSystemCluster ? `<div class="flex items-center gap-2 mb-0.5"><span class="text-sm font-semibold leading-5 text-zinc-400">${escapeHtml(systemHeaderLabel)}</span></div>` : ''}
                         <div class="text-zinc-400 text-[15px] leading-6">${renderPlainTextWithEmoji(systemContent)}</div>
                         <div class="relative mt-0.5">
                             <div class="text-xs flex items-center gap-3">
@@ -4524,24 +4597,25 @@ function renderMessages(messages, options = {}) {
         const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
         const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
         const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
+        const pinLabel = escapeHtml(chatLabel('pin'));
 
         let editButton = '';
         let deleteButton = '';
         if (canEditMessage(msg, isQuoted)) {
-            editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="Edit" aria-label="Edit" data-edit-message-id="${Number(msg.id)}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
+            editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="${escapeHtml(uiText('edit'))}" aria-label="${escapeHtml(uiText('edit'))}" data-edit-message-id="${Number(msg.id)}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
         }
         if (canDeleteMessage(msg)) {
-            deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="Delete" aria-label="Delete" data-delete-message-id="${Number(msg.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
+            deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="${escapeHtml(uiText('delete'))}" aria-label="${escapeHtml(uiText('delete'))}" data-delete-message-id="${Number(msg.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
         }
 
         const interactionControlsMarkup = isGroupReadOnlyViewer
             ? ''
             : `<div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="Quote" aria-label="Quote" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(String(msg.username || ''))}" data-quote-user-number="${escapeHtml(String(msg.user_number || ''))}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
+                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(String(msg.username || ''))}" data-quote-user-number="${escapeHtml(String(msg.user_number || ''))}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
                                 ${editButton}
                                 ${deleteButton}
-                                ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="Pin" aria-label="Pin" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="React" aria-label="React" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbs-up" aria-hidden="true"></i></button>
+                                ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbs-up" aria-hidden="true"></i></button>
                             </div>`;
 
         chunks.push(`
@@ -4550,7 +4624,7 @@ function renderMessages(messages, options = {}) {
                     ${isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>'}
                 </div>
                 <div class="min-w-0 flex-1">
-                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${profileUrl ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-semibold leading-5 inline-block prologue-accent hover:text-emerald-300 hover:underline underline-offset-2">${escapeHtml(msg.username)}</a>` : `<div class="text-sm font-semibold leading-5 inline-block prologue-accent">${escapeHtml(msg.username)}</div>`}${showStatus ? `<span class="inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
+                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${profileUrl ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${escapeHtml(msg.username)}</a>` : `<div class="text-sm font-semibold leading-5 inline-block causette-accent">${escapeHtml(msg.username)}</div>`}${showStatus ? `<span class="inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
                     ${renderQuotedMessageBlock(msg)}
                     <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
                     ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
@@ -4558,7 +4632,7 @@ function renderMessages(messages, options = {}) {
                         ${renderReactionPickerMarkup(msg.id)}
                         <div class="text-xs flex items-center gap-3">
                             <span class="text-zinc-500" data-utc="${escapeHtml(fullTimestamp)}" title="${escapeHtml(fullTimestamp)}">${escapeHtml(compactTimestamp)}</span>
-                            ${editedAt ? '<span class="text-zinc-500 italic">(edited)</span>' : ''}
+                            ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
                             ${interactionControlsMarkup}
                             ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
                         </div>
@@ -4730,7 +4804,7 @@ async function deleteSubmittedAttachment(attachmentId) {
 
         await pollMessages({ scrollMode: 'preserve', forceRender: true });
     } catch (error) {
-        showToast('Failed to delete attachment', 'error');
+        showToast(uiText('failed_to_delete_attachment'), 'error');
     }
 }
 
@@ -4769,7 +4843,7 @@ async function submitEditMessage(messageId) {
     if (!input) return;
     const newContent = input.value.trim();
     if (!newContent) {
-        showToast('Message cannot be empty', 'error');
+        showToast(uiText('message_cannot_be_empty'), 'error');
         return;
     }
 
@@ -4786,7 +4860,7 @@ async function submitEditMessage(messageId) {
         }
         await pollMessages({ scrollMode: 'preserve', forceRender: true });
     } catch (e) {
-        showToast('Failed to edit message', 'error');
+        showToast(uiText('failed_to_edit_message'), 'error');
         cancelEditMessage(messageId);
     }
 }
@@ -4845,7 +4919,7 @@ function bindDeleteMessageModal() {
                 }
                 await pollMessages({ scrollMode: 'preserve', forceRender: true });
             } catch (err) {
-                showToast('Failed to delete message', 'error');
+                showToast(uiText('failed_to_delete_message'), 'error');
             }
         });
     }
@@ -4989,10 +5063,10 @@ function bindMessageSettingsModal() {
                 currentChat.group_edit_window = editWindow;
                 currentChat.group_delete_window = deleteWindow;
                 currentChat.group_visibility = nonMemberVisibility;
-                showToast('Group settings saved');
+                showToast(uiText('group_settings_saved'));
                 await pollMessages({ scrollMode: 'preserve', forceRender: true });
             } catch (err) {
-                showToast('Failed to save settings', 'error');
+                showToast(uiText('failed_to_save_settings'), 'error');
             }
         });
     }

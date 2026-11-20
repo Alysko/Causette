@@ -88,14 +88,40 @@ checkBootstrap(renderChatBootstrap([(object) $attachment], (object) $pin, (objec
 $badText = "Before \xC3 after";
 $repairedText = "Before \u{FFFD} after";
 
-checkBootstrap(renderChatBootstrap(
+$invalidUtf8Html = renderChatBootstrap(
     [(object) array_replace($attachment, ['original_name' => $badText])],
     (object) array_replace($pin, ['content' => $badText]),
     (object) array_replace($poll, ['question' => $badText]),
-), [
+);
+checkBootstrap($invalidUtf8Html, [
     'PENDING_ATTACHMENTS' => [array_replace($attachment, ['original_name' => $repairedText])],
     'INITIAL_PINNED_MESSAGE' => array_replace($pin, ['content' => $repairedText]),
     'INITIAL_ACTIVE_POLL' => array_replace($poll, ['question' => $repairedText]),
 ]);
+if (!str_contains($invalidUtf8Html, 'id="pinned-message-content"')
+    || !str_contains($invalidUtf8Html, 'data-raw-content="' . $repairedText . '"')) {
+    throw new RuntimeException('The initial pin must preserve valid text around malformed UTF-8');
+}
+
+foreach ([
+    'en' => ['Pinned message', 'Active poll', 'Go to message', 'Poll created'],
+    'fr' => ['Message épinglé', 'Sondage en cours', 'Aller au message', 'Sondage créé'],
+] as $language => [$pinTitle, $pollTitle, $jumpLabel, $pollCreatedToast]) {
+    $_GET['lang'] = $language;
+    $html = renderChatBootstrap([], (object) $pin, (object) $poll);
+    if (!str_contains($html, '>' . $pinTitle . '</div>')
+        || !str_contains($html, '>' . $pollTitle . '</div>')
+        || !str_contains($html, 'aria-label="' . $jumpLabel . '"')) {
+        throw new RuntimeException('Initial F01 labels must use the selected language: ' . $language);
+    }
+
+    $json = bootstrapJson($html, 'CAUSETTE_CHAT_I18N');
+    $translations = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    if ($translations['language'] !== $language
+        || $translations['labels']['poll_created'] !== $pollCreatedToast
+        || strpbrk($json, "<>&'") !== false) {
+        throw new RuntimeException('The chat catalog must be safely embedded in the selected language: ' . $language);
+    }
+}
 
 echo "Chat bootstrap checks passed.\n";

@@ -16,3 +16,7 @@ storage/avatars/*
 .DS_Store
 **/.DS_Store
 .vscode/
+/frontend/node_modules/
+# Database exports belong outside the source tree.
+/*.sql
+/*.sql.gz

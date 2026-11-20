@@ -1,15 +1,16 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <div class="p-8 overflow-auto">
-    <h1 class="text-3xl font-bold mb-6">Users</h1>
+    <h1 class="text-3xl font-bold mb-6"><?= $tr('ui.users') ?></h1>
 
     <?php $userList = $users ?? []; ?>
 
     <div class="mb-4 max-w-3xl">
-        <label for="admin-users-search-input" class="sr-only">Search usernames</label>
+        <label for="admin-users-search-input" class="sr-only"><?= $tr('ui.search_usernames') ?></label>
         <div class="relative">
             <input
                 type="text"
                 id="admin-users-search-input"
-                placeholder="Search usernames"
+                placeholder="<?= $tr('ui.search_usernames') ?>"
                 autocomplete="off"
                 class="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-5 py-2.5"
             >
@@ -20,7 +21,7 @@
     <section class="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-4xl">
         <div id="admin-users-list" class="space-y-3">
             <?php if (empty($userList)): ?>
-                <p class="text-zinc-400 text-sm">No users found.</p>
+                <p class="text-zinc-400 text-sm"><?= $tr('ui.no_users_found') ?></p>
             <?php else: ?>
                 <?php foreach ($userList as $managedUser): ?>
                     <?php $managedAvatar = User::avatarUrl($managedUser); ?>
@@ -55,18 +56,18 @@
                                         <span id="admin-user-role-badge-<?= (int)$managedUser->id ?>" class="text-[11px] px-2 py-0.5 rounded-full <?= $managedIsAdmin ? 'bg-emerald-700 text-emerald-100' : 'bg-zinc-700 text-zinc-200' ?>">
                                             <?= htmlspecialchars($managedIsAdmin ? 'admin' : 'user', ENT_QUOTES, 'UTF-8') ?>
                                         </span>
-                                        <span id="admin-user-banned-badge-<?= (int)$managedUser->id ?>" class="text-[11px] px-2 py-0.5 rounded-full bg-red-800 text-red-100 <?= $managedIsBanned ? '' : 'hidden' ?>">banned</span>
+                                        <span id="admin-user-banned-badge-<?= (int)$managedUser->id ?>" class="text-[11px] px-2 py-0.5 rounded-full bg-red-800 text-red-100 <?= $managedIsBanned ? '' : 'hidden' ?>"><?= $tr('ui.banned') ?></span>
                                     </div>
                                 </div>
                             </div>
 
                             <div class="relative shrink-0">
-                                <button type="button" class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" onclick="toggleAdminUserMenu(<?= (int)$managedUser->id ?>)">Actions</button>
+                                <button type="button" class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" onclick="toggleAdminUserMenu(<?= (int)$managedUser->id ?>)"><?= $tr('ui.actions') ?></button>
                                 <div id="admin-user-menu-<?= (int)$managedUser->id ?>" data-admin-user-menu class="hidden absolute right-0 mt-2 w-56 bg-zinc-900 border border-zinc-700 rounded-xl p-3 z-30 space-y-3">
                                     <div class="space-y-2">
                                         <button type="button" id="admin-user-role-action-<?= (int)$managedUser->id ?>" class="w-full text-left text-sm px-3 py-2 rounded-lg <?= $managedIsAdmin ? 'bg-amber-700 hover:bg-amber-600 text-amber-100' : 'bg-emerald-700 hover:bg-emerald-600 text-emerald-100' ?>" onclick="confirmAdminUserRoleAction(<?= (int)$managedUser->id ?>)"><?= $managedIsAdmin ? 'Demote' : 'Promote' ?></button>
                                         <button type="button" id="admin-user-ban-action-<?= (int)$managedUser->id ?>" class="w-full text-left bg-amber-700 hover:bg-amber-600 text-amber-100 text-sm px-3 py-2 rounded-lg" onclick="confirmAdminUserBanAction(<?= (int)$managedUser->id ?>)"><?= $managedIsBanned ? 'Unban' : 'Ban' ?></button>
-                                        <button type="button" class="w-full text-left bg-red-700 hover:bg-red-600 text-red-100 text-sm px-3 py-2 rounded-lg" onclick="deleteAdminUser(<?= (int)$managedUser->id ?>)">Delete user</button>
+                                        <button type="button" class="w-full text-left bg-red-700 hover:bg-red-600 text-red-100 text-sm px-3 py-2 rounded-lg" onclick="deleteAdminUser(<?= (int)$managedUser->id ?>)"><?= $tr('ui.delete_user') ?></button>
                                     </div>
                                 </div>
                             </div>
@@ -81,15 +82,15 @@
 <div id="admin-user-action-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
     <div class="h-full w-full flex items-center justify-center">
         <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="admin-user-action-modal-title">
-            <h2 id="admin-user-action-modal-title" class="text-lg font-semibold text-zinc-100">Confirm action</h2>
-            <p id="admin-user-action-modal-description" class="mt-2 text-sm text-zinc-400">Are you sure?</p>
+            <h2 id="admin-user-action-modal-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.confirm_action') ?></h2>
+            <p id="admin-user-action-modal-description" class="mt-2 text-sm text-zinc-400"><?= $tr('ui.are_you_sure') ?></p>
             <label id="admin-user-retain-messages-wrap" class="mt-4 hidden items-start gap-2 text-sm text-zinc-300">
                 <input id="admin-user-retain-messages" type="checkbox" class="mt-0.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600 focus:ring-emerald-500" value="1">
-                <span>Retain this user's messages in all chats</span>
+                <span><?= $tr('ui.retain_this_user_s_messages_in') ?></span>
             </label>
             <div class="mt-5 flex items-center justify-end gap-3">
-                <button type="button" id="admin-user-action-modal-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Cancel</button>
-                <button type="button" id="admin-user-action-modal-submit" class="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white">Confirm</button>
+                <button type="button" id="admin-user-action-modal-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.cancel') ?></button>
+                <button type="button" id="admin-user-action-modal-submit" class="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white"><?= $tr('ui.confirm') ?></button>
             </div>
         </div>
     </div>

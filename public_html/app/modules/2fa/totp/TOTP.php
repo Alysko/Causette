@@ -37,18 +37,22 @@ class TOTP {
         return str_pad((string)$code, self::DIGITS, '0', STR_PAD_LEFT);
     }
 
-    /**
-     * Verify a code with a time window tolerance.
-     */
-    public static function verify(string $base32Secret, string $code, int $window = 1): bool {
-        $now = time();
-        for ($i = -$window; $i <= $window; $i++) {
-            $timestamp = $now + ($i * self::PERIOD);
-            if (hash_equals(self::getCode($base32Secret, $timestamp), $code)) {
-                return true;
+    public static function matchingStep(string $base32Secret, string $code, int $window = 1): ?int {
+        $current = intdiv(time(), self::PERIOD);
+        for ($step = $current + $window; $step >= $current - $window; $step--) {
+            if (hash_equals(self::getCode($base32Secret, $step * self::PERIOD), $code)) {
+                return $step;
             }
         }
-        return false;
+        return null;
+    }
+
+    public static function consumeStep(int $userId, int $step): bool {
+        $key = 'auth_totp_step_' . $userId;
+        Database::query("INSERT INTO settings (`key`, `value`) VALUES (?, '0')
+            ON DUPLICATE KEY UPDATE `key` = `key`", [$key]);
+        return Database::query('UPDATE settings SET `value` = ? WHERE `key` = ? AND CAST(`value` AS UNSIGNED) < ?',
+            [$step, $key, $step])->rowCount() === 1;
     }
 
     /**

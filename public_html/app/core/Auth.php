@@ -1,34 +1,33 @@
 <?php
+require_once __DIR__ . '/TrustedBrowser.php';
+require_once __DIR__ . '/BrowserSession.php';
+
+use Causette\Security\BrowserSession;
+use Causette\Security\TrustedBrowser;
+
 class Auth {
     public static function user() {
-        if (!isset($_SESSION['user_id'])) {
-            self::tryRestoreFromRememberCookie();
-        }
-
-        if (!isset($_SESSION['user_id'])) return null;
-
-        $sessionToken = trim((string)($_SESSION['auth_session_token'] ?? ''));
-        if ($sessionToken === '') {
-            $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            $sessionToken = self::registerLoginSession((int)$_SESSION['user_id'], $ip, $userAgent);
-            $_SESSION['auth_session_token'] = $sessionToken;
-        }
-
-        $sessionRow = Database::query(
-            "SELECT id FROM user_sessions WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL LIMIT 1",
-            [(int)$_SESSION['user_id'], $sessionToken]
-        )->fetch();
-
-        if (!$sessionRow) {
-            self::clearSessionState();
+        if (!empty($_SESSION['auth_session_retired'])) {
             return null;
         }
 
-        $user = User::find($_SESSION['user_id']);
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        $sessionToken = $_SESSION['auth_session_token'] ?? null;
+        $digest = BrowserSession::sessionDigest($sessionToken);
+        $user = $userId > 0 && $digest !== null ? self::activeAccount($userId, $digest) : null;
         if (!$user) {
             self::clearSessionState();
-            return null;
+            $session = self::restoreRememberedSession($userId);
+            if ($session === null) {
+                return null;
+            }
+            [$userId, $sessionToken] = $session;
+            $digest = BrowserSession::sessionDigest($sessionToken);
+            $user = self::activeAccount($userId, $digest);
+            if (!$user) {
+                self::clearSessionState();
+                return null;
+            }
         }
 
         if (User::isBanned($user)) {
@@ -39,17 +38,68 @@ class Auth {
 
         $lastTouchAt = (int)($_SESSION['last_activity_touch_at'] ?? 0);
         $now = time();
+        if (BrowserSession::shouldRotate($sessionToken)) {
+            $replacement = self::rotateSession($userId, $digest);
+            if ($replacement === null) {
+                self::clearSessionState();
+                return null;
+            }
+            if (($_SESSION['password_authentication']['session_token'] ?? null) === $sessionToken) {
+                $_SESSION['password_authentication']['session_token'] = $replacement;
+            }
+            $_SESSION['auth_session_token'] = $replacement;
+            $digest = BrowserSession::sessionDigest($replacement);
+        }
+
         if ($lastTouchAt <= 0 || ($now - $lastTouchAt) >= 60) {
             User::touchActivity((int)$user->id);
             Database::query(
-                "UPDATE user_sessions SET last_seen_at = NOW() WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL",
-                [(int)$user->id, $sessionToken]
+                'UPDATE user_sessions SET last_seen_at = UTC_TIMESTAMP()
+                 WHERE user_id = ? AND session_token = CAST(? AS BINARY) AND ' . BrowserSession::ACTIVE,
+                [$userId, $digest],
             );
             $_SESSION['last_activity_touch_at'] = $now;
             $user->last_active_at = date('Y-m-d H:i:s', $now);
         }
 
         return User::attachEffectiveStatus($user);
+    }
+
+    private static function activeAccount(int $userId, string $digest): ?object {
+        $account = Database::query(
+            'SELECT u.* FROM user_sessions s JOIN users u ON u.id = s.user_id
+             WHERE s.user_id = ? AND s.session_token = CAST(? AS BINARY) AND ' . BrowserSession::ACTIVE . ' LIMIT 1',
+            [$userId, $digest],
+        )->fetch();
+        return $account ?: null;
+    }
+
+    private static function rotateSession(int $userId, string $digest): ?string {
+        if (!self::renewPhpSession()) {
+            return null;
+        }
+
+        $token = BrowserSession::newSession();
+        $changed = Database::query(
+            'UPDATE user_sessions SET session_token = ?, last_seen_at = UTC_TIMESTAMP()
+             WHERE user_id = ? AND session_token = CAST(? AS BINARY) AND ' . BrowserSession::ACTIVE,
+            [BrowserSession::sessionDigest($token), $userId, $digest],
+        )->rowCount() === 1;
+        return $changed ? $token : null;
+    }
+
+    private static function renewPhpSession(): bool {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return false;
+        }
+
+        // Retire the old ID before releasing its PHP session lock. A parallel
+        // request must neither authenticate nor use the remember cookie from it.
+        $state = $_SESSION;
+        $_SESSION = ['auth_session_retired' => true];
+        $renewed = session_regenerate_id(false);
+        $_SESSION = $state;
+        return $renewed;
     }
 
     public static function requireAuth() {
@@ -60,53 +110,116 @@ class Auth {
 
         $emailVerificationRequired = (string)(Setting::get('email_verification_required') ?? '1') === '1';
         if ($emailVerificationRequired && empty($user->email_verified_at)) {
-            $_SESSION['email_verification_user'] = $user->id;
-            unset($_SESSION['user_id']);
+            self::beginEmailVerification($user);
             self::redirect('/verify-email');
         }
     }
 
-    public static function needs2FA($userId, $ip) {
-        $frequency = (string)(Setting::get('twofa_frequency_' . $userId) ?? 'trusted');
-        if ($frequency === 'always') {
-            return true;
+    public static function passwordBinding(object $user): string {
+        return hash('sha256', (string)$user->password);
+    }
+
+    public static function beginEmailVerification(object $user): void {
+        $_SESSION['email_verification_user'] = (int)$user->id;
+        $_SESSION['email_verification_password_binding'] = self::passwordBinding($user);
+        self::clearSessionState();
+    }
+
+    public static function pendingEmailVerificationUser(): ?object {
+        $userId = (int)($_SESSION['email_verification_user'] ?? 0);
+        $binding = $_SESSION['email_verification_password_binding'] ?? null;
+        if ($userId > 0 && is_string($binding)) {
+            $user = User::find($userId);
+            if ($user && hash_equals(self::passwordBinding($user), $binding)) {
+                return $user;
+            }
         }
-        $stmt = Database::query("SELECT id FROM user_trusted_ips WHERE user_id = ? AND ip = ? AND last_login > NOW() - INTERVAL 14 DAY", [$userId, $ip]);
-        return $stmt->rowCount() === 0;
+
+        self::clearEmailVerification();
+        return null;
     }
 
-    public static function markTrustedIP($userId, $ip) {
-        Database::query("INSERT INTO user_trusted_ips (user_id, ip) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_login = NOW()", [$userId, $ip]);
+    public static function clearEmailVerification(): void {
+        unset($_SESSION['email_verification_user'], $_SESSION['email_verification_password_binding'], $_SESSION['email_verification_challenge']);
     }
 
-    public static function csrfValidate() {
-        if (!isset($_POST['csrf_token'], $_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-            ErrorHandler::abort(419, 'CSRF validation failed');
+    public static function needs2FA(int $userId, ?string $trustedBrowser): bool {
+        return !TrustedBrowser::permits($userId, $trustedBrowser);
+    }
+
+    public static function csrfValidate(int $failureStatus = 419) {
+        if (!is_string($_POST['csrf_token'] ?? null) || !is_string($_SESSION['csrf_token'] ?? null)
+            || !hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])
+        ) {
+            ErrorHandler::abort($failureStatus, 'CSRF validation failed');
         }
     }
 
     public static function registerLoginSession($userId, $ip, $userAgent) {
-        $token = bin2hex(random_bytes(32));
+        $token = BrowserSession::newSession();
         Database::query(
             "INSERT INTO user_sessions (user_id, session_token, ip_address, browser) VALUES (?, ?, ?, ?)",
-            [(int)$userId, $token, (string)$ip, self::browserLabel($userAgent)]
+            [(int)$userId, BrowserSession::sessionDigest($token), (string)$ip, self::browserLabel($userAgent)]
         );
 
         return $token;
     }
 
+    public static function registerBoundSession(
+        int $userId,
+        string $passwordBinding,
+        string $ip,
+        string $userAgent,
+        ?string $trustedBrowser = null,
+    ): ?string {
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            $user = Database::query('SELECT password, is_banned FROM users WHERE id = ? FOR UPDATE', [$userId])->fetch();
+            if (!$user || User::isBanned($user) || !hash_equals(self::passwordBinding($user), $passwordBinding)
+                || ($trustedBrowser !== null && self::needs2FA($userId, $trustedBrowser))
+            ) {
+                $connection->rollBack();
+                return null;
+            }
+
+            $token = self::registerLoginSession($userId, $ip, $userAgent);
+            $connection->commit();
+            return $token;
+        } catch (Throwable $failure) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+            throw $failure;
+        }
+    }
+
+    public static function recordPasswordAuthentication(int $checkedAt): void {
+        $_SESSION['password_authentication'] = [
+            'session_token' => $_SESSION['auth_session_token'],
+            'checked_at' => $checkedAt,
+        ];
+    }
+
     public static function revokeCurrentSession() {
         $userId = (int)($_SESSION['user_id'] ?? 0);
-        $sessionToken = trim((string)($_SESSION['auth_session_token'] ?? ''));
-        if ($userId <= 0 || $sessionToken === '') {
-            return;
+        $sessionToken = $_SESSION['auth_session_token'] ?? null;
+        if ($userId > 0 && is_string($sessionToken)) {
+            User::revokeSessionByToken($userId, $sessionToken);
         }
 
-        User::revokeSessionByToken($userId, $sessionToken);
+        $remember = BrowserSession::rememberDigest($_COOKIE['remember_me'] ?? null);
+        if ($remember !== null) {
+            Database::query(
+                'UPDATE user_sessions SET revoked_at = UTC_TIMESTAMP(), remember_token = NULL
+                 WHERE remember_token = CAST(? AS BINARY) AND revoked_at IS NULL',
+                [$remember],
+            );
+        }
     }
 
     private static function clearSessionState() {
-        unset($_SESSION['user_id'], $_SESSION['auth_session_token'], $_SESSION['last_activity_touch_at']);
+        unset($_SESSION['user_id'], $_SESSION['auth_session_token'], $_SESSION['last_activity_touch_at'], $_SESSION['password_authentication']);
     }
 
     private static function redirect(string $path): void {
@@ -119,62 +232,92 @@ class Auth {
     }
 
     public static function setRememberCookie(int $userId, string $sessionToken): void {
-        $rememberToken = bin2hex(random_bytes(32));
-        Database::query(
-            "UPDATE user_sessions SET remember_token = ? WHERE user_id = ? AND session_token = ? AND revoked_at IS NULL",
-            [$rememberToken, $userId, $sessionToken]
-        );
-        $isHttps = is_https_request();
-        setcookie('remember_me', $rememberToken, [
-            'expires'  => time() + (30 * 24 * 60 * 60),
-            'path'     => '/',
-            'secure'   => $isHttps,
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
+        $digest = BrowserSession::sessionDigest($sessionToken);
+        if ($digest === null || !is_https_request()) {
+            return;
+        }
+
+        $expires = time() + BrowserSession::REMEMBER_SECONDS;
+        $token = BrowserSession::newRemember($expires);
+        $changed = Database::query(
+            'UPDATE user_sessions SET remember_token = ?
+             WHERE user_id = ? AND session_token = CAST(? AS BINARY) AND remember_token IS NULL AND ' . BrowserSession::ACTIVE,
+            [BrowserSession::rememberDigest($token), $userId, $digest],
+        )->rowCount() === 1;
+        if ($changed) {
+            self::sendRememberCookie($token, $expires);
+        }
     }
 
     public static function clearRememberCookie(): void {
-        $isHttps = is_https_request();
-        setcookie('remember_me', '', [
-            'expires'  => time() - 3600,
-            'path'     => '/',
-            'secure'   => $isHttps,
+        unset($_COOKIE['remember_me']);
+        self::sendRememberCookie('', time() - 3600);
+    }
+
+    private static function restoreRememberedSession(int $expectedUserId): ?array {
+        $token = $_COOKIE['remember_me'] ?? null;
+        $expires = BrowserSession::rememberExpiry($token);
+        if ($expires === null || $expires <= time() || !is_https_request()
+            || isset($_SESSION['2fa_pending_user']) || isset($_SESSION['email_verification_user'])
+        ) {
+            return null;
+        }
+
+        $digest = BrowserSession::rememberDigest($token);
+        $row = Database::query(
+            'SELECT id, user_id FROM user_sessions WHERE remember_token = CAST(? AS BINARY) AND ' . BrowserSession::RESTORABLE,
+            [$digest],
+        )->fetch();
+        if (!$row || ($expectedUserId > 0 && (int)$row->user_id !== $expectedUserId) || !self::renewPhpSession()) {
+            return null;
+        }
+
+        $userId = (int)$row->user_id;
+        $replacementSession = BrowserSession::newSession();
+        $replacementRemember = BrowserSession::newRemember($expires);
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            // Share the account lock with password resets and session issuance.
+            $account = Database::query('SELECT is_banned FROM users WHERE id = ? FOR UPDATE', [$userId])->fetch();
+            $consumed = $account && !User::isBanned($account) && Database::query(
+                'UPDATE user_sessions SET session_token = ?, remember_token = ?, logged_in_at = UTC_TIMESTAMP(), last_seen_at = UTC_TIMESTAMP()
+                 WHERE id = ? AND user_id = ? AND remember_token = CAST(? AS BINARY) AND ' . BrowserSession::RESTORABLE,
+                [BrowserSession::sessionDigest($replacementSession), BrowserSession::rememberDigest($replacementRemember),
+                    (int)$row->id, $userId, $digest],
+            )->rowCount() === 1;
+            if (!$consumed) {
+                $connection->rollBack();
+                return null;
+            }
+            $connection->commit();
+        } catch (Throwable $failure) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+            throw $failure;
+        }
+
+        $_SESSION['user_id'] = $userId;
+        $_SESSION['auth_session_token'] = $replacementSession;
+        unset($_SESSION['password_authentication'], $_SESSION['csrf_token']);
+        $_SESSION['last_activity_touch_at'] = 0;
+        self::sendRememberCookie($replacementRemember, $expires);
+        return [$userId, $replacementSession];
+    }
+
+    private static function sendRememberCookie(string $token, int $expires): void {
+        setcookie('remember_me', $token, [
+            'expires'  => $expires,
+            'path'     => self::cookiePath(),
+            'secure'   => true,
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
     }
 
-    private static function tryRestoreFromRememberCookie(): void {
-        $token = $_COOKIE['remember_me'] ?? '';
-        if ($token === '' || !preg_match('/^[a-f0-9]{64}$/', $token)) {
-            return;
-        }
-
-        $row = Database::query(
-            "SELECT user_id, session_token FROM user_sessions WHERE remember_token = ? AND revoked_at IS NULL LIMIT 1",
-            [$token]
-        )->fetch();
-
-        if (!$row) {
-            self::clearRememberCookie();
-            return;
-        }
-
-        session_regenerate_id(true);
-        $_SESSION['user_id'] = (int)$row->user_id;
-        $_SESSION['auth_session_token'] = $row->session_token;
-        $_SESSION['last_activity_touch_at'] = 0;
-
-        // Refresh cookie expiry (rolling 30-day window)
-        $isHttps = is_https_request();
-        setcookie('remember_me', $token, [
-            'expires'  => time() + (30 * 24 * 60 * 60),
-            'path'     => '/',
-            'secure'   => $isHttps,
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
+    private static function cookiePath(): string {
+        return (defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '') . '/';
     }
 
     private static function browserLabel($userAgent) {

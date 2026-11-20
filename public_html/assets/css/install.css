@@ -8,6 +8,26 @@ main {
     margin: 3rem auto;
 }
 
+.language-links {
+    display: flex;
+    gap: 1rem;
+}
+
+.language-links [aria-current="true"] {
+    font-weight: 700;
+}
+
+[role="alert"] {
+    border: 1px solid currentColor;
+    border-radius: 0.4rem;
+    padding: 0.65rem 1rem;
+}
+
+[role="alert"] h2 {
+    font-size: 1rem;
+    margin-top: 0;
+}
+
 form {
     display: grid;
     gap: 0.65rem;
