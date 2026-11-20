@@ -1,10 +1,12 @@
 <?php
+use Causette\Chat\PollDraft;
 use Causette\Localization\Locale;
 use Causette\View\HtmlJson;
 
 require_once __DIR__ . '/../core/HtmlJson.php';
 require_once __DIR__ . '/../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../core/Locale.php';
+require_once __DIR__ . '/../core/PollDraft.php';
 require_once __DIR__ . '/../core/ReactionCatalog.php';
 
 $chatLocale = Locale::current();
@@ -425,7 +427,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <div class="text-xs uppercase tracking-wide text-zinc-400"><?= $chatLabel('active_poll') ?></div>
                 <div id="active-poll-question" class="mt-1 text-sm font-semibold text-zinc-100"></div>
                 <div id="active-poll-meta" class="mt-1 text-xs text-zinc-500"></div>
-                <div id="active-poll-options" class="mt-3 space-y-2"></div>
+                <div id="active-poll-options" class="mt-3 max-h-48 overflow-y-auto space-y-2"></div>
             </div>
             <div class="flex items-center">
                 <button type="button" id="active-poll-expire" class="hidden inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200" title="<?= $chatLabel('expire_poll') ?>" aria-label="<?= $chatLabel('expire_poll') ?>">
@@ -966,6 +968,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
 
 <script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
     window.CAUSETTE_CHAT_I18N = <?= HtmlJson::encode(['language' => $chatLocale->language(), 'labels' => $chatLocale->catalog('chat')]) ?>;
+    window.CAUSETTE_POLL_LIMITS = <?= HtmlJson::encode(['minOptions' => PollDraft::MIN_OPTIONS, 'maxOptions' => PollDraft::MAX_OPTIONS, 'maxHours' => PollDraft::MAX_HOURS, 'maxDays' => PollDraft::MAX_DAYS]) ?>;
     window.PENDING_ATTACHMENTS = <?= HtmlJson::encode($pendingAttachments ?? []) ?>;
     window.INITIAL_PINNED_MESSAGE = <?= HtmlJson::encode($pinnedMessage) ?>;
     window.INITIAL_ACTIVE_POLL = <?= HtmlJson::encode($activePoll) ?>;
@@ -1025,31 +1028,40 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
 
 <div id="create-poll-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
     <div class="h-full w-full flex items-center justify-center">
-        <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="create-poll-modal-title">
+        <div class="w-full max-w-md max-h-[90vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="create-poll-modal-title">
             <h2 id="create-poll-modal-title" class="text-lg font-semibold text-zinc-100"><?= $chatLabel('create_poll') ?></h2>
             <form id="create-poll-form" class="mt-4 space-y-4">
                 <div>
                     <label for="create-poll-question" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('poll_question_label') ?></label>
-                    <input type="text" id="create-poll-question" maxlength="40" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" required>
+                    <input type="text" id="create-poll-question" name="question" maxlength="<?= PollDraft::MAX_TEXT_LENGTH ?>" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" required>
                 </div>
-                <div>
-                    <label for="create-poll-option-1" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('option_1') ?></label>
-                    <input type="text" id="create-poll-option-1" maxlength="40" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" required>
-                </div>
-                <div>
-                    <label for="create-poll-option-2" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('option_2') ?></label>
-                    <input type="text" id="create-poll-option-2" maxlength="40" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" required>
-                </div>
-                <div>
-                    <label for="create-poll-option-3" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('option_3') ?></label>
-                    <input type="text" id="create-poll-option-3" maxlength="40" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
-                </div>
-                <div>
-                    <label for="create-poll-expiry" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('expiry') ?></label>
-                    <select id="create-poll-expiry" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
-                        <option value="24h"><?= $chatLabel('time_24_hours') ?></option>
-                        <option value="7d"><?= $chatLabel('time_7_days') ?></option>
-                    </select>
+                <fieldset class="space-y-2">
+                    <legend class="text-sm text-zinc-300 mb-1"><?= $chatLabel('poll_options') ?></legend>
+                    <div id="create-poll-options" class="space-y-2"></div>
+                    <template id="create-poll-option-template">
+                        <div data-poll-option-row>
+                            <label class="block text-sm text-zinc-300 mb-1"></label>
+                            <div class="flex items-center gap-2">
+                                <input type="text" name="option" maxlength="<?= PollDraft::MAX_TEXT_LENGTH ?>" class="w-full min-w-0 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" required>
+                                <button type="button" data-remove-poll-option class="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm text-zinc-200 disabled:opacity-50"><?= $chatLabel('remove_option') ?></button>
+                            </div>
+                        </div>
+                    </template>
+                    <button type="button" id="create-poll-add-option" class="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-sm text-zinc-200 disabled:opacity-50"><?= $chatLabel('add_option') ?></button>
+                </fieldset>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label for="create-poll-duration" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('expiry') ?></label>
+                        <input type="number" id="create-poll-duration" name="duration" value="<?= PollDraft::DEFAULT_HOURS ?>" min="1" max="<?= PollDraft::MAX_HOURS ?>" step="1" required
+                               class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                    </div>
+                    <div>
+                        <label for="create-poll-duration-unit" class="block text-sm text-zinc-300 mb-1"><?= $chatLabel('duration_unit') ?></label>
+                        <select id="create-poll-duration-unit" name="duration_unit" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                            <option value="h"><?= $chatLabel('duration_hours') ?></option>
+                            <option value="d"><?= $chatLabel('duration_days') ?></option>
+                        </select>
+                    </div>
                 </div>
                 <div class="flex items-center justify-end gap-3">
                     <button type="button" id="create-poll-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $chatLabel('cancel') ?></button>

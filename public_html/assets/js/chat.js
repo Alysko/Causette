@@ -808,7 +808,8 @@ function normalizeActivePoll(activePoll) {
         return null;
     }
 
-    if (!Array.isArray(activePoll.options) || activePoll.options.length < 2 || activePoll.options.length > 3) {
+    const { minOptions, maxOptions } = window.CAUSETTE_POLL_LIMITS;
+    if (!Array.isArray(activePoll.options) || activePoll.options.length < minOptions || activePoll.options.length > maxOptions) {
         return null;
     }
     const options = activePoll.options.map((option) => ({
@@ -979,39 +980,37 @@ function renderActivePollBanner(activePoll) {
     }
 }
 
-async function createCurrentGroupPoll() {
+async function createCurrentGroupPoll(form) {
     if (!currentChat || !canCurrentUserCreatePoll()) {
         return false;
     }
 
     const chat = currentChat;
-    const questionInput = document.getElementById('create-poll-question');
-    const option1Input = document.getElementById('create-poll-option-1');
-    const option2Input = document.getElementById('create-poll-option-2');
-    const option3Input = document.getElementById('create-poll-option-3');
-    const expiryInput = document.getElementById('create-poll-expiry');
-
-    const question = String(questionInput?.value || '').trim();
-    const option1 = String(option1Input?.value || '').trim();
-    const option2 = String(option2Input?.value || '').trim();
-    const option3 = String(option3Input?.value || '').trim();
-    const expiry = String(expiryInput?.value || '24h').trim();
-
-    const options = [option1, option2, option3].filter((value) => value !== '');
+    const values = new FormData(form);
+    const question = values.get('question').trim();
+    const options = values.getAll('option').map(value => value.trim());
+    const duration = Number(values.get('duration'));
+    const unit = values.get('duration_unit');
+    const { minOptions, maxOptions, maxHours, maxDays } = window.CAUSETTE_POLL_LIMITS;
+    const maximum = unit === 'd' ? maxDays : maxHours;
 
     if (!question) {
         showToast(chatLabel('poll_question_empty'), 'error');
         return false;
     }
-    if (question.length > 40) {
+    if (question.length > form.elements.question.maxLength) {
         showToast(chatLabel('poll_question_length'), 'error');
         return false;
     }
-    if (options.length < 2 || options.length > 3) {
-        showToast(chatLabel('poll_options_count'), 'error');
+    if (options.length < minOptions || options.length > maxOptions) {
+        showToast(chatLabel('poll_options_count', { min: minOptions, max: maxOptions }), 'error');
         return false;
     }
-    if (options.some((value) => value.length > 40)) {
+    if (options.some(value => value === '')) {
+        showToast(chatLabel('poll_option_empty'), 'error');
+        return false;
+    }
+    if (options.some(value => value.length > form.querySelector('[name="option"]').maxLength)) {
         showToast(chatLabel('poll_option_length'), 'error');
         return false;
     }
@@ -1021,12 +1020,16 @@ async function createCurrentGroupPoll() {
         showToast(chatLabel('poll_options_unique'), 'error');
         return false;
     }
+    if ((unit !== 'h' && unit !== 'd') || !Number.isInteger(duration) || duration < 1 || duration > maximum) {
+        showToast(chatLabel('poll_duration_invalid', { hours: maxHours, days: maxDays }), 'error');
+        return false;
+    }
 
     const result = await postForm('/api/chats/group/poll/create', {
         csrf_token: getCsrfToken(),
         chat_id: String(chat.id),
         question,
-        expiry,
+        expiry: `${duration}${unit}`,
         options: JSON.stringify(options)
     });
     if (currentChat !== chat) return false;
@@ -1151,26 +1154,67 @@ function bindCreatePollModal() {
     if (modal.dataset.bound === '1') return;
     modal.dataset.bound = '1';
 
-    const questionInput = document.getElementById('create-poll-question');
-    const option1Input = document.getElementById('create-poll-option-1');
-    const option2Input = document.getElementById('create-poll-option-2');
-    const option3Input = document.getElementById('create-poll-option-3');
-    const expiryInput = document.getElementById('create-poll-expiry');
+    const options = form.querySelector('#create-poll-options');
+    const template = form.querySelector('#create-poll-option-template');
+    const add = form.querySelector('#create-poll-add-option');
+    const { minOptions, maxOptions, maxHours, maxDays } = window.CAUSETTE_POLL_LIMITS;
+    const duration = form.elements.duration;
+    const unit = form.elements.duration_unit;
+
+    const refreshOptions = () => {
+        add.disabled = options.childElementCount >= maxOptions;
+        Array.from(options.children).forEach((row, index) => {
+            const number = index + 1;
+            const input = row.querySelector('input');
+            const label = row.querySelector('label');
+            const remove = row.querySelector('[data-remove-poll-option]');
+            input.id = `create-poll-option-${number}`;
+            label.htmlFor = input.id;
+            label.textContent = chatLabel('poll_option_label', { number });
+            remove.setAttribute('aria-label', chatLabel('remove_numbered_option', { number }));
+            remove.disabled = options.childElementCount <= minOptions;
+        });
+    };
+
+    const refreshDurationLimit = () => {
+        duration.max = String(unit.value === 'd' ? maxDays : maxHours);
+    };
+
+    add.addEventListener('click', () => {
+        if (options.childElementCount >= maxOptions) return;
+        options.append(template.content.cloneNode(true));
+        refreshOptions();
+        options.lastElementChild.querySelector('input').focus();
+    });
+    options.addEventListener('click', (event) => {
+        const remove = event.target.closest('[data-remove-poll-option]');
+        if (!remove || options.childElementCount <= minOptions) return;
+        const row = remove.closest('[data-poll-option-row]');
+        const next = row.nextElementSibling || row.previousElementSibling;
+        row.remove();
+        refreshOptions();
+        next.querySelector('input').focus();
+    });
+    unit.addEventListener('change', refreshDurationLimit);
 
     const setOpenState = (isOpen) => {
         modal.classList.toggle('hidden', !isOpen);
+        modal.setAttribute('aria-hidden', String(!isOpen));
         if (isOpen) {
-            if (questionInput) questionInput.value = '';
-            if (option1Input) option1Input.value = '';
-            if (option2Input) option2Input.value = '';
-            if (option3Input) option3Input.value = '';
-            if (expiryInput) expiryInput.value = '24h';
-            setTimeout(() => questionInput?.focus(), 0);
+            form.reset();
+            options.replaceChildren();
+            for (let index = 0; index < minOptions; index++) {
+                options.append(template.content.cloneNode(true));
+            }
+            refreshOptions();
+            refreshDurationLimit();
+            form.elements.question.focus();
             return;
         }
 
         submit.disabled = false;
         submit.textContent = chatLabel('create');
+        document.getElementById('chat-header-menu-toggle')?.focus();
     };
 
     const closeModal = () => setOpenState(false);
@@ -1185,7 +1229,7 @@ function bindCreatePollModal() {
         closeModal();
     });
 
-    document.addEventListener('keydown', (event) => {
+    modal.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
         if (modal.classList.contains('hidden')) return;
         closeModal();
@@ -1199,7 +1243,7 @@ function bindCreatePollModal() {
         submit.textContent = chatLabel('creating');
 
         try {
-            const created = await createCurrentGroupPoll();
+            const created = await createCurrentGroupPoll(form);
             if (created && !modal.classList.contains('hidden')) {
                 closeModal();
             }

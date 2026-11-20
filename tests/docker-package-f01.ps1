@@ -17,7 +17,9 @@ param(
 
     [switch]$ContentSecurity,
 
-    [switch]$PushDelivery
+    [switch]$PushDelivery,
+
+    [switch]$PollComposer
 )
 
 $ErrorActionPreference = 'Stop'
@@ -141,6 +143,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     }
     if ($ContentSecurity) {
         Run-Browser '--content-security'
+    }
+    if ($PollComposer) {
+        Run-Browser '--poll-composer'
     }
     Run-Browser '--french-member'
 }

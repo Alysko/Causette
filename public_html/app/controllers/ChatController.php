@@ -1,9 +1,11 @@
 <?php
+use Causette\Chat\PollDraft;
 use Causette\Http\ChatResponse;
 use Causette\Security\ConversationRead;
 
 require_once __DIR__ . '/../core/ChatResponse.php';
 require_once __DIR__ . '/../core/ConversationRead.php';
+require_once __DIR__ . '/../core/PollDraft.php';
 
 class ChatController extends Controller {
     private const GROUP_CHAT_USER_LIMIT = 999;
@@ -11,10 +13,6 @@ class ChatController extends Controller {
     private const GROUP_VISIBILITY_NONE = 'none';
     private const GROUP_VISIBILITY_REQUESTABLE = 'requestable';
     private const GROUP_VISIBILITY_PUBLIC = 'public';
-    private const POLL_QUESTION_MAX_LENGTH = 40;
-    private const POLL_OPTION_MAX_LENGTH = 40;
-    private const POLL_OPTION_MIN_COUNT = 2;
-    private const POLL_OPTION_MAX_COUNT = 3;
 
     private function supportsChatMemberRole(): bool {
         static $supports = null;
@@ -83,28 +81,21 @@ class ChatController extends Controller {
     }
 
     private function normalizePollText($value): string {
-        $normalized = preg_replace('/\s+/u', ' ', trim((string)$value));
-        if (!is_string($normalized)) {
-            return '';
-        }
-
-        return $normalized;
+        return is_string($value) ? trim(preg_replace('/\s+/u', ' ', $value) ?? '') : '';
     }
 
     private function normalizePollOptions($rawOptions): array {
-        $options = [];
-
-        if (is_array($rawOptions)) {
-            $options = $rawOptions;
-        } elseif (is_string($rawOptions)) {
-            $decoded = json_decode($rawOptions, true);
-            if (is_array($decoded)) {
-                $options = $decoded;
-            }
+        $options = is_string($rawOptions) && strlen($rawOptions) <= 8192
+            ? json_decode($rawOptions, false, 4) : $rawOptions;
+        if (!is_array($options) || !array_is_list($options) || count($options) > PollDraft::MAX_OPTIONS) {
+            return [];
         }
 
         $normalized = [];
         foreach ($options as $option) {
+            if (!is_string($option)) {
+                return [];
+            }
             $value = $this->normalizePollText($option);
             if ($value === '') {
                 continue;
@@ -113,18 +104,6 @@ class ChatController extends Controller {
         }
 
         return $normalized;
-    }
-
-    private function getPollExpirySeconds(string $expiry): int {
-        $normalized = strtolower(trim($expiry));
-        if ($normalized === '24h') {
-            return 24 * 60 * 60;
-        }
-        if ($normalized === '7d') {
-            return 7 * 24 * 60 * 60;
-        }
-
-        return 0;
     }
 
     private function enrichActivePollPermissions($poll, $chat, int $userId, bool $isCurrentUserAdmin) {
@@ -853,7 +832,7 @@ class ChatController extends Controller {
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
         $question = $this->normalizePollText($_POST['question'] ?? '');
-        $expiry = strtolower(trim((string)($_POST['expiry'] ?? '')));
+        $expirySeconds = PollDraft::expirySeconds($_POST['expiry'] ?? null);
         $options = $this->normalizePollOptions($_POST['options'] ?? ($_POST['options_json'] ?? []));
         $user = Auth::user();
         $userId = (int)$user->id;
@@ -863,30 +842,29 @@ class ChatController extends Controller {
             $this->json(['error' => 'Invalid payload'], 400);
         }
 
-        if ($this->pollTextLength($question) > self::POLL_QUESTION_MAX_LENGTH) {
+        if ($this->pollTextLength($question) > PollDraft::MAX_TEXT_LENGTH) {
             $this->json(['error' => 'Poll question must be 40 characters or fewer'], 400);
         }
 
-        if (count($options) < self::POLL_OPTION_MIN_COUNT || count($options) > self::POLL_OPTION_MAX_COUNT) {
-            $this->json(['error' => 'Poll must have 2 or 3 options'], 400);
+        if (count($options) < PollDraft::MIN_OPTIONS) {
+            $this->json(['error' => 'Poll must have between 2 and 10 options'], 400);
         }
 
         $seenOptions = [];
         foreach ($options as $option) {
-            if ($this->pollTextLength($option) > self::POLL_OPTION_MAX_LENGTH) {
+            if ($this->pollTextLength($option) > PollDraft::MAX_TEXT_LENGTH) {
                 $this->json(['error' => 'Each poll option must be 40 characters or fewer'], 400);
             }
 
-            $dedupeKey = strtolower($option);
+            $dedupeKey = function_exists('mb_strtolower') ? mb_strtolower($option, 'UTF-8') : strtolower($option);
             if (isset($seenOptions[$dedupeKey])) {
                 $this->json(['error' => 'Poll options must be unique'], 400);
             }
             $seenOptions[$dedupeKey] = true;
         }
 
-        $expirySeconds = $this->getPollExpirySeconds($expiry);
-        if ($expirySeconds <= 0) {
-            $this->json(['error' => 'Expiry must be either 24h or 7d'], 400);
+        if ($expirySeconds === null) {
+            $this->json(['error' => 'Poll duration must be between 1 and 168 hours or between 1 and 7 days'], 400);
         }
 
         $chat = $this->supportsChatSoftDelete()
@@ -916,10 +894,10 @@ class ChatController extends Controller {
                 $this->json(['error' => 'Only one active poll is allowed per group'], 409);
             }
 
-            $expiresAt = date('Y-m-d H:i:s', time() + $expirySeconds);
             Database::query(
-                "INSERT INTO polls (chat_id, creator_user_id, question, status, expires_at) VALUES (?, ?, ?, 'active', ?)",
-                [$chatId, $userId, $question, $expiresAt]
+                "INSERT INTO polls (chat_id, creator_user_id, question, status, expires_at)
+                 VALUES (?, ?, ?, 'active', TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP))",
+                [$chatId, $userId, $question, $expirySeconds]
             );
 
             $pollId = (int)$pdo->lastInsertId();

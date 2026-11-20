@@ -56,7 +56,7 @@ function fixture(i18n = {}) {
     };
     const context = createContext({
         URL,
-        window: { CAUSETTE_CHAT_I18N: i18n },
+        window: { CAUSETTE_CHAT_I18N: i18n, CAUSETTE_POLL_LIMITS: { minOptions: 2, maxOptions: 10 } },
         currentChat: { id: 1, type: 'group', is_group_member: true },
         currentUserId: 7,
         document: {
@@ -152,6 +152,18 @@ test('live poll metadata and accessible option labels use the selected language'
     assert.equal(first['aria-label'], '<b>Café</b> {votes} (0 vote)');
     assert.equal(first.title, 'Aucun vote pour le moment');
     assert.equal(second['aria-label'], 'Thé (2 votes)');
+});
+
+test('the poll banner accepts ten options and rejects an oversized list', () => {
+    const { context, element } = fixture();
+    const options = Array.from({ length: 11 }, (_, index) => ({ id: index + 1, option_text: `Option ${index + 1}` }));
+    const poll = { id: 10, status: 'active', question: 'Many options' };
+
+    context.renderActivePollBanner({ ...poll, options: options.slice(0, 10) });
+    assert.equal(element('active-poll-options').children.length, 10);
+    context.renderActivePollBanner({ ...poll, options });
+    assert.equal(element('active-poll-options').children.length, 0);
+    assert.equal(element('active-poll-expire').disabled, true);
 });
 
 test('a completed refresh cannot update a conversation opened after it started', async () => {

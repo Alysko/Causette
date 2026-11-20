@@ -139,7 +139,9 @@ async function post(page, path, action) {
         action(),
     ]);
     assert.equal(response.status(), 200, path);
-    assert.equal((await response.json()).success, true, path);
+    const data = await response.json();
+    assert.equal(data.success, true, path);
+    return data;
 }
 
 async function checkSavedPoll(owner, member) {
@@ -486,6 +488,93 @@ async function checkPushSettings(browser, errors) {
     console.log('The administrator provider policy persisted, and HTTPS registration enforced it and preserved device ownership.');
 }
 
+async function checkPollComposer(browser, errors) {
+    const owner = await login(browser, 'fixtureadmin', adminPassword, errors, 'fr');
+    const member = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const open = async () => {
+        await owner.locator('#chat-header-menu-toggle').click();
+        await owner.locator('[data-chat-action="create-poll"]').click();
+    };
+    const create = async (options, expiry, field = 'options') => owner.evaluate(async ({ options, expiry, field }) => {
+        const response = await fetch('/api/chats/group/poll/create', {
+            method: 'POST',
+            body: new URLSearchParams({
+                csrf_token: document.querySelector('meta[name="csrf-token"]').content,
+                chat_id: '8', question: 'Fixture de durée', expiry, [field]: JSON.stringify(options),
+            }),
+        });
+        return { status: response.status, data: await response.json() };
+    }, { options, expiry, field });
+    const checkDuration = (poll, hours) => {
+        const epoch = (value) => Date.parse(value.replace(' ', 'T') + 'Z');
+        assert.equal((epoch(poll.expires_at) - epoch(poll.created_at)) / 3600000, hours);
+    };
+    const close = () => post(owner, '/api/chats/group/poll/expire', () => owner.locator('#active-poll-expire').click());
+
+    const first = await create(['Premier', 'Second'], '24h', 'options_json');
+    assert.equal(first.status, 200, 'Legacy poll clients continue to work');
+    checkDuration(first.data.active_poll, 24);
+    await owner.reload();
+    await waitForText(owner, '#active-poll-question', 'Fixture de durée');
+    await close();
+
+    const options = Array.from({ length: 10 }, (_, index) => `Option ${index + 1}`);
+    const custom = await create(options, '3h');
+    assert.equal(custom.status, 200, 'The API accepts ten options and a custom duration in hours');
+    checkDuration(custom.data.active_poll, 3);
+    assert.deepEqual(custom.data.active_poll.options.map(option => option.option_text), options);
+    assert.equal((await create(['Premier', 'Second'], '1d')).status, 409, 'One active poll per group');
+    await owner.reload();
+    await waitForText(owner, '#active-poll-question', 'Fixture de durée');
+    await close();
+
+    for (const expiry of ['0h', '169h', '8d', '1.5h', '1w']) {
+        assert.equal((await create(['Premier', 'Second'], expiry)).status, 400, expiry);
+    }
+    assert.equal((await create([...options, 'Option 11'], '1d')).status, 400);
+    assert.equal((await create(['Premier', ['nested']], '1d')).status, 400);
+
+    await open();
+    const list = owner.locator('#create-poll-options');
+    const fields = list.locator('input');
+    const add = owner.getByRole('button', { name: 'Ajouter un choix', exact: true });
+    assert.equal(await fields.count(), 2);
+    assert.equal(await list.getByRole('button', { name: 'Retirer le choix 1', exact: true }).isDisabled(), true);
+    await add.click();
+    assert.equal(await fields.nth(2).evaluate(input => document.activeElement === input), true);
+    await fields.nth(2).fill('Choix à retirer');
+    await list.getByRole('button', { name: 'Retirer le choix 3', exact: true }).click();
+    assert.equal(await fields.count(), 2);
+    for (let index = 2; index < options.length; index++) await add.click();
+    assert.equal(await add.isDisabled(), true);
+    await owner.locator('#create-poll-question').fill('Quel choix préférez-vous ?');
+    const choices = [...options.slice(0, -1), 'Été <mark> & café ☕'];
+    for (let index = 0; index < choices.length; index++) await fields.nth(index).fill(choices[index]);
+    await owner.getByLabel('Unité de durée').selectOption('d');
+    const duration = owner.getByLabel('Durée du sondage', { exact: true });
+    assert.equal(await duration.getAttribute('max'), '7');
+    await duration.fill('2');
+    const published = await post(owner, '/api/chats/group/poll/create', () => owner.locator('#create-poll-submit').click());
+    checkDuration(published.active_poll, 48);
+
+    await member.setViewportSize({ width: 390, height: 700 });
+    await member.reload();
+    await waitForText(member, '#active-poll-question', 'Quel choix préférez-vous ?');
+    const vote = member.locator('#active-poll-options button').last();
+    assert.equal(await vote.getAttribute('aria-label'), 'Été <mark> & café ☕ (0 votes)');
+    assert.equal(await member.locator('#active-poll-options mark').count(), 0);
+    assert.equal(await member.locator('#active-poll-options button').count(), choices.length);
+    await post(member, '/api/chats/group/poll/vote', () => vote.click());
+    await waitForText(owner, '#active-poll-meta', '1 vote');
+    await close();
+
+    await open();
+    assert.equal(await fields.count(), 2);
+    assert.equal(await duration.inputValue(), '24');
+    assert.equal(await owner.getByLabel('Unité de durée').inputValue(), 'h');
+    console.log('Custom durations, bounded dynamic options, bilingual rendering, voting and modal reset passed.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -523,6 +612,11 @@ async function run() {
         }
         if (process.argv.includes('--push-settings')) {
             await checkPushSettings(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--poll-composer')) {
+            await checkPollComposer(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }
