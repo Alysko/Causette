@@ -51,6 +51,8 @@ jobs:
               php -n /project/tests/message-response.test.php
               php -n /project/tests/attachment-access.test.php
               php -n /project/tests/request-origin.test.php
+              php -n /project/tests/web-push-delivery.test.php
+              php -n /project/tests/push-subscription-policy.test.php
             '
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'

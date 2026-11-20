@@ -15,7 +15,9 @@ param(
 
     [switch]$PostSearch,
 
-    [switch]$ContentSecurity
+    [switch]$ContentSecurity,
+
+    [switch]$PushDelivery
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +99,7 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
         'run', '--detach', '--pull', 'never', '--name', $app, '--network', 'none', '--mount', "$socketMount,readonly"
         '--mount', "type=bind,source=$($zip.FullName),target=/artifact.zip,readonly"
         '--mount', "type=bind,source=$PSScriptRoot/chat-banners-fixture.sh,target=/fixture.sh,readonly"
+        '--mount', "type=bind,source=$PSScriptRoot/docker-push-delivery.php,target=/verify-push.php,readonly"
         '--entrypoint', 'sleep', $PhpImage, 'infinity'
     )
     Invoke-Docker @applicationArguments | Out-Null
@@ -119,6 +122,11 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
 
     Run-Browser '--install'
     Invoke-Docker exec $app sh -c 'tr -d "\015" </fixture.sh | sh -s -- seed'
+    if ($PushDelivery) {
+        Invoke-Docker exec $app sh -c 'openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=fcm.googleapis.com -addext subjectAltName=DNS:fcm.googleapis.com -out /tmp/fixture-push-tls.crt -keyout /tmp/fixture-push-tls.key >/dev/null 2>&1'
+        Invoke-Docker exec $app php /verify-push.php
+        Run-Browser '--push-settings'
+    }
     if ($PostSearch) {
         Run-Browser '--post-search'
     }

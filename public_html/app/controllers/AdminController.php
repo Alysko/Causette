@@ -3,7 +3,9 @@ require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
+require_once __DIR__ . '/../core/PushEndpoint.php';
 
+use Causette\Push\PushEndpoint;
 use Causette\Security\SecretSettings;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as MailException;
@@ -162,14 +164,26 @@ class AdminController extends Controller {
         $this->requireAdminUser();
         Auth::csrfValidate();
 
-        $publicKey = trim((string)($_POST['push_vapid_public_key'] ?? ''));
+        $publicKey = $_POST['push_vapid_public_key'] ?? '';
         $privateKey = $_POST['push_vapid_private_key'] ?? '';
 
         try {
-            if (!is_string($privateKey)) {
-                throw new RuntimeException('Invalid private key field.');
+            if (!is_string($publicKey) || !is_string($privateKey)) {
+                throw new RuntimeException('Invalid key field.');
             }
-            SecretSettings::save(['push_vapid_public_key' => $publicKey], SecretSettings::VAPID, trim($privateKey));
+            $settings = ['push_vapid_public_key' => trim($publicKey)];
+            if (($_POST['push_provider_policy_present'] ?? null) === '1') {
+                $requested = $_POST['push_allowed_providers'] ?? [];
+                if (!is_array($requested) || count($requested) > count(PushEndpoint::PROVIDERS)) {
+                    throw new RuntimeException('Invalid push provider selection.');
+                }
+                $selected = array_filter(PushEndpoint::PROVIDERS, static fn(string $provider): bool => in_array($provider, $requested, true));
+                if (count($selected) !== count($requested)) {
+                    throw new RuntimeException('Invalid push provider selection.');
+                }
+                $settings['push_allowed_providers'] = implode(',', $selected);
+            }
+            SecretSettings::save($settings, SecretSettings::VAPID, trim($privateKey));
         } catch (RuntimeException) {
             $this->flash('error', 'integration_storage_error');
             $this->redirect('/settings');

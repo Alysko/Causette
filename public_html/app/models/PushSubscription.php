@@ -1,171 +1,129 @@
 <?php
-class PushSubscription extends Model {
-    public static function upsertForUser($userId, $endpoint, $p256dhKey, $authKey, $userAgent = null) {
-        $userId = (int)$userId;
-        $endpoint = trim((string)$endpoint);
-        $p256dhKey = trim((string)$p256dhKey);
-        $authKey = trim((string)$authKey);
-        $userAgent = trim((string)$userAgent);
+declare(strict_types=1);
 
-        if ($userId <= 0 || $endpoint === '' || $p256dhKey === '' || $authKey === '') {
-            return false;
+class PushSubscription extends Model
+{
+    public const SAVED = 'saved';
+    public const CONFLICT = 'conflict';
+    public const LIMIT = 'limit';
+    public const MAX_DEVICES = 4;
+    private const MAX_FAILURES = 3;
+
+    public static function upsertForUser(int $userId, string $endpoint, string $p256dhKey, string $authKey, string $userAgent): string
+    {
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            // Serialize enrolment for the same account before counting or reclaiming slots.
+            $user = Database::query('SELECT id FROM users WHERE id = ? FOR UPDATE', [$userId])->fetchColumn();
+            if ($user === false) {
+                $connection->rollBack();
+                return self::CONFLICT;
+            }
+
+            $existing = Database::query('SELECT id, user_id FROM push_subscriptions WHERE endpoint = ?', [$endpoint])->fetch();
+            if ($existing && (int)$existing->user_id !== $userId) {
+                $connection->rollBack();
+                return self::CONFLICT;
+            }
+
+            $agent = $userAgent !== '' ? $userAgent : null;
+            if ($existing) {
+                Database::query(
+                    'UPDATE push_subscriptions
+                     SET p256dh_key = ?, auth_key = ?, user_agent = ?
+                     WHERE id = ? AND user_id = ?',
+                    [$p256dhKey, $authKey, $agent, $existing->id, $userId]
+                );
+            } else {
+                $count = self::countForUser($userId);
+                if ($count === self::MAX_DEVICES) {
+                    $reclaimed = Database::query(
+                        'DELETE FROM push_subscriptions WHERE user_id = ? AND fail_count >= 3 ORDER BY id LIMIT 1',
+                        [$userId]
+                    )->rowCount();
+                    $count -= $reclaimed;
+                }
+                if ($count >= self::MAX_DEVICES) {
+                    $connection->rollBack();
+                    return self::LIMIT;
+                }
+
+                Database::query(
+                    'INSERT INTO push_subscriptions (user_id, endpoint, p256dh_key, auth_key, user_agent, last_used_at)
+                     VALUES (?, ?, ?, ?, ?, NOW())',
+                    [$userId, $endpoint, $p256dhKey, $authKey, $agent]
+                );
+            }
+            $connection->commit();
+            return self::SAVED;
+        } catch (Throwable $failure) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+            // The unique endpoint index also guards races between different accounts.
+            if ($failure instanceof PDOException && (int)($failure->errorInfo[1] ?? 0) === 1062) {
+                return self::CONFLICT;
+            }
+            throw $failure;
         }
-
-        Database::query(
-            "INSERT INTO push_subscriptions (user_id, endpoint, p256dh_key, auth_key, user_agent, fail_count, failed_at, last_error, last_http_status, last_used_at)
-             VALUES (?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NOW())
-             ON DUPLICATE KEY UPDATE
-                user_id = VALUES(user_id),
-                p256dh_key = VALUES(p256dh_key),
-                auth_key = VALUES(auth_key),
-                user_agent = VALUES(user_agent),
-                fail_count = 0,
-                failed_at = NULL,
-                last_error = NULL,
-                last_http_status = NULL,
-                last_used_at = NOW()",
-            [$userId, $endpoint, $p256dhKey, $authKey, $userAgent !== '' ? $userAgent : null]
-        );
-
-        return true;
     }
 
-    public static function removeForUserByEndpoint($userId, $endpoint) {
-        $userId = (int)$userId;
-        $endpoint = trim((string)$endpoint);
-        if ($userId <= 0 || $endpoint === '') {
-            return 0;
-        }
-
-        $stmt = Database::query(
-            "DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
-            [$userId, $endpoint]
-        );
-
-        return (int)$stmt->rowCount();
-    }
-
-    public static function getActiveForUser($userId) {
-        $userId = (int)$userId;
-        if ($userId <= 0) {
-            return [];
-        }
-
+    public static function removeForUserByEndpoint(int $userId, string $endpoint): int
+    {
         return Database::query(
-            "SELECT *
-             FROM push_subscriptions
-             WHERE user_id = ?
-               AND (failed_at IS NULL OR fail_count < 3)
-             ORDER BY id ASC",
+            'DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?',
+            [$userId, $endpoint]
+        )->rowCount();
+    }
+
+    public static function getActiveForUser(int $userId): array
+    {
+        return Database::query(
+            'SELECT id, endpoint FROM push_subscriptions
+             WHERE user_id = ? AND fail_count < 3 AND (failed_at IS NULL OR failed_at <= NOW() - INTERVAL 60 SECOND)
+             ORDER BY last_used_at, id LIMIT 4',
             [$userId]
         )->fetchAll();
     }
 
-    public static function markSuccess($subscriptionId) {
-        $subscriptionId = (int)$subscriptionId;
-        if ($subscriptionId <= 0) {
-            return;
-        }
+    public static function reserveDelivery(): bool
+    {
+        $minute = intdiv(time(), 60);
+        // The database atomically increments this single installation-wide counter.
+        return Database::query(
+            "INSERT INTO settings (`key`, `value`) VALUES ('push_delivery_budget', ?)
+             ON DUPLICATE KEY UPDATE value = CASE
+                 WHEN SUBSTRING_INDEX(value, ':', 1) <> ? THEN VALUES(value)
+                 WHEN CAST(SUBSTRING_INDEX(value, ':', -1) AS UNSIGNED) < 60
+                     THEN CONCAT(?, ':', CAST(SUBSTRING_INDEX(value, ':', -1) AS UNSIGNED) + 1)
+                 ELSE value END",
+            [$minute . ':1', (string)$minute, (string)$minute]
+        )->rowCount() > 0;
+    }
 
+    public static function recordDelivery(int $id, ?int $status, string $outcome): void
+    {
+        $delivered = $outcome === 'delivered';
+        $retryable = in_array($outcome, [
+            'dns_rejected', 'response_limit', 'transport_error', 'provider_unavailable', 'provider_configuration', 'vapid_signing_failed',
+        ], true);
         Database::query(
-            "UPDATE push_subscriptions
-             SET fail_count = 0,
-                 failed_at = NULL,
-                 last_error = NULL,
-                 last_http_status = 201,
-                 last_used_at = NOW()
-             WHERE id = ?",
-            [$subscriptionId]
+            'UPDATE push_subscriptions
+             SET fail_count = CASE WHEN ? THEN 0 WHEN ? THEN LEAST(fail_count + 1, ?) ELSE ? END,
+                 failed_at = CASE WHEN ? THEN NULL ELSE NOW() END,
+                 last_http_status = ?, last_error = ?, last_used_at = NOW()
+             WHERE id = ?',
+            [(int)$delivered, (int)$retryable, self::MAX_FAILURES, self::MAX_FAILURES,
+                (int)$delivered, $status, $delivered ? null : $outcome, $id]
         );
-
-        self::logDelivery($subscriptionId, 'success', 201, null);
     }
 
-    public static function markRetryableFailure($subscriptionId, $httpStatus = null, $errorMessage = null) {
-        $subscriptionId = (int)$subscriptionId;
-        if ($subscriptionId <= 0) {
-            return;
-        }
-
-        $httpStatus = $httpStatus !== null ? (int)$httpStatus : null;
-        $errorMessage = self::normalizeErrorText($errorMessage);
-
-        Database::query(
-            "UPDATE push_subscriptions
-             SET fail_count = fail_count + 1,
-                 failed_at = NOW(),
-                 last_http_status = ?,
-                 last_error = ?,
-                 last_used_at = NOW()
-             WHERE id = ?",
-            [$httpStatus, $errorMessage, $subscriptionId]
-        );
-
-        self::logDelivery($subscriptionId, 'retryable', $httpStatus, $errorMessage);
-    }
-
-    public static function markPermanentFailure($subscriptionId, $httpStatus = null, $errorMessage = null) {
-        $subscriptionId = (int)$subscriptionId;
-        if ($subscriptionId <= 0) {
-            return;
-        }
-
-        $httpStatus = $httpStatus !== null ? (int)$httpStatus : null;
-        $errorMessage = self::normalizeErrorText($errorMessage);
-
-        Database::query(
-            "UPDATE push_subscriptions
-             SET fail_count = 5,
-                 failed_at = NOW(),
-                 last_http_status = ?,
-                 last_error = ?,
-                 last_used_at = NOW()
-             WHERE id = ?",
-            [$httpStatus, $errorMessage, $subscriptionId]
-        );
-
-        self::logDelivery($subscriptionId, 'permanent_fail', $httpStatus, $errorMessage);
-    }
-
-    public static function removeById($subscriptionId) {
-        $subscriptionId = (int)$subscriptionId;
-        if ($subscriptionId <= 0) {
-            return;
-        }
-
-        Database::query("DELETE FROM push_subscriptions WHERE id = ?", [$subscriptionId]);
-    }
-
-    public static function countForUser($userId) {
-        $userId = (int)$userId;
-        if ($userId <= 0) {
-            return 0;
-        }
-
+    public static function countForUser(int $userId): int
+    {
         return (int)Database::query(
-            "SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?",
+            'SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?',
             [$userId]
         )->fetchColumn();
-    }
-
-    private static function logDelivery($subscriptionId, $status, $httpStatus, $errorMessage) {
-        Database::query(
-            "INSERT INTO push_delivery_logs (subscription_id, status, http_status, error_message)
-             VALUES (?, ?, ?, ?)",
-            [(int)$subscriptionId, (string)$status, $httpStatus !== null ? (int)$httpStatus : null, self::normalizeErrorText($errorMessage)]
-        );
-    }
-
-    private static function normalizeErrorText($errorMessage) {
-        $text = trim((string)$errorMessage);
-        if ($text === '') {
-            return null;
-        }
-
-        if (mb_strlen($text) > 1000) {
-            return mb_substr($text, 0, 1000);
-        }
-
-        return $text;
     }
 }

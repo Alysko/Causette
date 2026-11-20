@@ -450,6 +450,42 @@ async function checkContentSecurity(browser, errors) {
     console.log('CSP blocked inline canaries, preserved navigation, and limited each CAPTCHA to its authentication forms.');
 }
 
+async function checkPushSettings(browser, errors) {
+    const admin = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    await admin.goto(origin + '/settings?lang=en');
+    await admin.locator('button[data-modal-open="cp-push-modal"]').click();
+    const policy = admin.locator('form[action$="/admin/push"]');
+    assert.deepEqual(await policy.locator('input[type=checkbox]:checked').evaluateAll(inputs => inputs.map(input => input.value)),
+        ['chromium', 'firefox', 'apple', 'edge']);
+    await policy.locator('input[value="firefox"]').uncheck();
+    assert.equal(await submitForm(admin, '/admin/push', policy.locator('button[type=submit]')), 302);
+    await admin.waitForURL('**/settings');
+    await admin.locator('button[data-modal-open="cp-push-modal"]').click();
+    assert.deepEqual(await policy.locator('input[type=checkbox]:checked').evaluateAll(inputs => inputs.map(input => input.value)),
+        ['chromium', 'apple', 'edge']);
+
+    const member = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const registration = async (endpoint) => member.evaluate(async (endpoint) => {
+        const response = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            body: new URLSearchParams({
+                csrf_token: document.querySelector('meta[name="csrf-token"]').content,
+                endpoint,
+                p256dh: 'B'.repeat(87),
+                auth: 'A'.repeat(22),
+            }),
+        });
+        return { status: response.status, body: await response.json() };
+    }, endpoint);
+    assert.equal((await registration('https://updates.push.services.mozilla.com/wpush/v2/fixture-disabled')).status, 400);
+    const accepted = await registration('https://fcm.googleapis.com/fcm/send/fixture-http');
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.body.subscription_count, 2);
+    const otherAccount = await registration('https://fcm.googleapis.com/fcm/send/fixture-accepted');
+    assert.equal(otherAccount.status, 409);
+    console.log('The administrator provider policy persisted, and HTTPS registration enforced it and preserved device ownership.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -482,6 +518,11 @@ async function run() {
         }
         if (process.argv.includes('--content-security')) {
             await checkContentSecurity(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--push-settings')) {
+            await checkPushSettings(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

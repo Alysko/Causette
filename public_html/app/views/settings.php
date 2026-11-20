@@ -761,6 +761,16 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             <?php endif; ?>
             <form method="POST" action="<?= htmlspecialchars(base_path('/admin/push'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="push_provider_policy_present" value="1">
+                <fieldset class="space-y-2">
+                    <legend class="text-sm text-zinc-400"><?= $tr('ui.allowed_push_providers') ?></legend>
+                    <?php foreach (['chromium' => 'Chromium', 'firefox' => 'Firefox', 'apple' => 'Safari', 'edge' => 'Edge (WNS)'] as $provider => $name): ?>
+                        <label class="flex items-center gap-2 text-sm">
+                            <input type="checkbox" name="push_allowed_providers[]" value="<?= $provider ?>" <?= in_array($provider, $push_allowed_providers ?? [], true) ? 'checked' : '' ?>>
+                            <?= $name ?>
+                        </label>
+                    <?php endforeach; ?>
+                </fieldset>
                 <div>
                     <label for="push_vapid_public_key" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.vapid_public_key') ?></label>
                     <input type="text" id="push_vapid_public_key" name="push_vapid_public_key" value="<?= htmlspecialchars((string)($push_vapid_public_key ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="<?= $tr('ui.base64url_encoded_public_key') ?>" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">

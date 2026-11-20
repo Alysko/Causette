@@ -340,6 +340,7 @@ return [
     'public_read_only_view_join_the' => 'Public read-only view. Join the group to post messages and interact.',
     'publish' => 'Publish',
     'push_notifications' => 'Push Notifications',
+    'allowed_push_providers' => 'Allowed push providers',
     'push_notifications_are_configured_and_active' => 'Push notifications are configured and active.',
     'quote' => 'Quote',
     'rate_limit_status_for_failed_authentication' => 'Rate-limit status for failed authentication attempts.',

@@ -340,6 +340,7 @@ return [
     'public_read_only_view_join_the' => 'Cette vue publique est en lecture seule. Rejoignez le groupe pour publier des messages et interagir.',
     'publish' => 'Publier',
     'push_notifications' => 'Notifications push',
+    'allowed_push_providers' => 'Fournisseurs de notifications push autorisés',
     'push_notifications_are_configured_and_active' => 'Les notifications push sont configurées et actives.',
     'quote' => 'Citer',
     'rate_limit_status_for_failed_authentication' => 'État de la limitation des tentatives d’authentification.',

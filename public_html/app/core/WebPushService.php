@@ -1,175 +1,102 @@
 <?php
-require_once __DIR__ . '/SecretSettings.php';
 
+declare(strict_types=1);
+
+use Causette\Push\PushEndpoint;
+use Causette\Push\PushTransport;
 use Causette\Security\SecretSettings;
 
-class WebPushService {
-    private const PUSH_TTL_SECONDS = 60;
+require_once __DIR__ . '/SecretSettings.php';
+require_once __DIR__ . '/PushTransport.php';
 
-    public static function isConfigured(): bool {
-        return self::getVapidPublicKey() !== '' && self::getVapidPrivateKeyPem() !== null;
+class WebPushService
+{
+    private const MAX_ATTEMPTS_PER_REQUEST = 4;
+    private const REQUEST_BUDGET_NS = 2500000000;
+    private static int $attempts = 0;
+    private static ?int $deadlineNs = null;
+    private static array $authorizationByOrigin = [];
+    private static bool $unexpectedFailureLogged = false;
+
+    public static function allowedProviders(): array
+    {
+        $setting = Setting::get('push_allowed_providers');
+        return $setting === null
+            ? PushEndpoint::PROVIDERS
+            : array_values(array_intersect(PushEndpoint::PROVIDERS, explode(',', (string)$setting)));
     }
 
-    public static function getVapidPublicKey(): string {
-        $envKey = trim((string)(getenv('PUSH_VAPID_PUBLIC_KEY') ?: ''));
-        if ($envKey !== '') {
-            return $envKey;
-        }
-
-        $settingKey = trim((string)(Setting::get('push_vapid_public_key') ?? ''));
-        return $settingKey;
+    public static function isConfigured(): bool
+    {
+        return function_exists('curl_init') && function_exists('dns_get_record') && self::allowedProviders() !== []
+            && self::getVapidPublicKey() !== '' && self::getVapidPrivateKeyPem() !== null;
     }
 
-    public static function sendForNotification($userId, $type, $title, $message, $link = null): void {
-        $userId = (int)$userId;
-        if ($userId <= 0 || !self::isConfigured()) {
+    public static function getVapidPublicKey(): string
+    {
+        $key = trim((string)(getenv('PUSH_VAPID_PUBLIC_KEY') ?: Setting::get('push_vapid_public_key') ?? ''));
+        return preg_match('/\AB[A-Za-z0-9_-]{86}=?\z/D', $key) === 1 ? rtrim($key, '=') : '';
+    }
+
+    public static function sendForNotification(int $userId, string $type, ?PushTransport $transport = null): void
+    {
+        $type = strtolower(trim($type));
+        if ($userId < 1 || self::$attempts >= self::MAX_ATTEMPTS_PER_REQUEST
+            || (self::$deadlineNs !== null && hrtime(true) >= self::$deadlineNs)
+            || !in_array($type, ['message', 'poke'], true)
+            || Setting::get('web_push_notifications_' . $userId) !== '1' || !self::isConfigured()
+        ) {
             return;
         }
 
-        $normalizedType = strtolower(trim((string)$type));
-        // Send Web Push for message and call poke notifications.
-        if (!in_array($normalizedType, ['message', 'poke'], true)) {
-            return;
-        }
+        self::$deadlineNs ??= hrtime(true) + self::REQUEST_BUDGET_NS;
+        $providers = self::allowedProviders();
+        $transport ??= new PushTransport();
+        foreach (PushSubscription::getActiveForUser($userId) as $subscription) {
+            if (self::$attempts >= self::MAX_ATTEMPTS_PER_REQUEST || hrtime(true) >= self::$deadlineNs) {
+                return;
+            }
+            self::$attempts++;
 
-        $isEnabled = (string)(Setting::get('web_push_notifications_' . $userId) ?? '0') === '1';
-        if (!$isEnabled) {
-            return;
-        }
+            $endpoint = PushEndpoint::parse((string)$subscription->endpoint, PushEndpoint::PROVIDERS);
+            if ($endpoint === null) {
+                PushSubscription::recordDelivery((int)$subscription->id, null, 'endpoint_rejected');
+                continue;
+            }
+            if (!in_array($endpoint->provider, $providers, true)) {
+                continue;
+            }
+            if (!PushSubscription::reserveDelivery()) {
+                self::$attempts = self::MAX_ATTEMPTS_PER_REQUEST;
+                return;
+            }
 
-        $subscriptions = PushSubscription::getActiveForUser($userId);
-        if (count($subscriptions) === 0) {
-            return;
-        }
-
-        foreach ($subscriptions as $subscription) {
-            $subscriptionId = (int)($subscription->id ?? 0);
-            $endpoint = trim((string)($subscription->endpoint ?? ''));
-            if ($subscriptionId <= 0 || $endpoint === '') {
+            $audience = $endpoint->audience();
+            if (!array_key_exists($audience, self::$authorizationByOrigin)) {
+                $jwt = self::buildVapidJwt($audience);
+                self::$authorizationByOrigin[$audience] = $jwt === null
+                    ? null : 'Authorization: vapid t=' . $jwt . ', k=' . self::getVapidPublicKey();
+            }
+            $authorization = self::$authorizationByOrigin[$audience];
+            if ($authorization === null) {
+                PushSubscription::recordDelivery((int)$subscription->id, null, 'vapid_signing_failed');
                 continue;
             }
 
-            $result = self::sendEndpoint($endpoint);
-            if ($result['ok']) {
-                PushSubscription::markSuccess($subscriptionId);
-                continue;
+            $result = $transport->send($endpoint, $authorization, self::$deadlineNs);
+            if ($result['outcome'] === 'budget_elapsed') {
+                return;
             }
-
-            $statusCode = $result['status'];
-            $errorMessage = $result['error'];
-
-            if ($statusCode === 404 || $statusCode === 410) {
-                PushSubscription::markPermanentFailure($subscriptionId, $statusCode, $errorMessage);
-                PushSubscription::removeById($subscriptionId);
-                continue;
-            }
-
-            if ($statusCode >= 400 && $statusCode < 500) {
-                PushSubscription::markPermanentFailure($subscriptionId, $statusCode, $errorMessage);
-                continue;
-            }
-
-            PushSubscription::markRetryableFailure($subscriptionId, $statusCode > 0 ? $statusCode : null, $errorMessage);
+            PushSubscription::recordDelivery((int)$subscription->id, $result['status'], $result['outcome']);
         }
     }
 
-    private static function sendEndpoint(string $endpoint): array {
-        $audience = self::getAudienceFromEndpoint($endpoint);
-        if ($audience === null) {
-            return [
-                'ok' => false,
-                'status' => 0,
-                'error' => 'Invalid push endpoint audience'
-            ];
+    public static function reportUnexpectedFailure(): void
+    {
+        if (!self::$unexpectedFailureLogged) {
+            self::$unexpectedFailureLogged = true;
+            error_log('[Causette][push] Unexpected delivery failure');
         }
-
-        $jwt = self::buildVapidJwt($audience);
-        if ($jwt === null) {
-            return [
-                'ok' => false,
-                'status' => 0,
-                'error' => 'Unable to build VAPID JWT'
-            ];
-        }
-
-        $publicKey = self::getVapidPublicKey();
-        $ch = curl_init($endpoint);
-        if ($ch === false) {
-            return [
-                'ok' => false,
-                'status' => 0,
-                'error' => 'Unable to initialize push request'
-            ];
-        }
-
-        $headers = [
-            'TTL: ' . self::PUSH_TTL_SECONDS,
-            'Urgency: normal',
-            'Authorization: vapid t=' . $jwt . ', k=' . $publicKey,
-            'Content-Length: 0'
-        ];
-
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER => false,
-            CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_TIMEOUT => 8,
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_POSTFIELDS => '',
-        ]);
-
-        $responseBody = curl_exec($ch);
-        $curlError = curl_error($ch);
-        $statusCode = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-        if ($statusCode >= 200 && $statusCode < 300) {
-            return [
-                'ok' => true,
-                'status' => $statusCode,
-                'error' => null,
-            ];
-        }
-
-        $error = trim((string)$curlError);
-        if ($error === '') {
-            $error = trim((string)$responseBody);
-        }
-
-        if (mb_strlen($error) > 1000) {
-            $error = mb_substr($error, 0, 1000);
-        }
-
-        return [
-            'ok' => false,
-            'status' => $statusCode,
-            'error' => $error !== '' ? $error : 'Push request failed',
-        ];
-    }
-
-    private static function getAudienceFromEndpoint(string $endpoint): ?string {
-        $parts = parse_url($endpoint);
-        if (!is_array($parts)) {
-            return null;
-        }
-
-        $scheme = strtolower(trim((string)($parts['scheme'] ?? '')));
-        $host = trim((string)($parts['host'] ?? ''));
-        $port = isset($parts['port']) ? (int)$parts['port'] : 0;
-
-        if ($scheme === '' || $host === '') {
-            return null;
-        }
-
-        $audience = $scheme . '://' . $host;
-        if ($port > 0) {
-            $isDefaultPort = ($scheme === 'https' && $port === 443) || ($scheme === 'http' && $port === 80);
-            if (!$isDefaultPort) {
-                $audience .= ':' . $port;
-            }
-        }
-
-        return $audience;
     }
 
     private static function buildVapidJwt(string $audience): ?string {
@@ -180,8 +107,7 @@ class WebPushService {
 
         $subject = trim((string)(getenv('PUSH_VAPID_SUBJECT') ?: ''));
         if ($subject === '') {
-            $host = parse_url((string)APP_URL, PHP_URL_HOST) ?: 'localhost';
-            $subject = 'mailto:admin@' . $host;
+            $subject = (string)APP_URL;
         }
 
         $header = ['typ' => 'JWT', 'alg' => 'ES256'];
@@ -199,10 +125,18 @@ class WebPushService {
         if ($privateKey === false) {
             return null;
         }
+        $ec = openssl_pkey_get_details($privateKey)['ec'] ?? [];
+        if (($ec['curve_name'] ?? null) !== 'prime256v1' || !isset($ec['x'], $ec['y'])) {
+            return null;
+        }
+        $publicKey = self::base64UrlEncode("\x04" . str_pad($ec['x'], 32, "\0", STR_PAD_LEFT)
+            . str_pad($ec['y'], 32, "\0", STR_PAD_LEFT));
+        if (!hash_equals($publicKey, self::getVapidPublicKey())) {
+            return null;
+        }
 
         $derSignature = '';
         $signed = openssl_sign($signingInput, $derSignature, $privateKey, OPENSSL_ALGO_SHA256);
-        openssl_free_key($privateKey);
         if (!$signed) {
             return null;
         }
@@ -272,10 +206,10 @@ class WebPushService {
 
         $r = ltrim($r, "\x00");
         $s = ltrim($s, "\x00");
-        $r = str_pad($r, $partLength / 2, "\x00", STR_PAD_LEFT);
-        $s = str_pad($s, $partLength / 2, "\x00", STR_PAD_LEFT);
+        $r = str_pad($r, intdiv($partLength, 2), "\x00", STR_PAD_LEFT);
+        $s = str_pad($s, intdiv($partLength, 2), "\x00", STR_PAD_LEFT);
 
-        if (strlen($r) !== $partLength / 2 || strlen($s) !== $partLength / 2) {
+        if (strlen($r) !== intdiv($partLength, 2) || strlen($s) !== intdiv($partLength, 2)) {
             return null;
         }
 

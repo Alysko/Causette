@@ -197,6 +197,7 @@ class SettingsController extends Controller {
                 'captcha_site_key' => (string)(Setting::get('captcha_site_key') ?? ''),
                 'push_vapid_public_key' => (string)(Setting::get('push_vapid_public_key') ?? ''),
                 'push_vapid_configured' => WebPushService::isConfigured(),
+                'push_allowed_providers' => WebPushService::allowedProviders(),
                 'storage_writable' => is_dir($storageRoot) && is_writable($storageRoot),
                 'storage_total_size_label' => $hasStorageStats && $storageTotalBytes !== null ? $this->formatBytes($storageTotalBytes) : 'N/A',
                 'storage_dedup_saved_label' => $hasStorageStats && $storageDedupSavedBytes !== null && $storageDedupSavedPercent !== null
