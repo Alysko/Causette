@@ -298,6 +298,28 @@ async function checkReactions(browser, errors) {
     console.log('Both reaction pickers offer 21 local emoji choices. Existing reactions remain visible after voting and reload.');
 }
 
+async function checkPostSearch(browser, errors) {
+    const owner = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    const search = async (page) => owner.evaluate(async (page) => {
+        const query = new URLSearchParams({ q: 'Search fixture 20%', page });
+        const response = await fetch(`/api/posts/search?${query}`);
+        if (!response.ok) throw new Error(`Post search returned HTTP ${response.status}`);
+        return response.json();
+    }, page);
+
+    const first = await search(0);
+    const last = await search(500);
+    assert.deepEqual([first.page, first.total, first.total_pages], [1, 12, 2]);
+    assert.deepEqual([last.page, last.total, last.total_pages], [2, 12, 2]);
+    assert.equal(first.posts.length, 10);
+    assert.equal(last.posts.length, 2);
+    const posts = [...first.posts, ...last.posts];
+    assert.deepEqual(posts.map(post => post.content),
+        Array.from({ length: 12 }, (_, index) => `Search fixture 20% #${12 - index}`));
+    assert.ok(posts.every(post => post.author_username === 'fixturepeer' && post.is_friend));
+    console.log('Post search preserved literal wildcards, page boundaries and ordering across equal timestamps.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -320,6 +342,11 @@ async function run() {
         }
         if (process.argv.includes('--reactions')) {
             await checkReactions(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--post-search')) {
+            await checkPostSearch(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

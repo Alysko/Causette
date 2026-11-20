@@ -19,6 +19,11 @@ $pdo->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (52, 8, 
 $pdo->exec("INSERT INTO message_reactions (message_id, user_id, reaction_code) VALUES (50, 2, '1F44D')");
 $pdo->exec("INSERT INTO posts (id, user_id, content) VALUES (50, 2, 'Fixture reaction post')");
 $pdo->exec("INSERT INTO post_reactions (post_id, user_id, reaction_code) VALUES (50, 2, '2665')");
+$post = $pdo->prepare('INSERT INTO posts (user_id, content, created_at) VALUES (2, ?, ?)');
+for ($number = 1; $number <= 12; $number++) {
+    $post->execute(["Search fixture 20% #$number", '2025-11-20 12:00:00']);
+}
+$post->execute(['Search fixture 200 #13', '2025-11-20 12:00:00']);
 $pdo->exec("INSERT INTO friends (user_id, friend_id, status) VALUES (1, 2, 'accepted')");
 $setting = $pdo->prepare('INSERT INTO settings (`key`, `value`) VALUES (?, ?)');
 $setting->execute(['pinned_message_chat_8', '50']);

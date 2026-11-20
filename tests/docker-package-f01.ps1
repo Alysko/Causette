@@ -11,7 +11,9 @@ param(
 
     [switch]$LocalAssets,
 
-    [switch]$Reactions
+    [switch]$Reactions,
+
+    [switch]$PostSearch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -115,6 +117,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
 
     Run-Browser '--install'
     Invoke-Docker exec $app sh -c 'tr -d "\015" </fixture.sh | sh -s -- seed'
+    if ($PostSearch) {
+        Run-Browser '--post-search'
+    }
     if ($Reactions) {
         Run-Browser '--reactions'
     }

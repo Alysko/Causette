@@ -374,7 +374,7 @@ class ApiController extends Controller {
         $page = min($page, $totalPages);
         $offset = ($page - 1) * $perPage;
 
-        $results = Database::query(
+        $statement = Database::getInstance()->prepare(
             "SELECT p.id AS post_id,
                     p.content,
                     p.created_at,
@@ -388,10 +388,16 @@ class ApiController extends Controller {
              LEFT JOIN friends f ON f.status = 'accepted'
                  AND ((f.user_id = ? AND f.friend_id = u.id) OR (f.friend_id = ? AND f.user_id = u.id))
              WHERE p.content LIKE ?
-             ORDER BY p.created_at DESC
-             LIMIT $perPage OFFSET $offset",
-            [$userId, $userId, $search]
-        )->fetchAll();
+             ORDER BY p.created_at DESC, p.id DESC
+             LIMIT ? OFFSET ?"
+        );
+        $statement->bindValue(1, $userId, PDO::PARAM_INT);
+        $statement->bindValue(2, $userId, PDO::PARAM_INT);
+        $statement->bindValue(3, $search, PDO::PARAM_STR);
+        $statement->bindValue(4, $perPage, PDO::PARAM_INT);
+        $statement->bindValue(5, $offset, PDO::PARAM_INT);
+        $statement->execute();
+        $results = $statement->fetchAll();
 
         foreach ($results as $r) {
             $r->author_user_number_formatted = User::formatUserNumber($r->author_user_number);
