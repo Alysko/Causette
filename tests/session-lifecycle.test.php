@@ -6,7 +6,7 @@ use Causette\Installation\InstallDatabase;
 use Causette\Security\BrowserSession;
 
 if (getenv('CAUSETTE_RECOVERY_FIXTURE') !== '1' || !is_readable('/run/mysqld/mysqld.sock')) {
-    throw new LogicException('Run with the dedicated Docker fixture database.');
+    throw new LogicException('Run with the dedicated fixture database.');
 }
 
 const DB_HOST = 'localhost';

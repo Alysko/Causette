@@ -80,7 +80,7 @@ JSON
         printf '%s\n' 'fixture-private-storage-canary' >/case/storage/f01-fixture.txt
         ;;
     source)
-        docker-php-ext-install -j2 pdo_mysql >/tmp/pdo.log 2>&1 || { tail -n 20 /tmp/pdo.log; exit 1; }
+        php -r 'if (!extension_loaded("pdo_mysql")) { fwrite(STDERR, "The fixture requires pdo_mysql.\n"); exit(1); }'
         mkdir -p /case/public_html /case/storage/logs /case/storage/emojis
         cp -a /source/. /case/public_html/
         cp /fixture-emoji /case/storage/emojis/2615.svg

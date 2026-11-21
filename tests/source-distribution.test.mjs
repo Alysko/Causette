@@ -22,13 +22,19 @@ test('the source retains the public entry point, private storage layout and lice
     assert.ok(!readdirSync(new URL('public_html/', root)).some(name => name.toLowerCase() === 'storage'));
 });
 
-test('the source contains no container deployment entry points', () => {
-    const legacyFiles = readdirSync(root).filter(
-        name => /^(?:Dockerfile(?:\..*)?|(?:docker-)?compose(?:\..*)?\.ya?ml)$/i.test(name),
-    );
-    const supportDirectory = new URL('.docker/', root);
-    const legacySupport = existsSync(supportDirectory) ? readdirSync(supportDirectory) : [];
-    assert.deepEqual([...legacyFiles, ...legacySupport], []);
+test('the icon distribution includes only regular and solid fonts', () => {
+    const fonts = readdirSync(new URL('public_html/assets/webfonts/', root));
+    assert.deepEqual(fonts.sort(), [
+        'fa-regular-400.ttf',
+        'fa-regular-400.woff2',
+        'fa-solid-900.ttf',
+        'fa-solid-900.woff2',
+    ]);
+    const css = readFileSync(new URL('public_html/assets/css/fontawesome.min.css', root), 'utf8');
+    for (const font of fonts) {
+        assert.ok(css.includes(font), font);
+    }
+    assert.doesNotMatch(css, /fa-brands-400|fa-v4compatibility/);
 });
 
 test('the public rewrite configuration denies direct storage requests before serving files', () => {

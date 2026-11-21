@@ -15,107 +15,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - php: '8.5'
-            image: docker.io/library/php@sha256:282fb93697061f8315ce27b522d9bdc8e72d6823316a3771eb30c116e6baec7c
-          - php: '8.6'
-            image: docker.io/library/php@sha256:74fd38efacd3f5230c16d9d997b27831acfe64ffb84da6fb0154dd9c7b90f449
+        php: ['8.5', '8.6']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install test services and isolation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap mariadb-server
+          sudo systemctl stop mariadb
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
+          extensions: pdo_mysql, curl
           coverage: none
           tools: none
       - run: node scripts/check-syntax.mjs
       - run: node --test tests/*.test.mjs
       - name: Verify PHP behavior in isolation
-        env:
-          PHP_IMAGE: ${{ matrix.image }}
-        run: |
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-            --user 33:33 \
-            --tmpfs /project/storage:rw,noexec,nosuid,mode=0700,uid=33,gid=33 \
-            --tmpfs /tmp:rw,noexec,nosuid,mode=1777 \
-            --mount "type=bind,source=$PWD/public_html,target=/project/public_html,readonly" \
-            --mount "type=bind,source=$PWD/tests,target=/project/tests,readonly" \
-            --entrypoint sh "$PHP_IMAGE" -c '
-              set -eu
-              php -n /project/tests/chat-bootstrap.test.php
-              php -n /project/tests/mfa-delivery.test.php
-              php -n /project/tests/installer-authorization.test.php
-              php -n /project/tests/installer-keys.test.php
-              php -n /project/tests/update-authorization.test.php
-              php -n /project/tests/message-response.test.php
-              php -n /project/tests/reaction-catalog.test.php
-              php -n /project/tests/attachment-access.test.php
-              php -n /project/tests/request-origin.test.php
-              php -n /project/tests/web-push-delivery.test.php
-              php -n /project/tests/push-subscription-policy.test.php
-            '
+        run: sh tests/isolated-checks.sh php
       - name: Verify account changes and reaction upgrades against MariaDB
-        env:
-          PHP_IMAGE: ${{ matrix.image }}
-          MARIADB_IMAGE: docker.io/library/mariadb@sha256:ec79aa7a81a7667885cb69b6dc0415e032f22520bd5aca77927faffca4329924
-        run: |
-          set -euo pipefail
-          printf 'FROM %s\nRUN docker-php-ext-install -j2 pdo_mysql\n' "$PHP_IMAGE" |
-            docker build --network none --tag causette-account-fixture -
-          docker pull "$MARIADB_IMAGE"
-          cleanup() {
-            docker rm -f "${db:-}" >/dev/null 2>&1 || true
-            docker volume rm "${socket:-}" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-          run_account_fixture() {
-            local test_file="$1" mode="$2"
-            db="causette-account-$mode"
-            socket="$db-socket"
-            docker volume create "$socket" >/dev/null
-            docker run --detach --name "$db" --network none \
-              --tmpfs /var/lib/mysql:rw,nosuid,size=512m \
-              --mount "type=volume,source=$socket,target=/run/mysqld" \
-              --env MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1 \
-              --env MARIADB_DATABASE=causette_recovery_fixture \
-              --env MARIADB_USER=causette_fixture \
-              --env MARIADB_PASSWORD=fixture-only-database-password \
-              "$MARIADB_IMAGE" --skip-networking >/dev/null
-            local ready=0
-            for attempt in {1..75}; do
-              if docker exec "$db" sh -c 'test "$(cat /proc/1/comm)" = mariadbd &&
-                  mariadb -uroot causette_recovery_fixture -e "SELECT 1"' >/dev/null 2>&1; then
-                ready=1
-                break
-              fi
-              sleep 0.4
-            done
-            test "$ready" -eq 1
-            docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-              --user 33:33 --tmpfs /tmp:rw,noexec,nosuid,mode=1777 \
-              --tmpfs /project/storage:rw,noexec,nosuid,mode=0700,uid=33,gid=33 \
-              --mount "type=volume,source=$socket,target=/run/mysqld" \
-              --mount "type=bind,source=$PWD/public_html,target=/project/public_html,readonly" \
-              --mount "type=bind,source=$PWD/tests,target=/project/tests,readonly" \
-              --env CAUSETTE_RECOVERY_FIXTURE=1 --entrypoint php causette-account-fixture \
-              -d pdo_mysql.default_socket=/run/mysqld/mysqld.sock -d session.save_path=/tmp \
-              "/project/tests/$test_file" "$mode"
-            cleanup
-          }
-          run_account_fixture mfa-lifecycle.test.php email
-          run_account_fixture mfa-lifecycle.test.php invitation
-          run_account_fixture password-recovery.test.php change
-          run_account_fixture reaction-upgrade.test.php reactions
+        run: sh tests/isolated-checks.sh database
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'
-        run: |
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-            --user 33:33 --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-            --mount "type=bind,source=$PWD/tests/apache-storage-routing.sh,target=/verify.sh,readonly" \
-            --mount "type=bind,source=$PWD/public_html/.htaccess,target=/causette.htaccess,readonly" \
-            --entrypoint sh docker.io/library/php@sha256:0110f2cd5f4d58417afc7340b22c4ddcce54e970b87c03a6c77259b07b47c325 \
-            /verify.sh /causette.htaccess
+        run: sh tests/isolated-checks.sh apache
 
   secrets:
     name: Secret scan
@@ -146,15 +70,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          version: '0.12.15'
+          enable-cache: false
       - name: Scan PHP and JavaScript
         shell: bash
         run: |
-          docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges \
-            --tmpfs /tmp:rw,nosuid,size=256m \
-            --env GIT_CONFIG_GLOBAL=/tmp/semgrep.gitconfig \
-            --env SEMGREP_LOG_FILE=/tmp/semgrep.log --env SEMGREP_SETTINGS_FILE=/tmp/semgrep-settings.yml \
-            --mount "type=bind,source=$PWD/public_html,target=/src,readonly" \
-            --entrypoint semgrep docker.io/semgrep/semgrep@sha256:6e1b04340e60e910fbb4ddbf3c857ab0918f064417ad5ac530014ccb3cf8c8f1 \
-            scan --config p/php --config p/javascript --metrics=off --disable-version-check \
-            --max-target-bytes 5000000 --error --json /src |
-            node -e 'const r = JSON.parse(require("node:fs").readFileSync(0, "utf8")); console.log(`Findings: ${r.results.length}, scan errors: ${r.errors.length}`); if (r.errors.length) process.exitCode = 1;'
+          uvx --python 3.12 semgrep@1.186.0 scan public_html \
+            --no-git-ignore --config p/php --config p/javascript --metrics=off --disable-version-check \
+            --max-target-bytes 5000000 --error --json |
+            node -e 'const r = JSON.parse(require("node:fs").readFileSync(0, "utf8")); console.log("Findings: " + r.results.length + ", scan errors: " + r.errors.length); if (r.errors.length) process.exitCode = 1;'
