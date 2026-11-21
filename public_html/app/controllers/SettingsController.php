@@ -3,10 +3,23 @@ require_once __DIR__ . '/../modules/2fa/totp/TOTP.php';
 require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
 require_once __DIR__ . '/../core/AuthChallenge.php';
 
+use Causette\Localization\DisplayPreferences;
 use Causette\Security\AuthChallenge;
 use Causette\Security\BrowserSession;
 
 class SettingsController extends Controller {
+    public function saveDisplayPreferences(): void {
+        Auth::requireAuth();
+        $user = Auth::user();
+        Auth::csrfValidate(403);
+        if (!DisplayPreferences::save($_POST, (int)$user->id)) {
+            ErrorHandler::abort(400, 'Invalid display preferences');
+        }
+
+        $this->flash('success', 'preferences_saved');
+        $this->redirect('/settings');
+    }
+
     public function index() {
         Auth::requireAuth();
         $user = Auth::user();
@@ -233,7 +246,7 @@ class SettingsController extends Controller {
             return null;
         }
 
-        return date('F j, Y \a\t g:i A', $availableAt);
+        return gmdate('Y-m-d H:i:s', $availableAt);
     }
 
     private function storageRoot(): string {

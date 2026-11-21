@@ -307,8 +307,8 @@ $tr = $locale->html(...);
                         $postAuthorNumber = (string)($post->user_number ?? '');
                         $postAuthorUrl = base_url('/u/' . User::formatUserNumber($postAuthorNumber));
                         $postCreatedAtRaw = trim((string)($post->created_at ?? ''));
-                        $postCreatedAtTs = $postCreatedAtRaw !== '' ? strtotime($postCreatedAtRaw) : false;
-                        $postCreatedAtLabel = $postCreatedAtTs !== false ? date('M j, Y H:i', $postCreatedAtTs) : 'Unknown';
+                        $postCreatedAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($postCreatedAtRaw)
+                            ?: \Causette\Localization\Locale::current()->text('ui.unknown_date');
                         $postDestinationUrl = base_url('/posts?post=' . $postId);
                         $postAvatar = User::avatarUrl($post);
                     ?>

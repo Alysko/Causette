@@ -3,6 +3,20 @@
 declare(strict_types=1);
 
 return [
+    'site_display_defaults' => 'Affichage par défaut du site',
+    'use_browser_language' => 'Utiliser la langue du navigateur',
+    'use_site_default' => 'Utiliser le réglage du site',
+    'date_format' => 'Format de date',
+    'date_format_locale' => 'Selon la langue',
+    'date_format_dmy' => 'Jour / mois / année (21/11/2026)',
+    'date_format_mdy' => 'Mois / jour / année (11/21/2026)',
+    'date_format_ymd' => 'Année / mois / jour (2026-11-21)',
+    'time_format' => 'Format de l’heure',
+    'time_format_24h' => '24 heures (15:30)',
+    'time_format_12h' => '12 heures (03:30 PM)',
+    'save_display_preferences' => 'Enregistrer les préférences d’affichage',
+    'unknown_date' => 'Date inconnue',
+    'username_change_available_on' => 'Vous pourrez modifier à nouveau votre nom d’utilisateur le {date}.',
     '1_year' => '1 an',
     '1080p_30_fps' => '1080p · 30 images/s',
     '24_hours' => '24 heures',

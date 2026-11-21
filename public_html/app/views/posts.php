@@ -134,8 +134,8 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                     $postAuthorNumber = (string)($post->user_number ?? '');
                     $postAuthorUrl = base_url('/u/' . User::formatUserNumber($postAuthorNumber));
                     $postCreatedAtRaw = trim((string)($post->created_at ?? ''));
-                    $postCreatedAtTs = $postCreatedAtRaw !== '' ? strtotime($postCreatedAtRaw) : false;
-                    $postCreatedAtLabel = $postCreatedAtTs !== false ? date('M j, Y H:i', $postCreatedAtTs) : 'Unknown';
+                    $postCreatedAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($postCreatedAtRaw)
+                        ?: \Causette\Localization\Locale::current()->text('ui.unknown_date');
                     $postReactions = (isset($post->reactions) && is_array($post->reactions)) ? $post->reactions : [];
                     $postAvatar = User::avatarUrl($post);
                     $canDeletePost = Post::canUserDeletePost($currentUser, $post);

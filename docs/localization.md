@@ -1,6 +1,10 @@
 # Localization
 
-The language picker, language cookie and browser preference select the display language in that order. English is the fallback. Changing the display language does not change stored messages, poll questions, options or names.
+Administrators can set the site language, date format and clock under **Settings → System → Site display defaults**. Signed-in users can override any of those values under **Settings → Preferences**. Each field can independently inherit the site default. The unconfigured site uses the browser language (with English as a fallback), the language’s date format and a 24-hour clock.
+
+The sign-in and installer language pickers are available before authentication. For visitors, an explicit choice takes precedence over the language cookie and the site language. The installer can run before the site defaults exist. Account preferences are stored with the account, so a visitor's language cookie has no effect on the signed-in interface.
+
+Numeric dates support day/month/year, month/day/year and year-month-day. The clock supports 24-hour and 12-hour display. These settings preserve the account’s existing time offset and the stored UTC timestamps. Changing the display language leaves stored messages, poll questions, options and names as written.
 
 ## Add a language
 
@@ -8,6 +12,6 @@ Add its code and display name to `public_html/app/locales/languages.php`. Use a 
 
 The catalogs are PHP arrays of plain UTF-8 strings. English and French ship together. User interface templates use `Locale::html()` for text and HTML attributes. Use `Locale::text()` when the caller is responsible for escaping, for example when building data for the browser. Send browser catalogs through the HTML-safe JSON encoder. Browser code uses `uiText()` for shared messages and `chatLabel()` for poll and pin labels. Escape strings before adding them to an existing HTML template, or use DOM text properties.
 
-Provide whole sentences with named placeholders when a translation needs to reorder words. Vote counts use the browser's plural categories and number formatting. Add the categories used by the language and keep the `other` form as a fallback. Poll dates use the selected language and the account's display offset.
+Provide whole sentences with named placeholders when a translation needs to reorder words. Vote counts use the browser's plural categories and number formatting. Add the categories used by the language and keep the `other` form as a fallback. Add month abbreviations and date patterns to the `dates.php` catalog for PHP-rendered timestamps. Browsers use their native `Intl.DateTimeFormat` for language-specific dates.
 
-Run `php tests/localization.test.php` for English and French key and placeholder checks. The Docker package suite also accepts `-Localization` to exercise both languages in Chromium.
+Run `php tests/localization.test.php` for English and French key and placeholder checks. The Docker package suite accepts `-Localization` for both languages and `-DisplayPreferences` for the site and account settings in Chromium.

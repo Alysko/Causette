@@ -520,6 +520,8 @@ function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
     const nextScripts = Array.from(nextDoc.querySelectorAll('script[data-app-script]'), (script) => script.getAttribute('src'));
     const currentScripts = Array.from(document.querySelectorAll('script[data-app-script]'), (script) => script.getAttribute('src'));
     if (nextDoc.documentElement.lang !== document.documentElement.lang ||
+        nextDoc.documentElement.dataset.dateFormat !== document.documentElement.dataset.dateFormat ||
+        nextDoc.documentElement.dataset.timeFormat !== document.documentElement.dataset.timeFormat ||
         nextScripts.length !== currentScripts.length ||
         nextScripts.some((url, index) => url !== currentScripts[index])) {
         return false;
@@ -812,7 +814,7 @@ function parseUtcTimestamp(value) {
     return new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds));
 }
 
-function formatCompactMessageTimestamp(value, { relative = true } = {}) {
+function formatCompactMessageTimestamp(value, { relative = true, dateOnly = false } = {}) {
     const fullTimestamp = String(value || '').trim();
     if (!fullTimestamp) return '';
 
@@ -821,7 +823,7 @@ function formatCompactMessageTimestamp(value, { relative = true } = {}) {
     if (!date) return fullTimestamp;
 
     const diffFromNowMs = Date.now() - date.getTime();
-    if (relative && diffFromNowMs >= 0 && diffFromNowMs < ONE_MINUTE_IN_MS) {
+    if (relative && !dateOnly && diffFromNowMs >= 0 && diffFromNowMs < ONE_MINUTE_IN_MS) {
         return uiText('just_now');
     }
 
@@ -832,14 +834,31 @@ function formatCompactMessageTimestamp(value, { relative = true } = {}) {
         : 0;
 
     const local = new Date(date.getTime() + offsetMins * 60 * 1000);
-    const language = uiLanguage();
-    if (!timestampFormatters.has(language)) {
-        timestampFormatters.set(language, new Intl.DateTimeFormat(language, {
-            timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-        }));
+    const { dateFormat, timeFormat } = document.documentElement?.dataset ?? {};
+    const twelveHours = timeFormat === '12h';
+    if (dateFormat === 'dmy' || dateFormat === 'mdy' || dateFormat === 'ymd') {
+        const twoDigits = (number) => String(number).padStart(2, '0');
+        const day = twoDigits(local.getUTCDate());
+        const month = twoDigits(local.getUTCMonth() + 1);
+        const year = String(local.getUTCFullYear()).padStart(4, '0');
+        const formattedDate = { dmy: day + '/' + month + '/' + year, mdy: month + '/' + day + '/' + year, ymd: year + '-' + month + '-' + day }[dateFormat];
+        if (dateOnly) return formattedDate;
+        const hour = local.getUTCHours();
+        const minute = twoDigits(local.getUTCMinutes());
+        return formattedDate + ' ' + twoDigits(twelveHours ? (hour % 12 || 12) : hour) + ':' + minute
+            + (twelveHours ? (hour >= 12 ? ' PM' : ' AM') : '');
     }
-    return timestampFormatters.get(language).format(local);
+
+    const language = uiLanguage();
+    const formatterKey = [language, dateOnly, twelveHours].join(':');
+    if (!timestampFormatters.has(formatterKey)) {
+        const options = { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' };
+        if (!dateOnly) {
+            Object.assign(options, { hour: '2-digit', minute: '2-digit', hourCycle: twelveHours ? 'h12' : 'h23' });
+        }
+        timestampFormatters.set(formatterKey, new Intl.DateTimeFormat(language, options));
+    }
+    return timestampFormatters.get(formatterKey).format(local);
 }
 
 function getUtcTimestampTargets(root = document) {
@@ -861,6 +880,7 @@ function scheduleUtcTimestampRefresh() {
     let nextRefreshDelay = Infinity;
 
     document.querySelectorAll('[data-utc]').forEach((el) => {
+        if (el.dataset.dateOnly !== undefined) return;
         const date = parseUtcTimestamp(el.dataset.utc);
         if (!date) return;
 
@@ -888,7 +908,9 @@ function scheduleUtcTimestampRefresh() {
 function refreshUtcTimestamps(root = document) {
     const targets = getUtcTimestampTargets(root);
     targets.forEach((el) => {
-        const converted = formatCompactMessageTimestamp(el.dataset.utc);
+        const converted = formatCompactMessageTimestamp(el.dataset.utc, {
+            dateOnly: el.dataset.dateOnly !== undefined,
+        });
         if (converted) {
             el.textContent = converted;
         }

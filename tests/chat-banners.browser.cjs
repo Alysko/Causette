@@ -10,10 +10,10 @@ const savedQuestion = 'Sondage sauvegardé <mark>Thé</mark> ?';
 const adminPassword = 'fixture-only-password';
 const operatorToken = 'fixture-only-operator-token-2026-fixture-only-operator-token';
 
-async function newPage(browser, errors, externalRequests = null) {
+async function newPage(browser, errors, externalRequests = null, locale = 'en-US') {
     const context = await browser.newContext({
         ignoreHTTPSErrors: true,
-        locale: 'en-US',
+        locale,
         serviceWorkers: 'block',
     });
     // The test server is reachable over loopback even when Chromium sees no network interface.
@@ -116,14 +116,18 @@ async function installPackage(browser, errors) {
     console.log('The completed installer, private storage canary and packaged schema were denied over HTTPS.');
 }
 
-async function login(browser, username, password, errors, language) {
-    const page = await newPage(browser, errors);
+async function signIn(page, username, password, language) {
     await page.goto(origin + '/login?lang=' + language);
     await page.locator('input[name=identifier]').fill(username);
     await page.locator('input[name=password]').fill(password);
     assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name="identifier"]) button[type=submit]')), 302);
     await page.goto(origin + firstChat);
     await page.locator('#chat-view[data-chat-id="8"]').waitFor();
+}
+
+async function login(browser, username, password, errors, language) {
+    const page = await newPage(browser, errors, null, language === 'fr' ? 'fr-FR' : 'en-US');
+    await signIn(page, username, password, language);
     assert.equal(await page.locator('html').getAttribute('lang'), language);
     return page;
 }
@@ -131,6 +135,97 @@ async function login(browser, username, password, errors, language) {
 async function waitForText(page, selector, expected) {
     await page.waitForFunction(({ selector, expected }) => document.querySelector(selector)?.textContent.includes(expected),
         { selector, expected });
+}
+
+async function checkDisplayPreferences(browser, errors) {
+    const admin = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    const save = (page, path, fields = {}, withCsrf = true) => page.evaluate(async ({ path, fields, withCsrf }) => {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content
+            ?? document.querySelector('input[name="csrf_token"]')?.value;
+        if (withCsrf) fields.csrf_token = token;
+        return (await fetch(path, { method: 'POST', body: new URLSearchParams(fields) })).status;
+    }, { path, fields, withCsrf });
+    const sitePath = '/admin/display-defaults';
+    const personalPath = '/settings/display-preferences';
+    const siteChoices = { language: 'fr', date_format: 'dmy', time_format: '24h' };
+    assert.equal(await save(admin, sitePath, siteChoices), 200, 'administrator can save site defaults');
+    assert.equal(await save(admin, sitePath, { ...siteChoices, language: 'en', time_format: 'invalid' }), 400);
+    assert.equal(await save(admin, sitePath, { ...siteChoices, language: 'en' }, false), 403);
+
+    const timestamp = (page) => page.locator('[data-message-id="50"] [data-utc]').first();
+    const adminChat = await admin.goto(origin + firstChat + '?lang=en');
+    assert.equal(await admin.locator('html').getAttribute('lang'), 'fr');
+    assert.equal(adminChat.headers()['content-language'], 'fr');
+    assert.equal(await admin.locator('#app-sidebar .language-links').count(), 0);
+    assert.match(await adminChat.text(), /data-utc="2025-11-19 15:05:00"[^>]*>19\/11\/2025 15:05</);
+    assert.match(await adminChat.text(), /id="pinned-message-time"[^>]*>19\/11\/2025 15:05</);
+    await waitForText(admin, '[data-message-id="50"] [data-utc]', '19/11/2025 15:05');
+
+    const member = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'fr');
+    assert.equal(await save(member, sitePath, siteChoices), 403);
+    assert.equal(await timestamp(member).textContent(), '19/11/2025 15:05');
+    assert.equal(await save(member, personalPath, { ...siteChoices, 'language[]': 'en' }), 400);
+    assert.equal(await save(member, '/settings/timezone', { timezone: 'UTC+5:30' }), 200);
+    await member.goto(origin + '/settings');
+    assert.equal(await member.locator('[data-modal-open="cp-display-defaults-modal"]').count(), 0);
+    await member.locator('[data-modal-open="cp-preferences-modal"]').click();
+    const form = member.locator('form[action$="/settings/display-preferences"]');
+    await form.locator('select[name="language"]').selectOption('en');
+    await form.locator('select[name="time_format"]').selectOption('12h');
+    assert.equal(await submitForm(member, personalPath, form.locator('button[type=submit]')), 302);
+    const memberChat = await member.goto(origin + firstChat + '?lang=fr');
+    assert.equal(await member.locator('html').getAttribute('lang'), 'en');
+    assert.match(await memberChat.text(), /data-utc="2025-11-19 15:05:00"[^>]*>19\/11\/2025 08:35 PM</);
+    assert.equal(await timestamp(member).textContent(), '19/11/2025 08:35 PM');
+    await admin.reload();
+    assert.equal(await admin.locator('html').getAttribute('lang'), 'fr');
+    assert.equal(await timestamp(admin).textContent(), '19/11/2025 15:05');
+    await admin.locator('#chat-header-menu-toggle').click();
+    await admin.locator('[data-chat-action="create-poll"]').click();
+    await admin.locator('#create-poll-question').fill('Display preference fixture');
+    await admin.locator('#create-poll-option-1').fill('Choice 1');
+    await admin.locator('#create-poll-option-2').fill('Choice 2');
+    await post(admin, '/api/chats/group/poll/create', () => admin.locator('#create-poll-submit').click());
+    await waitForText(member, '#active-poll-question', 'Display preference fixture');
+    assert.match(await admin.locator('#active-poll-meta').textContent(), /^Se termine le \d{2}\/\d{2}\/\d{4} \d{2}:\d{2} ·/);
+    assert.match(await member.locator('#active-poll-meta').textContent(), /^Expires \d{2}\/\d{2}\/\d{4} \d{2}:\d{2} (AM|PM) ·/);
+    await post(admin, '/api/chats/group/poll/expire', () => admin.locator('#active-poll-expire').click());
+
+    const historyButton = member.locator('#notification-history-button');
+    if (await historyButton.getAttribute('aria-expanded') === 'false') {
+        await post(member, '/api/notifications/sidebar-state', () => historyButton.click());
+    }
+    await member.clock.setFixedTime(new Date('2025-11-19T15:05:00Z'));
+    await member.evaluate(() => showToast('Display preference notification', 'info', { persistent: true }));
+    await member.clock.setFixedTime(new Date('2025-11-19T15:10:00Z'));
+    await member.evaluate(() => window.refreshUtcTimestamps(document));
+    const notification = member.locator('#notification-history-list [data-toast-id]').filter({ hasText: 'Display preference notification' });
+    assert.equal(await notification.locator('[data-utc]').textContent(), '19/11/2025 08:35 PM');
+    await member.clock.setFixedTime(new Date());
+
+    assert.equal(await save(member, '/logout'), 200);
+    await signIn(member, 'fixtureadmin', adminPassword, 'en');
+    assert.equal(await member.locator('html').getAttribute('lang'), 'fr');
+    assert.equal(await timestamp(member).textContent(), '19/11/2025 15:05');
+    assert.equal(await save(member, '/logout'), 200);
+    await signIn(member, 'fixturepeer', 'fixture-only-peer-password', 'fr');
+    assert.equal(await member.locator('html').getAttribute('lang'), 'en');
+    assert.equal(await timestamp(member).textContent(), '19/11/2025 08:35 PM');
+
+    assert.equal(await save(member, personalPath, { language: '', date_format: 'ymd', time_format: '' }), 200);
+    await member.reload();
+    assert.equal(await member.locator('html').getAttribute('lang'), 'fr');
+    assert.equal(await timestamp(member).textContent(), '2025-11-19 20:35');
+    assert.equal(await save(member, personalPath, { language: '', date_format: '', time_format: '' }), 200);
+    assert.equal(await save(member, '/settings/timezone', { timezone: 'UTC+0' }), 200);
+    await admin.goto(origin + '/settings');
+    await admin.getByRole('button', { name: 'Affichage par défaut du site' }).click();
+    const defaultsForm = admin.locator('form[action$="/admin/display-defaults"]');
+    assert.equal(await defaultsForm.locator('select[name="language"]').inputValue(), 'fr');
+    await defaultsForm.locator('select[name="language"]').selectOption('');
+    await defaultsForm.locator('select[name="date_format"]').selectOption('locale');
+    assert.equal(await submitForm(admin, sitePath, defaultsForm.locator('button[type=submit]')), 302);
+    console.log('Site defaults, personal overrides, shared-browser isolation, timezone, and server and browser timestamps passed.');
 }
 
 async function post(page, path, action) {
@@ -698,6 +793,11 @@ async function run() {
         }
         if (process.argv.includes('--notification-history')) {
             await checkNotificationHistory(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--display-preferences')) {
+            await checkDisplayPreferences(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

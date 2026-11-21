@@ -100,7 +100,6 @@ if ($scheme !== 'https') {
 
 define('CAUSETTE_CANONICAL_URL', $origin->url);
 define('CAUSETTE_PUBLIC_PATH', $origin->basePath);
-Locale::initialize($requestMethod, CAUSETTE_PUBLIC_PATH);
 if ($privateRoot !== null) {
     define('CAUSETTE_INTEGRATION_KEY_FILE', $privateRoot . '/' . IntegrationKeyring::FILE);
 }
@@ -116,6 +115,7 @@ if ($isRecoveryPage) {
 }
 
 if ($requestPath === '/install') {
+    Locale::initialize($requestMethod, CAUSETTE_PUBLIC_PATH);
     header('Cache-Control: no-store');
     header('Content-Type: text/html; charset=UTF-8');
     header('Referrer-Policy: no-referrer');
@@ -404,6 +404,7 @@ $router->post('/trash/delete', 'TrashController@delete');
 
 // Settings
 $router->get('/settings', 'SettingsController@index');
+$router->post('/settings/display-preferences', 'SettingsController@saveDisplayPreferences');
 $router->get('/apikeys', 'ApiKeyController@index');
 $router->post('/apikeys/create', 'ApiKeyController@create');
 $router->post('/apikeys/expire', 'ApiKeyController@expire');
@@ -416,6 +417,7 @@ $router->post('/admin/mail/test', 'AdminController@sendTestMail');
 $router->post('/admin/storage/recalculate', 'AdminController@recalculateStorageStats');
 $router->post('/admin/check-updates', 'AdminController@checkForUpdatesNow');
 $router->post('/admin/accounts', 'AdminController@saveAccountSettings');
+$router->post('/admin/display-defaults', 'AdminController@saveDisplayDefaults');
 $router->post('/admin/attachments', 'AdminController@saveAttachmentSettings');
 $router->post('/admin/announcement', 'AdminController@saveAnnouncementSettings');
 $router->post('/admin/more', 'AdminController@saveMoreSettings');

@@ -98,12 +98,10 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
 
         <?php
             $lastActiveRaw = trim((string)($profile->last_active_at ?? ''));
-            $lastActiveTs = $lastActiveRaw !== '' ? strtotime($lastActiveRaw) : false;
-            $lastActiveLabel = $lastActiveTs !== false ? date('M j, Y H:i', $lastActiveTs) : 'Never';
+            $lastActiveLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($lastActiveRaw);
 
             $joinedAtRaw = trim((string)($profile->created_at ?? ''));
-            $joinedAtTs = $joinedAtRaw !== '' ? strtotime($joinedAtRaw) : false;
-            $joinedAtLabel = $joinedAtTs !== false ? date('M j, Y', $joinedAtTs) : 'Unknown';
+            $joinedAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($joinedAtRaw, dateOnly: true);
         ?>
         <div class="mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="rounded-xl border border-zinc-700 bg-zinc-800/60 p-3">
@@ -118,7 +116,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                     <?php if ($lastActiveRaw !== ''): ?>
                         <span data-utc="<?= htmlspecialchars($lastActiveRaw, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($lastActiveRaw, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($lastActiveLabel, ENT_QUOTES, 'UTF-8') ?></span>
                     <?php else: ?>
-                        Never
+                        <?= $tr('ui.never') ?>
                     <?php endif; ?>
                 </div>
             </div>
@@ -128,7 +126,13 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             </div>
             <div class="rounded-xl border border-zinc-700 bg-zinc-800/60 p-3">
                 <div class="text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.joined') ?></div>
-                <div class="mt-1 text-sm text-zinc-200"><?= htmlspecialchars($joinedAtLabel, ENT_QUOTES, 'UTF-8') ?></div>
+                <div class="mt-1 text-sm text-zinc-200">
+                    <?php if ($joinedAtRaw !== ''): ?>
+                        <span data-date-only data-utc="<?= htmlspecialchars($joinedAtRaw, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($joinedAtLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                    <?php else: ?>
+                        <?= $tr('ui.unknown_date') ?>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
 
@@ -190,8 +194,8 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                 }
 
                 $postCreatedAtRaw = trim((string)($post->created_at ?? ''));
-                $postCreatedAtTs = $postCreatedAtRaw !== '' ? strtotime($postCreatedAtRaw) : false;
-                $postCreatedAtLabel = $postCreatedAtTs !== false ? date('M j, Y H:i', $postCreatedAtTs) : 'Unknown';
+                $postCreatedAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($postCreatedAtRaw)
+                    ?: \Causette\Localization\Locale::current()->text('ui.unknown_date');
                 $postReactions = (isset($post->reactions) && is_array($post->reactions)) ? $post->reactions : [];
                 $postOwnerId = (int)($post->user_id ?? (int)$profile->id);
                 $canDeletePost = Post::canUserDeletePost($currentUser, $post);

@@ -13,7 +13,7 @@ $create = $pdo->prepare("INSERT INTO users (id, username, email, password, user_
 $create->execute([password_hash('fixture-only-peer-password', PASSWORD_DEFAULT)]);
 $pdo->exec("INSERT INTO chats (id, chat_number, type, title, non_member_visibility, created_by) VALUES (8, '1010202030304040', 'group', 'Private fixture', 'none', 1), (9, '1010202030304041', 'group', 'Public fixture', 'public', 1)");
 $pdo->exec("INSERT INTO chat_members (chat_id, user_id, role) VALUES (8, 1, 'moderator'), (9, 1, 'moderator'), (8, 2, 'member'), (9, 2, 'member')");
-$message = $pdo->prepare('INSERT INTO messages (id, chat_id, user_id, content) VALUES (50, 8, 1, ?)');
+$message = $pdo->prepare("INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES (50, 8, 1, ?, '2025-11-19 15:05:00')");
 $message->execute(["<mark>Thé</mark> & https://example.test/tea\n☕ @[0111222233334444|fixturepeer]"]);
 $pdo->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (52, 8, 2, 'Replacement <mark>note</mark>'), (53, 9, 1, 'Other room'), (54, 8, 1, 'Latest chat message')");
 $pdo->exec("INSERT INTO message_reactions (message_id, user_id, reaction_code) VALUES (50, 2, '1F44D')");

@@ -15,10 +15,11 @@ final class Locale
     {
     }
 
-    public static function initialize(string $method, string $basePath): void
+    public static function initialize(string $method, string $basePath, string $siteLanguage = ''): void
     {
         $requested = $method === 'GET' ? $_GET['lang'] ?? null : null;
-        self::$current = self::resolve($requested, $_COOKIE[self::COOKIE] ?? null, self::acceptLanguage());
+        $cookie = $_COOKIE[self::COOKIE] ?? null;
+        self::$current = self::resolve($requested, self::supported($cookie) ? $cookie : $siteLanguage, self::acceptLanguage());
         if (self::supported($requested) && ($_COOKIE[self::COOKIE] ?? null) !== $requested) {
             setcookie(self::COOKIE, $requested, [
                 'expires' => time() + 31536000,
@@ -28,6 +29,11 @@ final class Locale
                 'samesite' => 'Lax',
             ]);
         }
+    }
+
+    public static function initializeForAccount(string $personalLanguage, string $siteLanguage): void
+    {
+        self::$current = self::resolve($personalLanguage, $siteLanguage, self::acceptLanguage());
     }
 
     public static function current(): self

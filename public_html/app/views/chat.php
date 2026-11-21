@@ -1,11 +1,13 @@
 <?php
 use Causette\Chat\PollDraft;
+use Causette\Localization\DisplayPreferences;
 use Causette\Localization\Locale;
 use Causette\View\HtmlJson;
 
 require_once __DIR__ . '/../core/HtmlJson.php';
 require_once __DIR__ . '/../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../core/Locale.php';
+require_once __DIR__ . '/../core/DisplayPreferences.php';
 require_once __DIR__ . '/../core/PollDraft.php';
 require_once __DIR__ . '/../core/ReactionCatalog.php';
 
@@ -403,7 +405,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <div class="mt-1 text-sm text-zinc-300">
                     <span id="pinned-message-username" class="font-semibold"><?= htmlspecialchars($initialPinnedMessageUsername, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
                     <span class="text-zinc-500">·</span>
-                    <span id="pinned-message-time" class="text-zinc-500"><?= htmlspecialchars(preg_replace('/:(\d{2})(?!.*:\d{2})/', '', $initialPinnedMessageCreatedAt), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+                    <span id="pinned-message-time" class="text-zinc-500"><?= htmlspecialchars(DisplayPreferences::formatTimestamp($initialPinnedMessageCreatedAt), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
                 </div>
                 <div id="pinned-message-content" class="text-sm text-zinc-200 leading-6 line-clamp-2" data-raw-content="<?= htmlspecialchars($initialPinnedMessageContent, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-mention-map="<?= htmlspecialchars($initialPinnedMessageMentionMap, ENT_QUOTES, 'UTF-8') ?>">
                     <?= nl2br(htmlspecialchars($renderStoredMentionsToPlain($initialPinnedMessageContent, $pinnedMessage->mention_map ?? []), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?>
@@ -611,7 +613,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     $isNewSystemCluster = $isStandalonePollEvent ? true : !$previousWasSystemEvent;
                     $isCallSystemEvent = strpos($systemEventType, 'call_') === 0;
                     $sysFullTimestamp = (string)($message->created_at ?? '');
-                    $sysCompactTimestamp = preg_replace('/:(\d{2})(?!.*:\d{2})/', '', $sysFullTimestamp);
+                    $sysCompactTimestamp = DisplayPreferences::formatTimestamp($sysFullTimestamp);
                     $systemContentRaw = (string)($message->content ?? '');
 
                     $systemAvatarIcon = 'fa-comments';
@@ -682,7 +684,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     && ((int)$message->user_id !== (int)$currentUserId)
                     && (($latestClusterIndexByUser[(int)$message->user_id] ?? -1) === $index);
                 $fullTimestamp = (string)($message->created_at ?? '');
-                $compactTimestamp = preg_replace('/:(\d{2})(?!.*:\d{2})/', '', $fullTimestamp);
+                $compactTimestamp = DisplayPreferences::formatTimestamp($fullTimestamp);
                 $quotedContent = (string)($message->quoted_content ?? '');
                 $quotedUsername = (string)($message->quoted_username ?? '');
                 $quotedUserNumber = (string)($message->quoted_user_number ?? '');

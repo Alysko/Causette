@@ -1,4 +1,9 @@
 <?php
+require_once __DIR__ . '/DisplayPreferences.php';
+
+use Causette\Localization\DisplayPreferences;
+use Causette\Localization\Locale;
+
 class Controller {
     protected function view($view, $data = []) {
         header('X-App-Version: ' . APP_VERSION);
@@ -8,6 +13,9 @@ class Controller {
         }
 
         extract($data);
+        $pageViewer = Auth::user();
+        DisplayPreferences::initialize($pageViewer ? (int)$pageViewer->id : null, $data['userTimezone'] ?? null);
+        header('Content-Language: ' . Locale::current()->language());
         $viewFile = __DIR__ . "/../views/{$view}.php";
         if (!file_exists($viewFile)) {
             ErrorHandler::abort(500, 'View not found', [
@@ -29,6 +37,9 @@ class Controller {
         }
 
         extract($data);
+        $pageViewer = Auth::user();
+        DisplayPreferences::initialize($pageViewer ? (int)$pageViewer->id : null);
+        header('Content-Language: ' . Locale::current()->language());
         $viewFile = __DIR__ . "/../views/{$view}.php";
         if (!file_exists($viewFile)) {
             ErrorHandler::abort(500, 'View not found', [

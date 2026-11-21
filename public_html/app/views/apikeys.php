@@ -55,11 +55,11 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 $isExpired = !$isActive;
                 $expiresAtLabel = '';
                 if ($key->expires_at === null && $isActive) {
-                    $expiresAtLabel = 'Never';
+                    $expiresAtLabel = \Causette\Localization\Locale::current()->text('ui.never');
                 } elseif ($key->expires_at !== null) {
-                    $expiresAtLabel = date('M j, Y g:i A', strtotime($key->expires_at));
+                    $expiresAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($key->expires_at);
                 }
-                $createdAtLabel = date('M j, Y g:i A', strtotime($key->created_at));
+                $createdAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp((string)$key->created_at);
                 $ipLabel = ($key->allowed_ips === null || $key->allowed_ips === '') ? 'Any' : $key->allowed_ips;
             ?>
                 <div class="rounded-2xl border <?= $isExpired ? 'border-zinc-800 opacity-60' : 'border-zinc-700' ?> bg-zinc-900 p-5">

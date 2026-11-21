@@ -268,6 +268,10 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <i class="fa-solid fa-envelope text-2xl text-emerald-400"></i>
                 <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.mail') ?></span>
             </button>
+            <button type="button" data-modal-open="cp-display-defaults-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
+                <i class="fa fa-globe text-xl" aria-hidden="true"></i>
+                <span><?= $tr('ui.site_display_defaults') ?></span>
+            </button>
             <button type="button" data-modal-open="cp-accounts-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
                 <i class="fa-solid fa-users-gear text-2xl text-emerald-400"></i>
                 <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.accounts') ?></span>
@@ -387,6 +391,19 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 
 <!-- ==================== ADMIN MODALS ==================== -->
 <?php if (!empty($isAdmin)): ?>
+
+<div id="cp-display-defaults-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true" aria-labelledby="cp-display-defaults-title">
+    <div class="<?= $modalBackdropClass ?>" data-modal-close="cp-display-defaults-modal"></div>
+    <div class="<?= $modalCenterClass ?>">
+        <div class="<?= $modalBoxClass ?>" data-modal-box>
+            <div class="mb-4 flex items-center justify-between">
+                <h3 id="cp-display-defaults-title" class="text-xl font-semibold"><?= $tr('ui.site_display_defaults') ?></h3>
+                <button type="button" data-modal-close="cp-display-defaults-modal" aria-label="<?= $tr('ui.close') ?>" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
+            </div>
+            <?php $displayForSite = true; require __DIR__ . '/partials/display-preference-form.php'; ?>
+        </div>
+    </div>
+</div>
 
 <!-- Mail Modal -->
 <div id="cp-mail-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true">
@@ -858,7 +875,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <p class="text-zinc-100"><?= htmlspecialchars($user->username, ENT_QUOTES, 'UTF-8') ?></p>
             </div>
             <?php if (!$usernameCanChangeNow && !empty($usernameChangeAvailableAt)): ?>
-                <p class="text-sm text-amber-300 mb-4">Username recently changed. You can change it again on <?= htmlspecialchars($usernameChangeAvailableAt, ENT_QUOTES, 'UTF-8') ?></p>
+                <p class="text-sm text-amber-300 mb-4"><?= $tr('ui.username_change_available_on', ['date' => \Causette\Localization\DisplayPreferences::formatTimestamp($usernameChangeAvailableAt)]) ?></p>
             <?php endif; ?>
             <form method="POST" action="<?= htmlspecialchars(base_path('/settings/profile/username'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-3">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
@@ -1082,11 +1099,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <?php else: ?>
                     <?php foreach ($sessions as $session): ?>
                         <?php
-                            $loggedInAt = strtotime((string)$session->logged_in_at . ' UTC');
-                            if ($loggedInAt && preg_match('/^UTC([+-])(\d{1,2})(?::(\d{2}))?$/', $userTimezone ?? 'UTC+0', $_tzm)) {
-                                $loggedInAt += ($_tzm[1] === '+' ? 1 : -1) * ((int)$_tzm[2] * 3600 + (int)($_tzm[3] ?? 0) * 60);
-                            }
-                            $loggedInLabel = $loggedInAt ? date('M j, Y H:i', $loggedInAt) : (string)$session->logged_in_at;
+                            $loggedInLabel = \Causette\Localization\DisplayPreferences::formatTimestamp((string)$session->logged_in_at);
                         ?>
                         <div class="bg-zinc-800 rounded-lg px-3 py-3 flex items-start justify-between gap-3">
                             <div class="space-y-1">
@@ -1280,6 +1293,9 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             <div class="mb-4 flex items-center justify-between">
                 <h3 class="text-xl font-semibold"><?= $tr('ui.preferences') ?></h3>
                 <button type="button" data-modal-close="cp-preferences-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
+            </div>
+            <div class="mb-4 pb-4 border-b border-zinc-700">
+                <?php $displayForSite = false; require __DIR__ . '/partials/display-preference-form.php'; ?>
             </div>
             <form method="POST" action="<?= htmlspecialchars(base_path('/settings/preferences'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">

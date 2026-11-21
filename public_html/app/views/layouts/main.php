@@ -1,6 +1,7 @@
 <?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <?php
 $locale = \Causette\Localization\Locale::current();
+$displayFormats = \Causette\Localization\DisplayPreferences::effective();
 require_once __DIR__ . '/../../core/HtmlJson.php';
 require_once __DIR__ . '/../../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../../core/AssetUrl.php';
@@ -8,7 +9,7 @@ require_once __DIR__ . '/../../core/ReactionCatalog.php';
 $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
 ?>
 <!DOCTYPE html>
-<html lang="<?= $locale->language() ?>" class="dark">
+<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -20,7 +21,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
 </head>
 <?php
-    $currentUser = Auth::user();
+    $currentUser = $pageViewer;
     $appFontSizePreference = 'default';
     if ($currentUser) {
         $fontSizeSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['font_size_' . $currentUser->id])->fetchColumn();
@@ -46,7 +47,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         $topLoadingBarEnabled = true;
         $systemMessagesAutoCombineEnabled = true;
         $fontSizePreference = $appFontSizePreference;
-        $userTimezone = 'UTC+0';
+        $userTimezone = \Causette\Localization\DisplayPreferences::timezone();
         if ($currentUser) {
             $notificationSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['browser_notifications_' . $currentUser->id])->fetchColumn();
             $browserNotificationsEnabled = ((int)$notificationSetting) === 1;
@@ -75,9 +76,6 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             $systemMessagesAutoCombineEnabled = $systemMessagesAutoCombineSetting === false ? true : ((int)$systemMessagesAutoCombineSetting) === 1;
 
             $fontSizePreference = $appFontSizePreference;
-
-            $userTimezoneSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['timezone_' . $currentUser->id])->fetchColumn();
-            $userTimezone = $userTimezoneSetting !== false ? (string)$userTimezoneSetting : 'UTC+0';
 
             if (isset($incomingRequestCount)) {
                 $incomingFriendRequestCount = (int)$incomingRequestCount;
@@ -281,10 +279,6 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                         </div>
                     </div>
                     <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-300 hover:text-zinc-100"><i class="fa fa-cog"></i> <?= $tr('ui.settings') ?></a>
-                    <?php
-                    $languagePath = \Causette\Security\RequestOrigin::requestPath($_SERVER) ?? base_path('/');
-                    require __DIR__ . '/../partials/language-links.php';
-                    ?>
                     <form method="post" action="<?= htmlspecialchars(base_path('/logout'), ENT_QUOTES, 'UTF-8') ?>">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                         <button type="submit" class="text-red-400 hover:text-red-300"><i class="fa fa-right-from-bracket"></i> <?= $tr('ui.exit') ?></button>

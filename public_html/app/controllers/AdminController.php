@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
 require_once __DIR__ . '/../core/PushEndpoint.php';
 
+use Causette\Localization\DisplayPreferences;
 use Causette\Push\PushEndpoint;
 use Causette\Security\SecretSettings;
 use PHPMailer\PHPMailer\PHPMailer;
@@ -19,6 +20,17 @@ class AdminController extends Controller {
         }
 
         return $user;
+    }
+
+    public function saveDisplayDefaults(): void {
+        $this->requireAdminUser();
+        Auth::csrfValidate(403);
+        if (!DisplayPreferences::save($_POST)) {
+            ErrorHandler::abort(400, 'Invalid display defaults');
+        }
+
+        $this->flash('success', 'preferences_saved');
+        $this->redirect('/settings');
     }
 
     public function saveAccountSettings() {

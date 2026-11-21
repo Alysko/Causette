@@ -21,7 +21,9 @@ param(
 
     [switch]$PollComposer,
 
-    [switch]$NotificationHistory
+    [switch]$NotificationHistory,
+
+    [switch]$DisplayPreferences
 )
 
 $ErrorActionPreference = 'Stop'
@@ -151,6 +153,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     }
     if ($NotificationHistory) {
         Run-Browser '--notification-history'
+    }
+    if ($DisplayPreferences) {
+        Run-Browser '--display-preferences'
     }
     Run-Browser '--french-member'
 }
