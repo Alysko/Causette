@@ -7,6 +7,7 @@ require_once __DIR__ . '/../modules/captcha/CaptchaManager.php';
 require_once __DIR__ . '/../core/AccountPassword.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
 
+use Causette\Localization\DisplayPreferences;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthBudget;
 use Causette\Security\AuthChallenge;
@@ -612,11 +613,12 @@ class AuthController extends Controller {
             return;
         }
 
+        $locale = DisplayPreferences::localeForRecipient($userId);
         Notification::create(
             $userId,
             'report',
-            'Browser Notice',
-            'Safari does not follow web standards and some features may be limited or function inconsistently. Recommended browsers include Firefox, Edge, and Chrome.'
+            $locale->text('notifications.browser_notice_title'),
+            $locale->text('notifications.safari_desktop_notice'),
         );
     }
 

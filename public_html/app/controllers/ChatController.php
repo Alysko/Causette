@@ -1,6 +1,7 @@
 <?php
 use Causette\Chat\PollDraft;
 use Causette\Http\ChatResponse;
+use Causette\Localization\DisplayPreferences;
 use Causette\Security\ConversationRead;
 use Causette\Storage\AttachmentBudget;
 
@@ -1226,16 +1227,19 @@ class ChatController extends Controller {
 
         // Notify other members
         $members = Database::query("SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?", [$chatId, $userId])->fetchAll();
-        $senderUsername = Auth::user()->username;
+        DisplayPreferences::preloadRecipients(array_column($members, 'user_id'));
+        $notificationPreview = mb_substr($rawContent, 0, 20);
+        if (mb_strlen($rawContent) > 20) {
+            $notificationPreview .= '…';
+        }
+        $notificationTitleKey = Chat::isGroupType($chat->type ?? null)
+            ? 'notifications.group_message_title'
+            : 'notifications.direct_message_title';
+        $titleParameters = ['username' => Auth::user()->username];
+        $chatPath = '/c/' . User::formatUserNumber($chat->chat_number);
         foreach ($members as $m) {
-            $notificationPreview = mb_substr($rawContent, 0, 20);
-            if (mb_strlen($rawContent) > 20) {
-                $notificationPreview .= '…';
-            }
-            $notificationTitle = Chat::isGroupType($chat->type ?? null)
-                ? ($senderUsername . ' new message')
-                : ($senderUsername . ' sent you a message');
-            Notification::create($m->user_id, 'message', $notificationTitle, $notificationPreview, '/c/' . User::formatUserNumber($chat->chat_number));
+            $locale = DisplayPreferences::localeForRecipient((int) $m->user_id);
+            Notification::create($m->user_id, 'message', $locale->text($notificationTitleKey, $titleParameters), $notificationPreview, $chatPath);
         }
 
         $this->json(['success' => true]);
@@ -2533,17 +2537,21 @@ class ChatController extends Controller {
         )->fetchAll();
 
         $chatPath = '/c/' . User::formatUserNumber((string)$chat->chat_number);
+        DisplayPreferences::preloadRecipients(array_column($notifyRows, 'user_id'));
         foreach ($notifyRows as $row) {
             $recipientUserId = (int)($row->user_id ?? 0);
             if ($recipientUserId <= 0) {
                 continue;
             }
 
+            $locale = DisplayPreferences::localeForRecipient($recipientUserId);
             Notification::create(
                 $recipientUserId,
                 'group_join_request',
-                'Group join request',
-                ($requesterUsername !== '' ? $requesterUsername : 'A user') . ' requested to join this group',
+                $locale->text('notifications.group_join_request_title'),
+                $locale->text('notifications.group_join_request_message', [
+                    'username' => $requesterUsername !== '' ? $requesterUsername : $locale->text('notifications.a_user'),
+                ]),
                 $chatPath
             );
         }
@@ -2657,11 +2665,12 @@ class ChatController extends Controller {
             );
         }
 
+        $locale = DisplayPreferences::localeForRecipient($requesterUserId);
         Notification::create(
             $requesterUserId,
             'group_join_approved',
-            'Group request approved',
-            'Your request to join this group was approved',
+            $locale->text('notifications.group_join_approved_title'),
+            $locale->text('notifications.group_join_approved_message'),
             '/c/' . User::formatUserNumber((string)$chat->chat_number)
         );
 
@@ -2729,11 +2738,12 @@ class ChatController extends Controller {
             );
         }
 
+        $locale = DisplayPreferences::localeForRecipient($requesterUserId);
         Notification::create(
             $requesterUserId,
             'group_join_denied',
-            'Group request denied',
-            'Your request to join this group was denied',
+            $locale->text('notifications.group_join_denied_title'),
+            $locale->text('notifications.group_join_denied_message'),
             '/'
         );
 

@@ -53,6 +53,28 @@ final class DisplayPreferences
         return Locale::resolve(self::read($userId)['language'], self::read()['language']);
     }
 
+    /**
+     * Load preferences in one query before creating notifications for several recipients.
+     *
+     * @param list<int|string> $userIds
+     */
+    public static function preloadRecipients(array $userIds): void
+    {
+        $pending = [];
+        foreach ($userIds as $userId) {
+            $userId = (int) $userId;
+            $key = self::key($userId);
+            if ($userId > 0 && !isset(self::$stored[$key])) {
+                $pending[$key] = $userId;
+            }
+        }
+
+        $values = Setting::getMany(array_keys($pending));
+        foreach ($pending as $key => $userId) {
+            self::$stored[$key] = self::decode((string) ($values[$key] ?? ''), $userId);
+        }
+    }
+
     public static function timezone(): string
     {
         return self::$timezone;
@@ -61,11 +83,12 @@ final class DisplayPreferences
     public static function read(?int $userId = null): array
     {
         $key = self::key($userId);
-        if (isset(self::$stored[$key])) {
-            return self::$stored[$key];
-        }
+        return self::$stored[$key] ??= self::decode((string) Setting::get($key), $userId);
+    }
 
-        $stored = json_decode((string)Setting::get($key), true);
+    private static function decode(string $value, ?int $userId): array
+    {
+        $stored = json_decode($value, true);
         $preferences = $userId === null ? self::DEFAULTS : array_fill_keys(array_keys(self::DEFAULTS), '');
         foreach (self::options() as $field => $options) {
             $value = $stored[$field] ?? null;
@@ -73,7 +96,7 @@ final class DisplayPreferences
                 $preferences[$field] = $value;
             }
         }
-        return self::$stored[$key] = $preferences;
+        return $preferences;
     }
 
     public static function save(array $input, ?int $userId = null): bool
