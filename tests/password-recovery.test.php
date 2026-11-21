@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Causette\Installation\InstallDatabase;
+use Causette\Localization\DisplayPreferences;
 use Causette\Security\BrowserSession;
 use Causette\Security\CredentialDigest;
 use Causette\Security\RequestOrigin;
@@ -43,6 +44,7 @@ final class RecoveryRedirect extends RuntimeException {}
 
 final class RecoveryControllerFixture extends AuthController
 {
+    public string $mailSubject = '';
     public string $mailBody = '';
     public string $deliveredToken = '';
 
@@ -53,8 +55,9 @@ final class RecoveryControllerFixture extends AuthController
 
     protected function sendEmail($to, $subject, $body): bool
     {
-        expectRecoveryState($to === 'peer@example.test' && $subject === 'Causette Password Reset',
+        expectRecoveryState($to === 'peer@example.test',
             'The canonical-link fixture may send only to its synthetic account');
+        $this->mailSubject = $subject;
         $this->mailBody = $body;
         preg_match('/[?]token=([a-f0-9]{64})"/', $body, $match);
         $this->deliveredToken = $match[1] ?? '';
@@ -125,7 +128,8 @@ if (($argv[1] ?? '') === 'link') {
     $site = new RequestOrigin('https://recovery.example.test:8443/site', ['192.0.2.20']);
     define('CAUSETTE_CANONICAL_URL', $site->url);
     $controller = new RecoveryControllerFixture();
-    foreach (['198.51.100.10', '192.0.2.20'] as $client) {
+    foreach (['198.51.100.10' => 'fr', '192.0.2.20' => ''] as $client => $language) {
+        DisplayPreferences::save(['language' => $language, 'date_format' => '', 'time_format' => ''], 2);
         $_SERVER = [
             'HTTP_HOST' => 'recovery.example.test:8443', 'HTTPS' => $client === '192.0.2.20' ? 'off' : 'on',
             'REMOTE_ADDR' => $client, 'HTTP_X_FORWARDED_PROTO' => 'https',
@@ -137,6 +141,10 @@ if (($argv[1] ?? '') === 'link') {
         $_POST = ['csrf_token' => 'fixture-csrf', 'email' => 'peer@example.test'];
         expectRecoveryState(recoveryRedirect($controller->forgotPassword(...)) === '/forgot-password',
             'A valid recovery request must use the normal response');
+        $subject = $language === 'fr' ? 'Réinitialisation du mot de passe Causette' : 'Causette Password Reset';
+        $intro = $language === 'fr' ? 'Réinitialisez votre mot de passe :' : 'Reset your password:';
+        expectRecoveryState($controller->mailSubject === $subject && str_starts_with($controller->mailBody, $intro),
+            'The reset email must use the account language or English by default');
         $token = $controller->deliveredToken;
         $digest = Database::query('SELECT token FROM password_resets WHERE user_id = 2')->fetchColumn();
         $expected = 'https://recovery.example.test:8443/site/reset-password?token=' . $token;

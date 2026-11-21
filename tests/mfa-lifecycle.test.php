@@ -65,22 +65,30 @@ final class MfaFixtureController extends AuthController
 final class MfaFixtureMailFactor extends EmailTwoFAProvider
 {
     public ?string $deliveredCode = null;
+    public ?string $subject = null;
+    public ?string $body = null;
 
     public function isAvailable(int $userId): bool
     {
         return true;
     }
 
-    public function sendChallenge(int $userId, ?string $deliveryCode): bool
+    protected function sendEmail(string $to, string $subject, string $body): bool
     {
-        $this->deliveredCode = $deliveryCode;
-        return $deliveryCode !== null;
+        expectMfa($to === 'peer@example.test', 'The email factor must send only to the synthetic account');
+        preg_match('/<b>([0-9]{6})<\/b>/', $body, $matches);
+        $this->deliveredCode = $matches[1] ?? null;
+        $this->subject = $subject;
+        $this->body = $body;
+        return $this->deliveredCode !== null;
     }
 }
 
 final class MfaFixtureSettings extends HomeController
 {
     public ?string $deliveredCode = null;
+    public ?string $subject = null;
+    public ?string $body = null;
 
     protected function redirect($url): never
     {
@@ -89,8 +97,11 @@ final class MfaFixtureSettings extends HomeController
 
     protected function sendEmail($to, $subject, $body): bool
     {
+        expectMfa($to === 'changed@example.test', 'The confirmation must go to the requested new address');
         preg_match('/<b>([0-9]{6})<\/b>/', $body, $matches);
         $this->deliveredCode = $matches[1] ?? null;
+        $this->subject = $subject;
+        $this->body = $body;
         return $this->deliveredCode !== null;
     }
 }
@@ -163,6 +174,7 @@ if ($mode === 'trust') {
 
 if ($mode === 'email') {
     session_start();
+    DisplayPreferences::save(['language' => 'fr', 'date_format' => '', 'time_format' => ''], 2);
     Database::query('UPDATE users SET email_verified_at = NULL WHERE id = 2');
     $controller = new MfaFixtureController();
     $mail = new MfaFixtureMailFactor();
@@ -173,6 +185,10 @@ if ($mode === 'email') {
     $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'fixturepeer', 'password' => FIXTURE_PASSWORD];
     expectMfa(mfaFixtureAction($controller->login(...)) === '/verify-email' && count($controller->messages) === 1,
         'An unverified user must receive an address verification code');
+    [$to, $subject, $body] = $controller->outgoingMail[0];
+    expectMfa($to === 'peer@example.test' && $subject === 'Confirmez votre adresse Causette'
+        && str_contains($body, 'Votre code de vérification est <b>') && str_contains($body, 'valable 10 minutes'),
+        'The verification email must use the account language and include its validity period');
     expectMfa(str_ends_with((string)Setting::get('auth_limit_login_2'), ':1'),
         'A password check must spend the account login budget before email verification');
     $staleSession = $_SESSION;
@@ -194,6 +210,10 @@ if ($mode === 'email') {
     $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'fixturepeer', 'password' => FIXTURE_PASSWORD];
     expectMfa(mfaFixtureAction($controller->login(...)) === '/2fa' && is_string($mail->deliveredCode),
         'Verified address must proceed through the email second factor');
+    expectMfa($mail->subject === 'Votre code de connexion Causette'
+        && str_contains($mail->body ?? '', 'Votre code de connexion est <b>')
+        && str_contains($mail->body ?? '', 'valable 10 minutes'),
+        'The email factor must send the localized content and validity period');
     expectMfa(str_ends_with((string)Setting::get('auth_limit_login_2'), ':2'),
         'A valid password must spend the same account budget and leave previous attempts counted');
     $challenge = json_decode(Setting::get('auth_challenge_mfa_2'), true);
@@ -348,6 +368,7 @@ if ($mode === 'invitation') {
 
 if ($mode === 'settings') {
     session_start();
+    DisplayPreferences::save(['language' => 'fr', 'date_format' => 'locale', 'time_format' => '24h']);
     $controller = new MfaFixtureSettings();
     $starter = Auth::registerLoginSession(2, '192.0.2.12', 'fixture browser');
     $other = Auth::registerLoginSession(2, '192.0.2.13', 'fixture second browser');
@@ -359,6 +380,10 @@ if ($mode === 'settings') {
     $_POST['password'] = FIXTURE_PASSWORD;
     expectMfa(mfaFixtureAction($controller->saveAccountEmail(...)) === '/settings' && is_string($controller->deliveredCode),
         'The verified password must allow an email change challenge to be delivered');
+    expectMfa($controller->subject === 'Confirmez votre nouvelle adresse Causette'
+        && str_contains($controller->body ?? '', 'Votre code de confirmation est <b>')
+        && str_contains($controller->body ?? '', 'valable 10 minutes'),
+        'The change confirmation must inherit the site language and preserve the validity period');
     $pendingEmail = $_SESSION;
     $_SESSION = ['csrf_token' => 'fixture-csrf', 'user_id' => 2, 'auth_session_token' => $other, 'last_activity_touch_at' => time()];
     $_POST = ['csrf_token' => 'fixture-csrf', 'code' => $controller->deliveredCode];

@@ -4,10 +4,12 @@ require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../modules/2fa/TwoFAManager.php';
 require_once __DIR__ . '/../modules/captcha/CaptchaManager.php';
+require_once __DIR__ . '/../core/AccountMail.php';
 require_once __DIR__ . '/../core/AccountPassword.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\AccountMail;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthBudget;
 use Causette\Security\AuthChallenge;
@@ -430,9 +432,9 @@ class AuthController extends Controller {
 
         $token = AccountPassword::issueReset((int)$user->id, $user->email);
         if ($token !== null) {
+            $locale = DisplayPreferences::localeForRecipient((int) $user->id);
             $resetLink = CAUSETTE_CANONICAL_URL . '/reset-password?token=' . rawurlencode($token);
-            $safeLink = htmlspecialchars($resetLink, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $this->sendEmail($user->email, 'Causette Password Reset', "Reset your password: <a href=\"{$safeLink}\">{$safeLink}</a>");
+            $this->sendEmail($user->email, $locale->text('mail.password_reset_subject'), AccountMail::resetLink($locale, $resetLink));
         }
 
         $this->flash('success', 'sent');
@@ -593,7 +595,12 @@ class AuthController extends Controller {
             return;
         }
 
-        if (!$this->sendEmail($user->email, 'Verify your Causette account', "Your verification code is <b>{$code}</b> (valid 10 minutes).")) {
+        $locale = DisplayPreferences::localeForRecipient((int) $user->id);
+        if (!$this->sendEmail(
+            $user->email,
+            $locale->text('mail.account_verification_subject'),
+            AccountMail::verificationCode($locale, 'mail.account_verification_body', $code),
+        )) {
             AuthChallenge::cancel($user, AuthChallenge::VERIFY_EMAIL, $id);
             $this->flash('error', 'delivery_failed');
             return;

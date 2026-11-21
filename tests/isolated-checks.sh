@@ -35,8 +35,8 @@ CREATE USER 'causette_fixture'@'localhost' IDENTIFIED BY 'fixture-only-database-
 GRANT ALL PRIVILEGES ON causette_recovery_fixture.* TO 'causette_fixture'@'localhost';
 SQL
     export CAUSETTE_RECOVERY_FIXTURE=1
-    for entry in mfa-lifecycle:email mfa-lifecycle:invitation mfa-lifecycle:registration-mail password-recovery:change \
-        reaction-upgrade:reactions attachment-upload:upload; do
+    for entry in mfa-lifecycle:email mfa-lifecycle:invitation mfa-lifecycle:registration-mail mfa-lifecycle:settings \
+        password-recovery:link password-recovery:change reaction-upgrade:reactions attachment-upload:upload; do
         mariadb --no-defaults --socket="$socket" -u root <<'SQL'
 DROP DATABASE IF EXISTS causette_recovery_fixture;
 CREATE DATABASE causette_recovery_fixture CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
