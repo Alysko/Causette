@@ -15,8 +15,8 @@ require_once __DIR__ . '/../core/ReactionCatalog.php';
 
 final class ReactionSchemaUpgrade
 {
-    public const TARGET = '1.0.3';
-    public const PROGRESS_KEY = 'reaction_schema_upgrade_103';
+    public const TARGET = '1.0.4';
+    public const PROGRESS_KEY = 'reaction_schema_upgrade_104';
     private const TABLES = [
         'message_reactions' => 'chk_message_reactions_code',
         'post_reactions' => 'chk_post_reactions_code',
@@ -63,19 +63,21 @@ final class ReactionSchemaUpgrade
         }
     }
 
-    private static function applyTable(PDO $connection, string $table, string $oldCheck, string $drop): void
+    private static function applyTable(PDO $connection, string $table, string $baseCheck, string $drop): void
     {
-        $newCheck = $oldCheck . '_v2';
+        $previousCheck = $baseCheck . '_v2';
+        $newCheck = $baseCheck . '_v3';
         $checks = Database::query(
             "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_TYPE = 'CHECK'
-                 AND CONSTRAINT_NAME IN (?, ?)",
-            [$table, $oldCheck, $newCheck],
+                 AND CONSTRAINT_NAME IN (?, ?, ?)",
+            [$table, $baseCheck, $previousCheck, $newCheck],
         )->fetchAll(PDO::FETCH_COLUMN);
 
         // A DDL statement can have committed before its journal write. Verify that state on retry.
-        if ($checks === [$oldCheck]) {
-            $codes = implode(',', array_map($connection->quote(...), ReactionCatalog::CODES_V2));
+        if ($checks === [$baseCheck] || $checks === [$previousCheck]) {
+            $oldCheck = $checks[0];
+            $codes = implode(',', array_map($connection->quote(...), ReactionCatalog::CODES));
             $connection->exec("ALTER TABLE `$table` $drop `$oldCheck`,
                 ADD CONSTRAINT `$newCheck` CHECK (reaction_code IN ($codes))");
         } elseif ($checks !== [$newCheck]) {
@@ -88,7 +90,7 @@ final class ReactionSchemaUpgrade
             [$newCheck],
         )->fetchColumn();
         $normalized = is_string($clause) ? preg_replace("/_[a-z0-9]+(?=')|[\s()`]/i", '', $clause) : '';
-        $expected = "reaction_codein'" . implode("','", ReactionCatalog::CODES_V2) . "'";
+        $expected = "reaction_codein'" . implode("','", ReactionCatalog::CODES) . "'";
         if (strcasecmp($normalized, $expected) !== 0) {
             throw new RuntimeException('The updated reaction constraint does not match the catalog.');
         }

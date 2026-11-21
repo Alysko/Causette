@@ -365,36 +365,50 @@ async function checkReactions(browser, errors) {
     await message.hover();
     await message.locator('.js-react-link').click();
     const options = message.locator('.js-reaction-option');
-    assert.equal(await options.count(), 21, 'The message reaction picker should offer all 21 choices');
-    const party = options.filter({ has: page.locator('img[src$="/emojis/1F389.svg"]') });
-    assert.equal(await party.getAttribute('aria-label'), 'Célébrer');
-    assert.equal(await page.evaluate(async () => (await fetch('/emojis/1F389.svg')).status), 200);
-    await post(page, '/api/messages/react', () => party.click());
-    await messageBadge('1F389').waitFor();
+    assert.equal(await options.count(), 75, 'The message reaction picker should offer all 75 choices');
+    const faces = message.getByRole('button', { name: 'Visages', exact: true });
+    await faces.click();
+    assert.equal(await faces.getAttribute('aria-pressed'), 'true');
+    assert.equal(await message.locator('.js-reaction-option:visible').count(), 24);
+    const melting = options.and(page.locator('[data-reaction-code="1FAE0"]'));
+    assert.equal(await melting.getAttribute('aria-label'), 'Je fonds');
+    await melting.scrollIntoViewIfNeeded();
+    const artwork = melting.locator('img[src$="/assets/img/reactions/1fae0.png"]');
+    await artwork.evaluate(img => img.decode());
+    assert.ok(await artwork.evaluate(img => img.naturalWidth > 0));
+    await post(page, '/api/messages/react', () => melting.click());
+    await messageBadge('1FAE0').waitFor();
     await page.reload();
-    await messageBadge('1F389').waitFor();
-    await messageBadge('1F44D').waitFor();
-    await post(page, '/api/messages/react', () => messageBadge('1F389').click());
-    await messageBadge('1F389').waitFor({ state: 'hidden' });
+    await messageBadge('1FAE0').locator('img[src$="/assets/img/reactions/1fae0.png"]').waitFor();
+    await messageBadge('1F44D').locator('img[src$="/assets/img/reactions/1f44d.png"]').waitFor();
+    await post(page, '/api/messages/react', () => messageBadge('1FAE0').click());
+    await messageBadge('1FAE0').waitFor({ state: 'hidden' });
 
-    await page.goto(origin + '/posts?scope=server');
-    const postBadge = code => page.locator(`.js-profile-post-reaction-badge[data-post-id="50"][data-reaction-code="${code}"]`);
+    const phone = await login(browser, 'fixtureadmin', adminPassword, errors, 'fr',
+        { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await phone.goto(origin + '/posts?scope=server');
+    const postBadge = code => phone.locator(`.js-profile-post-reaction-badge[data-post-id="50"][data-reaction-code="${code}"]`);
     await postBadge('2665').waitFor();
-    await page.locator('.js-profile-post-react-link[data-post-id="50"]').click();
-    const postOptions = page.locator('.js-profile-post-reaction-option[data-post-id="50"]');
-    assert.equal(await postOptions.count(), 21);
-    await post(page, '/api/posts/react', () => postOptions.and(page.locator('[data-reaction-code="1F525"]')).click());
-    await postBadge('1F525').waitFor();
-    await page.goto(origin + '/u/0111-2222-3333-4444');
-    await postBadge('1F525').waitFor();
+    await phone.locator('.js-profile-post-react-link[data-post-id="50"]').tap();
+    const postOptions = phone.locator('.js-profile-post-reaction-option[data-post-id="50"]');
+    assert.equal(await postOptions.count(), 75);
+    const palette = phone.locator('.reaction-palette:visible');
+    const bounds = await palette.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
+    await phone.getByRole('button', { name: 'Symboles', exact: true }).tap();
+    assert.equal(await phone.locator('.js-profile-post-reaction-option[data-post-id="50"]:visible').count(), 12);
+    await post(phone, '/api/posts/react', () => postOptions.and(phone.locator('[data-reaction-code="1F388"]')).tap());
+    await postBadge('1F388').waitFor();
+    await phone.goto(origin + '/u/0111-2222-3333-4444');
+    await postBadge('1F388').locator('img[src$="/assets/img/reactions/1f388.png"]').waitFor();
     await postBadge('2665').waitFor();
     const recipient = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
     const notifications = await recipient.evaluate(async () => {
         const response = await fetch('/notifications', { headers: { Accept: 'application/json' } });
         return (await response.json()).notifications;
     });
-    assert.ok(notifications.some(item => item.message.includes('🔥 Fire')));
-    console.log('Both reaction pickers offer 21 local emoji choices. Existing reactions remain visible after voting and reload.');
+    assert.ok(notifications.some(item => item.message.includes('🎈 Balloon')));
+    console.log('Desktop chat and mobile posts offer 75 local reactions. Existing reactions survive voting and reload.');
 }
 
 async function checkPostSearch(browser, errors) {
@@ -861,7 +875,7 @@ async function checkPrologueImport(browser, errors) {
     await page.locator('input[name=password]').fill(adminPassword);
     assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name=identifier]) button[type=submit]')), 302);
     assert.equal((await page.goto(origin + '/update')).status(), 200);
-    assert.deepEqual(await page.locator('dl dd').allTextContents(), ['1.0.1', '1.0.3']);
+    assert.deepEqual(await page.locator('dl dd').allTextContents(), ['1.0.1', '1.0.4']);
     const update = page.locator('form[action="/update"]');
     await update.getByRole('checkbox').check();
     assert.equal(await submitForm(page, '/update', update.getByRole('button', { name: 'Apply update' })), 302);

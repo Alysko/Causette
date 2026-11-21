@@ -22,14 +22,14 @@ Use this workflow when the incoming package lists the installed database version
 
 The update records one version change in the database. If the browser disconnects, reopen the site and check the marker. The old marker means the authorized update can be attempted again. The incoming marker means the update already finished. If the version is unexpected, keep the site restricted and identify the matching package and database before proceeding.
 
-## Upgrade the reaction catalog to 1.0.3
+## Upgrade the reaction catalog to 1.0.4
 
-The 1.0.3 updater accepts a private JSON installation at 1.0.1 or 1.0.2. It expands the check constraints on `message_reactions` and `post_reactions`. Existing rows, their original codes and the one-reaction-per-user rule are preserved.
+The 1.0.4 updater accepts a private JSON installation at 1.0.1, 1.0.2 or 1.0.3. It expands the check constraints on `message_reactions` and `post_reactions`. Existing rows, their original codes and the one-reaction-per-user rule are preserved.
 
 1. Restrict the site to the operator, verify the matching database and storage backup, and check the available database space and hosting quota. Allow space for the database engine to copy both reaction tables if needed.
 2. In the database administration interface, ensure the site's database account can run `ALTER` on those two tables. Keep the existing permissions. Grant only what the migration needs through the hosting panel or database manager.
 3. Upload the package and use the protected `/update` form over HTTPS after signing in again as a verified administrator. Confirm the matching backup as on a code-only update. The page shows how many of the two tables have been updated.
-4. If interrupted, keep the site restricted and reopen the same page. The updater checks which table changes committed before retrying and opens the site after both checks are in place and the database marker reaches 1.0.3. Verify old reactions and add and remove a new reaction on a message and a post before revoking any temporary `ALTER` grant and reopening traffic.
+4. If interrupted, keep the site restricted and reopen the same page. The updater checks which table changes committed before retrying and opens the site after both checks are in place and the database marker reaches 1.0.4. Verify old reactions and add and remove a new reaction on a message and a post before revoking any temporary `ALTER` grant and reopening traffic.
 
 Use the original files and matching database backup together for rollback. A database with newer reaction codes may not fit the older constraints.
 

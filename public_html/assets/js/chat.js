@@ -455,23 +455,9 @@ function normalizeReactionCode(value) {
 }
 
 function getReactionImageUrlByCode(reactionCode) {
-    initializeOpenMojiCatalog();
-
     const code = normalizeReactionCode(reactionCode);
-    if (!code) return '';
-
-    const keyCandidates = [code, `${code}-FE0F`, code.replace(/(?:-)?FE0F/gi, '')]
-        .map((candidate) => normalizeEmojiKey(candidate))
-        .filter(Boolean);
-
-    for (const key of keyCandidates) {
-        const item = openMojiByKey.get(key);
-        if (item?.url) {
-            return item.url;
-        }
-    }
-
-    return '';
+    const base = window.CAUSETTE_REACTION_ASSET_BASE;
+    return code && base ? base + code.toLowerCase() + '.png' : '';
 }
 
 function reactionCodeToChar(reactionCode) {
@@ -577,13 +563,21 @@ function renderReactionPickerMarkup(messageId) {
 
 function showReactionPalette(picker, targetId, kind) {
     if (!picker.firstElementChild) {
+        const palette = document.createElement('div');
+        palette.className = 'reaction-palette';
+
+        const filters = document.createElement('div');
+        filters.className = 'reaction-palette__filters';
+        filters.setAttribute('role', 'group');
+        filters.setAttribute('aria-label', uiText('reaction_categories'));
+
         const grid = document.createElement('div');
-        grid.className = 'inline-grid grid-cols-5 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-1.5 shadow-lg sm:grid-cols-7';
+        grid.className = 'reaction-palette__grid';
 
         for (const [code, label] of MESSAGE_REACTION_LABEL_BY_CODE) {
             const button = document.createElement('button');
             button.type = 'button';
-            button.className = 'flex h-9 w-9 items-center justify-center rounded-lg hover:bg-zinc-700 focus-visible:ring-2 focus-visible:ring-emerald-400';
+            button.className = 'reaction-palette__option';
             if (kind === 'post') {
                 button.classList.add('js-profile-post-reaction-option');
                 button.dataset.postId = String(targetId);
@@ -600,7 +594,7 @@ function showReactionPalette(picker, targetId, kind) {
                 const image = document.createElement('img');
                 image.src = imageUrl;
                 image.alt = '';
-                image.className = 'h-7 w-7';
+                image.loading = 'lazy';
                 image.decoding = 'async';
                 button.appendChild(image);
             } else {
@@ -608,7 +602,27 @@ function showReactionPalette(picker, targetId, kind) {
             }
             grid.appendChild(button);
         }
-        picker.appendChild(grid);
+        const categories = { all: [...MESSAGE_REACTION_LABEL_BY_CODE.keys()], ...window.CAUSETTE_REACTION_GROUPS };
+        for (const [category, codes] of Object.entries(categories)) {
+            const filter = document.createElement('button');
+            filter.type = 'button';
+            filter.className = 'reaction-palette__filter';
+            filter.textContent = uiText('reaction_group_' + category);
+            filter.setAttribute('aria-pressed', String(category === 'all'));
+            filter.addEventListener('click', () => {
+                for (const other of filters.children) {
+                    other.setAttribute('aria-pressed', String(filter === other));
+                }
+                const allowed = new Set(codes);
+                for (const option of grid.children) {
+                    option.hidden = !allowed.has(option.dataset.reactionCode);
+                }
+                grid.scrollTop = 0;
+            });
+            filters.appendChild(filter);
+        }
+        palette.append(filters, grid);
+        picker.appendChild(palette);
     }
     picker.classList.remove('hidden');
 }
