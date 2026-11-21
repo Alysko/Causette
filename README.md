@@ -14,7 +14,7 @@ Serve `public_html/` over HTTPS. Keep `storage/` next to it, outside the documen
 
 The first release targets PHP 8.5 or later. CI checks PHP 8.5 and 8.6. Use your host's latest PHP security patch. The release ZIP will list the tested versions, extensions and server settings.
 
-[Installation and setup recovery](docs/install.md) · [Backup, update and restore](docs/maintenance.md)
+[Installation and setup recovery](docs/install.md) · [Import an upstream backup](docs/import.md) · [Backup, update and restore](docs/maintenance.md)
 
 ## Development checks
 

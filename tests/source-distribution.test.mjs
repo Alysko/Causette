@@ -88,6 +88,13 @@ test('public sources use Causette and retain only the documented upstream refere
         ['public_html/assets/js/call.js', [/prologue\.(?:activeCallSession|activeCallOverlayMode|preferredMicDeviceId|preferredCameraDeviceId|micVolume|speakerVolume)(?=')/g]],
         ['public_html/assets/js/chat.js', [/prologue\.sidebar\.chatMode(?=')/g]],
         ['README.md', [/\[Prologue v1\.0\.1\]\(https:\/\/github\.com\/michaelstaake\/Prologue\)/g]],
+        ['docs/import.md', [/\bPrologue 1\.0\.1\b/g, /"prologue-1\.0\.1"/g, /\bprologue-import-state\.json\b/g]],
+        ['docs/branding.md', [/\bPrologueImport(?=\.php)/g]],
+        ['public_html/app/controllers/InstallController.php', [/\bPrologueImport\b/g]],
+        ['public_html/app/install/PrologueImport.php', [/\bPrologueImport\b/g,
+            /\bprologue-(?:1\.0\.1|import-state\.json)\b/g, /Welcome to Prologue!/g, /'Prologue'/g]],
+        ['public_html/app/locales/en/install.php', [/\bPrologue (?:1\.0\.1|data|encryption)\b/g]],
+        ['public_html/app/locales/fr/install.php', [/\bPrologue 1\.0\.1\b/g, /de Prologue(?= (?:sont|dans))/g]],
     ]);
     const filenames = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'public_html', 'docs', 'README.md'], {
         cwd: fileURLToPath(root),
@@ -99,7 +106,7 @@ test('public sources use Causette and retain only the documented upstream refere
         for (const reference of allowed.get(filename) ?? []) {
             source = source.replace(reference, '');
         }
-        if (/prologue/i.test(filename) || /prologue/i.test(source)) {
+        if ((/prologue/i.test(filename) && filename !== 'public_html/app/install/PrologueImport.php') || /prologue/i.test(source)) {
             unexpected.push(filename);
         }
     }

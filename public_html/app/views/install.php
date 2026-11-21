@@ -12,7 +12,7 @@ $installPath = $setupBasePath . '/install';
 </head>
 <body>
 <main>
-    <?php if ($screen !== 'success'): ?>
+    <?php if (!in_array($screen, ['success', 'imported'], true)): ?>
         <?php $languagePath = $installPath; require __DIR__ . '/partials/language-links.php'; ?>
     <?php endif; ?>
     <h1><?= $locale->html('install.title') ?></h1>
@@ -55,8 +55,24 @@ $installPath = $setupBasePath . '/install';
             <small id="password-length"><?= $locale->html('install.password_help') ?></small>
             <button type="submit"><?= $locale->html('install.submit') ?></button>
         </form>
-    <?php elseif ($screen === 'success'): ?>
-        <p><?= $locale->html('install.success') ?></p>
+    <?php elseif ($screen === 'import'): ?>
+        <h2><?= $locale->html('install.import_title') ?></h2>
+        <p><?= $locale->html('install.import_intro') ?></p>
+        <form method="post" action="<?= $escape($installPath) ?>">
+            <input type="hidden" name="csrf_token" value="<?= $escape($csrfToken) ?>">
+            <input type="hidden" name="stage" value="import">
+            <label for="import-username"><?= $locale->html('install.username') ?></label>
+            <input id="import-username" name="username" autocomplete="username" maxlength="32" required>
+            <label for="import-password"><?= $locale->html('install.password') ?></label>
+            <input id="import-password" name="password" type="password" autocomplete="current-password" maxlength="4096" required>
+            <label><input type="checkbox" name="backup_confirmed" value="1" required> <?= $locale->html('install.import_backup') ?></label>
+            <button type="submit"><?= $locale->html('install.import_submit') ?></button>
+        </form>
+    <?php elseif ($screen === 'success' || $screen === 'imported'): ?>
+        <p><?= $locale->html($screen === 'imported' ? 'install.import_success' : 'install.success') ?></p>
+        <?php if ($screen === 'imported'): ?>
+            <p><?= $locale->html('install.import_next') ?></p>
+        <?php endif; ?>
         <dl>
             <dt>PHP</dt><dd><?= $escape(PHP_VERSION) ?></dd>
             <dt><?= $locale->html('install.database_version') ?></dt><dd><?= $escape($databaseVersion) ?></dd>

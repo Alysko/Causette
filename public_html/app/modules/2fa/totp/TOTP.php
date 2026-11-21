@@ -76,6 +76,10 @@ class TOTP {
     public static function encrypt(string $plaintext): string {
         $versioned = defined('CAUSETTE_TOTP_KEY');
         $key = $versioned ? hex2bin(CAUSETTE_TOTP_KEY) : hash('sha256', CSRF_SECRET, true);
+        return self::seal($plaintext, $key, $versioned);
+    }
+
+    private static function seal(string $plaintext, string $key, bool $versioned): string {
         $iv = random_bytes(12);
         $tag = '';
         $ciphertext = openssl_encrypt($plaintext, self::CIPHER, $key, OPENSSL_RAW_DATA, $iv, $tag, '', 16);
@@ -94,6 +98,20 @@ class TOTP {
             return null;
         }
         $key = $versioned ? hex2bin(CAUSETTE_TOTP_KEY) : hash('sha256', CSRF_SECRET, true);
+        return self::open($encoded, $key, $versioned);
+    }
+
+    public static function reencryptLegacy(string $encoded, string $legacySecret, string $newKey): ?string {
+        if (strlen($encoded) > 128 || str_starts_with($encoded, 'v1:')) {
+            return null;
+        }
+        $plaintext = self::open($encoded, hash('sha256', $legacySecret, true), false);
+        return $plaintext !== null && preg_match('/\A[A-Z2-7]{32}\z/', $plaintext)
+            ? self::seal($plaintext, hex2bin($newKey), true)
+            : null;
+    }
+
+    private static function open(string $encoded, string $key, bool $versioned): ?string {
         $data = base64_decode($versioned ? substr($encoded, 3) : $encoded, true);
         if ($data === false || strlen($data) < 28) {
             return null;

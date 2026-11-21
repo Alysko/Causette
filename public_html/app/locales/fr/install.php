@@ -3,6 +3,22 @@
 declare(strict_types=1);
 
 return [
+    'import_title' => 'Importer Prologue 1.0.1',
+    'import_intro' => 'Utilisez un compte administrateur de la base restaurée. L’import révoque les anciennes sessions, les clés API et les codes de connexion en attente.',
+    'import_backup' => 'J’ai une sauvegarde séparée de la base et des fichiers privés. Ce site utilise une copie restaurée.',
+    'import_submit' => 'Préparer les données importées',
+    'import_success' => 'Les données de Prologue sont prêtes pour la mise à jour de Causette.',
+    'import_next' => 'Reconnectez-vous comme administrateur et ouvrez la page de mise à jour pour terminer.',
+    'import_source' => 'Sélectionnez la source Prologue 1.0.1 dans le fichier privé de configuration.',
+    'import_administrator' => 'Utilisez l’identifiant et le mot de passe d’un administrateur actif et vérifié de la sauvegarde.',
+    'import_schema' => 'La base ne correspond pas au schéma Prologue 1.0.1 pris en charge.',
+    'import_charset' => 'Des tables ou colonnes texte restaurées ne sont pas en UTF-8. Convertissez la copie en utf8mb4 dans phpMyAdmin, vérifiez les textes, puis réessayez.',
+    'import_keys' => 'Restaurez le journal d’import et le fichier de clés qui correspondent à cette base, puis réessayez.',
+    'import_reauthorize' => 'Il y a eu trop de tentatives de connexion administrateur. Saisissez de nouveau le jeton opérateur pour continuer.',
+    'import_version' => 'Sélectionnez une sauvegarde Prologue 1.0.1 et un paquet Causette compatible avec sa mise à jour.',
+    'import_space' => 'Libérez au moins 1 Mio dans le stockage privé pour les fichiers d’import, puis réessayez.',
+    'import_attachments' => 'Une pièce jointe contrôlée est absente, illisible ou de taille différente. Restaurez les fichiers privés qui correspondent à la sauvegarde, puis réessayez.',
+    'import_totp' => 'Renseignez la clé de chiffrement d’origine de Prologue dans le fichier privé. La lecture des comptes avec application d’authentification a échoué.',
     'title' => 'Installation de Causette',
     'unavailable' => 'L’installation de Causette est indisponible.',
     'unavailable_config' => 'L’installation de Causette est indisponible. Vérifiez le fichier privé d’installation.',

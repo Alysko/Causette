@@ -3,6 +3,22 @@
 declare(strict_types=1);
 
 return [
+    'import_title' => 'Import Prologue 1.0.1',
+    'import_intro' => 'Use an existing administrator account from the restored database. The import retires the old sessions, API keys and pending sign-in codes.',
+    'import_backup' => 'I have a separate backup of the database and private files, and this site uses a restored copy.',
+    'import_submit' => 'Prepare the imported data',
+    'import_success' => 'Prologue data is ready for the Causette update.',
+    'import_next' => 'Sign in again as an administrator and open the update page to finish.',
+    'import_source' => 'Choose the supported Prologue 1.0.1 import source in the private setup file.',
+    'import_administrator' => 'Use the username and password of an active, verified administrator from the backup.',
+    'import_schema' => 'The database does not match the supported Prologue 1.0.1 schema.',
+    'import_charset' => 'Some restored tables or text columns are not UTF-8. Convert the restored copy to utf8mb4 in phpMyAdmin, verify the text, and retry.',
+    'import_keys' => 'Restore the private import journal and integration key file that belong to this database, then retry.',
+    'import_reauthorize' => 'There were too many administrator sign-in attempts. Enter the operator token again to continue.',
+    'import_version' => 'Select a Prologue 1.0.1 database backup and a Causette package that supports its update.',
+    'import_space' => 'Free at least 1 MiB in private storage for the import files, then retry.',
+    'import_attachments' => 'A sampled attachment is missing, unreadable or has a different size. Restore the matching private files and retry.',
+    'import_totp' => 'Set the original Prologue encryption secret in the private setup file. Confirmed authenticator records could not be read.',
     'title' => 'Causette setup',
     'unavailable' => 'Causette setup is unavailable.',
     'unavailable_config' => 'Causette setup is unavailable. Check the private setup configuration.',

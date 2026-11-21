@@ -19,6 +19,12 @@ final class InstallDatabase
 
     public function install(array $configuration, string $username, string $email, string $password): string
     {
+        return self::withDatabaseLock($configuration,
+            fn(PDO $connection) => $this->initialize($connection, $configuration, $username, $email, $password));
+    }
+
+    public static function withDatabaseLock(array $configuration, callable $operation): string
+    {
         $database = $configuration['database'];
         $connection = new PDO(
             'mysql:host=' . $database['host'] . ';dbname=' . $database['name'] . ';charset=utf8mb4',
@@ -42,7 +48,7 @@ final class InstallDatabase
         }
 
         try {
-            $this->initialize($connection, $configuration, $username, $email, $password);
+            $operation($connection);
             return (string)$server['server_version'];
         } finally {
             try {

@@ -7,6 +7,7 @@ The source distribution test allows the following technical references to the up
 | Location | Reason |
 | --- | --- |
 | `README.md` | Upstream attribution and source link. |
+| `docs/import.md`, `public_html/app/install/PrologueImport.php`, `public_html/app/controllers/InstallController.php`, `public_html/app/locales/{en,fr}/install.php` | Supported import source, source-specific instructions, and the exact original defaults that the importer replaces. |
 | `public_html/app/core/LegacySite.php` | Request-origin helper names used by existing executable configurations. |
 | `public_html/app/controllers/AdminUserController.php`, `public_html/app/models/User.php` | Reserved legacy username and synthetic email identifiers attached to retained messages from deleted accounts. Stable identifiers let the application recognise and reuse those records. |
 | `public_html/assets/js/app.js` | Internal navigation event names for existing browser scripts. |
