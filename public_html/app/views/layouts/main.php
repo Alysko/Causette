@@ -1,127 +1,27 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
+<?php
+$locale = \Causette\Localization\Locale::current();
+$displayFormats = \Causette\Localization\DisplayPreferences::effective();
+require_once __DIR__ . '/../../core/HtmlJson.php';
+require_once __DIR__ . '/../../core/ContentSecurityPolicy.php';
+require_once __DIR__ . '/../../core/AssetUrl.php';
+require_once __DIR__ . '/../../core/ReactionCatalog.php';
+$scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
+?>
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
     <link rel="icon" type="image/png" href="<?= htmlspecialchars(base_url('/assets/img/favicon.png'), ENT_QUOTES, 'UTF-8') ?>">
-    <title>Prologue</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <script>
-        tailwind.config = { content: ["**/*.{php,html}"], darkMode: 'class' };
-    </script>
-    <style>
-        body { background: #09090b; }
-        body.app-font-large { font-size: 1.125rem; }
-        #app-top-progress {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-            background: #000;
-            z-index: 10000;
-            pointer-events: none;
-        }
-        #app-top-progress-fill {
-            width: 0;
-            height: 100%;
-            background: #22c55e;
-            opacity: 0;
-            transition: width .18s ease, opacity .22s ease;
-            will-change: width, opacity;
-        }
-        #app-top-progress[data-loading="1"] #app-top-progress-fill {
-            opacity: 1;
-        }
-        .prologue-accent { color: #34d399; }
-        .sidebar { background: #111827; }
-        body.h-screen {
-            height: 100dvh;
-            height: var(--app-vh, 100dvh);
-        }
-        body.h-screen > .app-shell { height: 100%; min-height: 0; }
-        .typing-dots { display: inline-flex; gap: 1px; margin-left: 2px; }
-        .typing-dots span { opacity: .35; animation: typing-dot 1s infinite; }
-        .typing-dots span:nth-child(2) { animation-delay: .2s; }
-        .typing-dots span:nth-child(3) { animation-delay: .4s; }
-        @keyframes typing-dot {
-            0%, 80%, 100% { opacity: .35; }
-            40% { opacity: 1; }
-        }
-        @keyframes notification-expire-bar {
-            0% { transform: scaleX(1); }
-            100% { transform: scaleX(0); }
-        }
-        #notification-icon-preview { min-height: 0; }
-        .notification-icon-row {
-            height: 4rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #notification-history-panel.panel-hidden {
-            width: 0 !important;
-            min-width: 0;
-            border-left-width: 0;
-            opacity: 0;
-            transform: translateX(100%);
-            pointer-events: none;
-            overflow: hidden;
-        }
-        #notification-history-panel.panel-visible {
-            opacity: 1;
-            transform: translateX(0);
-            pointer-events: auto;
-        }
-        @media (max-width: 1023px) {
-            #app-sidebar { display: none; }
-            #app-sidebar.mobile-open {
-                display: flex;
-                position: fixed;
-                top: 0; left: 0; bottom: 0;
-                width: min(85vw, 18rem);
-                z-index: 50;
-            }
-            #notification-history-panel { display: none; }
-            #notification-history-panel.mobile-open {
-                display: flex;
-                position: fixed;
-                top: var(--mobile-top-bar-h, 65px); right: 0; bottom: 0;
-                width: min(95vw, 24rem);
-                z-index: 50;
-                border-left: 1px solid #3f3f46;
-            }
-            #notification-history-panel.mobile-open #notification-history-header {
-                justify-content: space-between;
-            }
-            #notification-history-panel.mobile-open #notification-history-header #notification-history-button {
-                display: none;
-            }
-            #notification-history-panel.mobile-open #notification-history-header #notification-history-title {
-                display: block !important;
-            }
-            #notification-icon-preview { display: none !important; }
-            #mobile-overlay-backdrop { display: none; }
-            #mobile-overlay-backdrop.visible {
-                display: block;
-                position: fixed;
-                inset: 0;
-                background: rgba(0,0,0,0.5);
-                z-index: 49;
-            }
-        }
-
-        @media (max-width: 639.98px) {
-            #message-form {
-                padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
-            }
-        }
-    </style>
+    <title>Causette</title>
+    <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
+    <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
+    <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
 </head>
 <?php
-    $currentUser = Auth::user();
+    $currentUser = $pageViewer;
     $appFontSizePreference = 'default';
     if ($currentUser) {
         $fontSizeSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['font_size_' . $currentUser->id])->fetchColumn();
@@ -135,7 +35,7 @@
 ?>
 <body class="text-gray-200 <?= $currentUser ? 'h-screen overflow-hidden' : 'min-h-screen overflow-y-auto' ?> <?= $appFontSizePreference === 'large' ? 'app-font-large' : '' ?>">
     <div id="app-top-progress" aria-hidden="true"><div id="app-top-progress-fill"></div></div>
-    <a href="#app-main-content" class="sr-only focus:not-sr-only">Skip to main content</a>
+    <a href="#app-main-content" class="sr-only focus:not-sr-only"><?= $tr('ui.skip_to_main_content') ?></a>
     <?php
         $browserNotificationsEnabled = false;
         $webPushNotificationsEnabled = false;
@@ -147,7 +47,7 @@
         $topLoadingBarEnabled = true;
         $systemMessagesAutoCombineEnabled = true;
         $fontSizePreference = $appFontSizePreference;
-        $userTimezone = 'UTC+0';
+        $userTimezone = \Causette\Localization\DisplayPreferences::timezone();
         if ($currentUser) {
             $notificationSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['browser_notifications_' . $currentUser->id])->fetchColumn();
             $browserNotificationsEnabled = ((int)$notificationSetting) === 1;
@@ -176,9 +76,6 @@
             $systemMessagesAutoCombineEnabled = $systemMessagesAutoCombineSetting === false ? true : ((int)$systemMessagesAutoCombineSetting) === 1;
 
             $fontSizePreference = $appFontSizePreference;
-
-            $userTimezoneSetting = Database::query('SELECT `value` FROM settings WHERE `key` = ?', ['timezone_' . $currentUser->id])->fetchColumn();
-            $userTimezone = $userTimezoneSetting !== false ? (string)$userTimezoneSetting : 'UTC+0';
 
             if (isset($incomingRequestCount)) {
                 $incomingFriendRequestCount = (int)$incomingRequestCount;
@@ -279,33 +176,34 @@
         <div id="chat-call-status-bar" class="hidden w-full px-6 py-2 border-b border-transparent text-sm font-medium flex items-center gap-3 shrink-0">
             <span id="chat-call-status-label"></span>
             <span id="chat-call-status-duration" class="hidden text-xs opacity-80 tabular-nums">00:00</span>
-            <span id="chat-call-show-overlay-hint" class="hidden text-xs opacity-60"><i class="fa-solid fa-up-right-from-square"></i> Show</span>
-            <button id="join-call-btn" onclick="joinCall()" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium">Join Call</button>
-            <button id="accept-call-btn" onclick="acceptCall()" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium">Accept</button>
-            <button id="decline-call-btn" onclick="declineCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium">Decline</button>
-            <button id="exit-call-btn" onclick="endCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium">End Call</button>
-            <button id="end-ringing-call-btn" onclick="endCall()" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium">End</button>
+            <span id="chat-call-show-overlay-hint" class="hidden text-xs opacity-60"><i class="fa-solid fa-up-right-from-square"></i> <?= $tr('ui.show') ?></span>
+            <button id="join-call-btn" data-app-action="join-call" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.join_call') ?></button>
+            <button id="accept-call-btn" data-app-action="accept-call" class="hidden bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.accept') ?></button>
+            <button id="decline-call-btn" data-app-action="decline-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.decline') ?></button>
+            <button id="exit-call-btn" data-app-action="end-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end_call') ?></button>
+            <button id="end-ringing-call-btn" data-app-action="end-call" class="hidden bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded-full text-xs font-medium"><?= $tr('ui.end') ?></button>
         </div>
 
         <div id="incoming-call-waiting-overlay" class="hidden fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm p-4">
             <div class="h-full w-full flex items-center justify-center">
                 <div class="relative z-[91] w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6">
-                    <h2 id="incoming-call-waiting-title" class="text-lg font-semibold text-zinc-100">Incoming call waiting</h2>
-                    <p id="incoming-call-waiting-subtitle" class="mt-2 text-sm text-zinc-400">You are currently in an active call. You can decline the new call, or end your current call and join the incoming call.</p>
+                    <h2 id="incoming-call-waiting-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.incoming_call_waiting') ?></h2>
+                    <p id="incoming-call-waiting-subtitle" class="mt-2 text-sm text-zinc-400"><?= $tr('ui.you_are_currently_in_an_active') ?></p>
                     <div class="mt-5 flex items-center justify-end gap-3">
-                        <button type="button" id="incoming-call-waiting-decline-btn" onclick="declineIncomingCallWaiting()" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Decline New Call</button>
-                        <button type="button" id="incoming-call-waiting-switch-btn" onclick="switchToIncomingCallWaiting()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white">End Current &amp; Join</button>
+                        <button type="button" id="incoming-call-waiting-decline-btn" data-app-action="decline-incoming-call" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.decline_new_call') ?></button>
+                        <button type="button" id="incoming-call-waiting-switch-btn" data-app-action="switch-incoming-call" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.end_current_join') ?></button>
                     </div>
                 </div>
             </div>
         </div>
 
     <div id="mobile-top-bar" role="banner" class="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-4 bg-zinc-900/95 backdrop-blur border-b border-zinc-800">
-        <button id="sidebar-toggle-mobile" class="flex items-center gap-3" aria-label="Open menu">
-            <i class="fa-solid fa-comments text-2xl prologue-accent"></i>
-            <span class="text-2xl font-bold text-zinc-100">Prologue</span>
+        <button id="sidebar-toggle-mobile" class="flex items-center gap-3" aria-label="<?= $tr('ui.open_menu') ?>">
+            <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+            <span class="text-2xl font-bold text-zinc-100">Causette</span>
         </button>
-        <button id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800" aria-label="Open notifications">
+        <button type="button" id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
+                aria-label="<?= $tr('ui.toggle_notification_history') ?>" aria-controls="notification-history-list" aria-expanded="false">
             <i class="fa-regular fa-bell text-zinc-300"></i>
             <span id="notification-history-count-mobile" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
         </button>
@@ -314,38 +212,38 @@
     <div id="app-layout" class="flex flex-1 min-h-0">
         <aside id="app-sidebar" role="complementary" class="w-72 sidebar border-r border-zinc-800 flex flex-col">
             <a href="<?= htmlspecialchars(base_url('/'), ENT_QUOTES, 'UTF-8') ?>" class="p-4 border-b border-zinc-700 flex items-center gap-3 hover:bg-zinc-800/40 transition">
-                <i class="fa-solid fa-comments text-2xl prologue-accent"></i>
-                <span class="text-2xl font-bold">Prologue</span>
+                <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+                <span class="text-2xl font-bold">Causette</span>
             </a>
             <div class="flex-1 min-h-0 p-4 flex flex-col gap-3">
                 <div class="inline-flex self-start w-fit items-center rounded-lg border border-zinc-700 p-1 text-xs" id="chat-sidebar-mode-toggle">
-                    <button type="button" data-chat-sidebar-mode="all" class="px-2.5 py-1 rounded-md transition bg-zinc-700 text-zinc-100">All</button>
-                    <button type="button" data-chat-sidebar-mode="pm" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200">PM</button>
-                    <button type="button" data-chat-sidebar-mode="group" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200">Group</button>
-                    <button type="button" data-chat-sidebar-mode="custom" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200" title="Right click to rename" aria-label="Custom category. Right click to rename"><span id="chat-sidebar-custom-mode-label">Custom</span></button>
+                    <button type="button" data-chat-sidebar-mode="all" class="px-2.5 py-1 rounded-md transition bg-zinc-700 text-zinc-100"><?= $tr('ui.all') ?></button>
+                    <button type="button" data-chat-sidebar-mode="pm" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.pm') ?></button>
+                    <button type="button" data-chat-sidebar-mode="group" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.group') ?></button>
+                    <button type="button" data-chat-sidebar-mode="custom" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200" title="<?= $tr('ui.right_click_to_rename') ?>" aria-label="<?= $tr('ui.custom_category_right_click_to_rename') ?>"><span id="chat-sidebar-custom-mode-label"><?= $tr('ui.custom') ?></span></button>
                 </div>
 
                 <nav class="flex-1 min-h-0 flex flex-col">
-                    <div class="px-3 pb-2 text-xs uppercase tracking-wide text-zinc-500">Chats</div>
+                    <div class="px-3 pb-2 text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.chats') ?></div>
                     <div id="chat-sidebar-list" class="space-y-1 overflow-y-auto min-h-0"></div>
                 </nav>
                 <div id="chat-sidebar-custom-controls" class="hidden space-y-2">
-                    <div id="chat-sidebar-custom-count" class="px-1 text-xs uppercase tracking-wide text-zinc-500">Custom (0/8)</div>
-                    <div id="chat-sidebar-custom-help" class="px-1 text-xs text-zinc-500">Add a chat to Custom by right clicking on it</div>
+                    <div id="chat-sidebar-custom-count" class="px-1 text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.custom_0_8') ?></div>
+                    <div id="chat-sidebar-custom-help" class="px-1 text-xs text-zinc-500"><?= $tr('ui.add_a_chat_to_custom_by') ?></div>
                 </div>
                 <div id="chat-sidebar-custom-menu" class="hidden fixed z-50 min-w-[14rem] bg-zinc-900 border border-zinc-700 rounded-xl p-1.5 shadow-lg">
-                    <button type="button" data-custom-menu-action="open" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap">Open in new tab</button>
-                    <button type="button" data-custom-menu-action="add" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap">Add to custom</button>
-                    <button type="button" data-custom-menu-action="copy-link" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap">Copy link to group</button>
-                    <button type="button" data-custom-menu-action="copy-number" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap">Copy group number</button>
-                    <button type="button" data-custom-menu-action="remove" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm text-red-300 whitespace-nowrap">Remove from custom list</button>
+                    <button type="button" data-custom-menu-action="open" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap"><?= $tr('ui.open_in_new_tab') ?></button>
+                    <button type="button" data-custom-menu-action="add" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap"><?= $tr('ui.add_to_custom') ?></button>
+                    <button type="button" data-custom-menu-action="copy-link" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap"><?= $tr('ui.copy_link_to_group') ?></button>
+                    <button type="button" data-custom-menu-action="copy-number" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm whitespace-nowrap"><?= $tr('ui.copy_group_number') ?></button>
+                    <button type="button" data-custom-menu-action="remove" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm text-red-300 whitespace-nowrap"><?= $tr('ui.remove_from_custom_list') ?></button>
                 </div>
             </div>
             <div class="p-4 border-t border-zinc-700 text-sm text-zinc-400">
                 <?php $currentUserAvatarUrl = User::avatarUrl($currentUser); ?>
                 <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($currentUser->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="flex items-center gap-3 mb-2 hover:bg-zinc-800/40 rounded-xl p-2 -m-2 transition">
                     <?php if ($currentUserAvatarUrl): ?>
-                        <img src="<?= htmlspecialchars($currentUserAvatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="Your avatar" class="w-10 h-10 rounded-full object-cover border border-zinc-700">
+                        <img src="<?= htmlspecialchars($currentUserAvatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.your_avatar') ?>" class="w-10 h-10 rounded-full object-cover border border-zinc-700">
                     <?php else: ?>
                         <div class="w-10 h-10 rounded-full border border-zinc-700 flex items-center justify-center font-semibold <?= htmlspecialchars(User::avatarColorClasses($currentUser->user_number), ENT_QUOTES, 'UTF-8') ?>">
                             <?= htmlspecialchars(User::avatarInitial($currentUser->username), ENT_QUOTES, 'UTF-8') ?>
@@ -367,21 +265,24 @@
                         </button>
                         <div id="status-menu" class="hidden absolute bottom-full mb-2 left-0 w-44 bg-zinc-900 border border-zinc-700 rounded-xl p-2 space-y-1 z-30">
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="online">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>Online</span>
+                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span><?= $tr('ui.online') ?></span>
                                 <i class="fa fa-check text-xs text-emerald-400 hidden" data-status-check="online"></i>
                             </button>
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="busy">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-amber-500"></span>Busy</span>
+                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-amber-500"></span><?= $tr('ui.busy') ?></span>
                                 <i class="fa fa-check text-xs text-amber-400 hidden" data-status-check="busy"></i>
                             </button>
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="offline">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-red-500"></span>Offline</span>
+                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-red-500"></span><?= $tr('ui.offline') ?></span>
                                 <i class="fa fa-check text-xs text-red-400 hidden" data-status-check="offline"></i>
                             </button>
                         </div>
                     </div>
-                    <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-300 hover:text-zinc-100"><i class="fa fa-cog"></i> Settings</a>
-                    <div onclick="logout()" class="cursor-pointer text-red-400 hover:text-red-300"><i class="fa fa-right-from-bracket"></i> Exit</div>
+                    <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-300 hover:text-zinc-100"><i class="fa fa-cog"></i> <?= $tr('ui.settings') ?></a>
+                    <form method="post" action="<?= htmlspecialchars(base_path('/logout'), ENT_QUOTES, 'UTF-8') ?>">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                        <button type="submit" class="text-red-400 hover:text-red-300"><i class="fa fa-right-from-bracket"></i> <?= $tr('ui.exit') ?></button>
+                    </form>
                 </div>
             </div>
         </aside>
@@ -393,25 +294,27 @@
         <div id="sidebar-custom-rename-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
             <div class="h-full w-full flex items-center justify-center">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="sidebar-custom-rename-title">
-                    <h2 id="sidebar-custom-rename-title" class="text-lg font-semibold text-zinc-100">Rename Custom category</h2>
-                    <p class="mt-2 text-sm text-zinc-400">Choose a category name. Leave blank to reset it to Custom.</p>
+                    <h2 id="sidebar-custom-rename-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.rename_custom_category') ?></h2>
+                    <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.choose_a_category_name_leave_blank') ?></p>
                     <form id="sidebar-custom-rename-form" class="mt-4 space-y-4">
-                        <label for="sidebar-custom-rename-input" class="block text-sm text-zinc-300">Category name</label>
-                        <input type="text" id="sidebar-custom-rename-input" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" placeholder="Custom" maxlength="10">
+                        <label for="sidebar-custom-rename-input" class="block text-sm text-zinc-300"><?= $tr('ui.category_name') ?></label>
+                        <input type="text" id="sidebar-custom-rename-input" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100" placeholder="<?= $tr('ui.custom') ?>" maxlength="10">
                         <div class="flex items-center justify-end gap-3">
-                            <button type="button" id="sidebar-custom-rename-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Cancel</button>
-                            <button type="submit" id="sidebar-custom-rename-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white">Save</button>
+                            <button type="button" id="sidebar-custom-rename-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.cancel') ?></button>
+                            <button type="submit" id="sidebar-custom-rename-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.save') ?></button>
                         </div>
                     </form>
                 </div>
             </div>
         </div>
 
-        <aside id="notification-history-panel" class="w-20 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out panel-hidden">
+        <aside id="notification-history-panel" class="w-20 shrink-0 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out"
+               aria-label="<?= $tr('ui.notifications') ?>">
             <div class="p-4 border-b border-zinc-700 flex items-center justify-center" id="notification-history-header">
-                <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3">Notifications</div>
-                <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" onclick="clearAllNotifications()">Clear all</button>
-                <button id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800" aria-label="Toggle notification history">
+                <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3"><?= $tr('ui.notifications') ?></div>
+                <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" data-app-action="clear-notifications"><?= $tr('ui.clear_all') ?></button>
+                <button type="button" id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
+                        aria-label="<?= $tr('ui.toggle_notification_history') ?>" aria-controls="notification-history-list" aria-expanded="false">
                     <i class="fa-regular fa-bell"></i>
                     <span id="notification-history-count" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
                 </button>
@@ -422,25 +325,25 @@
     </div>
 
     <!-- Call overlay -->
-    <div id="call-overlay" class="hidden fixed bg-black/95 z-40 flex flex-col" style="inset:0">
+    <div id="call-overlay" class="hidden fixed bg-black/95 z-40 flex flex-col">
         <div id="call-connecting-overlay" class="hidden absolute inset-0 z-20 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
             <div class="text-center">
-                <div id="call-connecting-overlay-title" class="text-lg md:text-xl font-semibold text-zinc-100">Connecting call</div>
-                <div id="call-connecting-overlay-subtitle" class="text-sm md:text-base text-zinc-300 mt-1">Please wait...</div>
+                <div id="call-connecting-overlay-title" class="text-lg md:text-xl font-semibold text-zinc-100"><?= $tr('ui.connecting_call') ?></div>
+                <div id="call-connecting-overlay-subtitle" class="text-sm md:text-base text-zinc-300 mt-1"><?= $tr('ui.please_wait') ?></div>
             </div>
         </div>
 
         <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-800/60 shrink-0">
             <div class="flex items-center gap-2">
-                <div class="text-sm font-medium text-zinc-400">Call in progress</div>
+                <div class="text-sm font-medium text-zinc-400"><?= $tr('ui.call_in_progress') ?></div>
                 <span id="call-overlay-duration" class="hidden text-xs text-zinc-500 tabular-nums">00:00</span>
             </div>
             <div class="flex items-center gap-1.5">
-                <button onclick="toggleCallParticipantsPanel()" id="call-participants-toggle-btn" class="hidden h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-2.5" title="Show participants panel" aria-label="Toggle participants panel" aria-expanded="false"><i class="fa-solid fa-users"></i></button>
-                <button onclick="openCallSettingsModal()" id="call-settings-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="Call settings"><i class="fa-solid fa-gear"></i></button>
-                <button onclick="setCallOverlayMode('hidden')" id="call-overlay-hidden-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="Hide call window (reopen from Call in progress bar)"><i class="fa-solid fa-chevron-up"></i></button>
-                <button onclick="setCallOverlayMode('half')" id="call-overlay-half-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="Split screen"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
-                <button onclick="setCallOverlayMode('full')" id="call-overlay-full-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="Full size"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+                <button data-app-action="toggle-call-participants" id="call-participants-toggle-btn" class="hidden h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-2.5" title="<?= $tr('ui.show_participants_panel') ?>" aria-label="<?= $tr('ui.toggle_participants_panel') ?>" aria-expanded="false"><i class="fa-solid fa-users"></i></button>
+                <button data-app-action="open-call-settings" id="call-settings-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.call_settings') ?>"><i class="fa-solid fa-gear"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="hidden" id="call-overlay-hidden-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.hide_call_window_reopen_from_call') ?>"><i class="fa-solid fa-chevron-up"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="half" id="call-overlay-half-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.split_screen') ?>"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
+                <button data-app-action="set-call-overlay" data-mode="full" id="call-overlay-full-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.full_size') ?>"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
             </div>
         </div>
 
@@ -448,47 +351,47 @@
             <div class="flex-1 min-h-0 flex flex-col">
                 <div id="call-videos" class="flex-1 min-h-0 flex items-center justify-center gap-6 flex-wrap overflow-auto">
                     <div id="remote-user-tile" class="flex flex-col items-center gap-2">
-                        <div id="remote-video-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center" style="width:320px;height:180px">
+                        <div id="remote-video-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                             <video id="remote-camera-video" autoplay playsinline class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <video id="remote-screen-video" autoplay playsinline class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <div id="remote-video-placeholder" class="absolute inset-0 flex items-center justify-center"><i class="fa fa-user text-5xl text-zinc-700"></i></div>
                         </div>
-                        <button id="remote-username-btn" type="button" class="text-sm text-zinc-300 px-1 select-none" disabled style="cursor:default">Participant</button>
+                        <button id="remote-username-btn" type="button" class="text-sm text-zinc-300 px-1 select-none" disabled><?= $tr('ui.participant') ?></button>
                     </div>
 
                     <div id="local-user-tile" class="flex flex-col items-center gap-2">
-                        <div id="local-media-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center" style="width:320px;height:180px">
+                        <div id="local-media-container" class="relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-700 flex items-center justify-center">
                             <div id="local-video-placeholder" class="absolute inset-0 flex items-center justify-center"><i class="fa fa-microphone text-4xl text-zinc-700"></i></div>
                             <video id="local-video" autoplay playsinline muted class="hidden absolute inset-0 w-full h-full object-contain"></video>
                             <video id="screen-share-video" autoplay playsinline muted class="hidden absolute inset-0 w-full h-full object-contain"></video>
-                            <button id="pip-toggle-btn" type="button" class="hidden absolute bottom-2 left-2 z-10 text-xs bg-black/70 hover:bg-black/90 text-white rounded-lg px-2 py-1 gap-1 flex items-center" onclick="togglePipMode()" title="Swap picture-in-picture"><i class="fa-solid fa-rotate"></i><span>Swap</span></button>
+                            <button id="pip-toggle-btn" type="button" class="hidden absolute bottom-2 left-2 z-10 text-xs bg-black/70 hover:bg-black/90 text-white rounded-lg px-2 py-1 gap-1 flex items-center" data-app-action="toggle-pip" title="<?= $tr('ui.swap_picture_in_picture') ?>"><i class="fa-solid fa-rotate"></i><span><?= $tr('ui.swap') ?></span></button>
                         </div>
-                        <span class="text-sm text-zinc-300 select-none" id="local-username-label">You</span>
+                        <span class="text-sm text-zinc-300 select-none" id="local-username-label"><?= $tr('ui.you') ?></span>
                     </div>
                 </div>
 
                 <div class="shrink-0 flex gap-5 flex-wrap justify-center px-6 pb-6 pt-2">
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="toggleMute()" id="mute-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="Toggle mute"><i class="fa fa-microphone"></i></button>
-                        <span class="text-xs text-zinc-400">Mute</span>
+                        <button data-app-action="toggle-mute" id="mute-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_mute') ?>"><i class="fa fa-microphone"></i></button>
+                        <span class="text-xs text-zinc-400"><?= $tr('ui.mute') ?></span>
                     </div>
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="toggleVideoInCall()" id="toggle-video-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="Toggle camera"><i class="fa fa-video-slash"></i></button>
-                        <span class="text-xs text-zinc-400">Camera</span>
+                        <button data-app-action="toggle-video" id="toggle-video-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.toggle_camera') ?>"><i class="fa fa-video-slash"></i></button>
+                        <span class="text-xs text-zinc-400"><?= $tr('ui.camera') ?></span>
                     </div>
                     <div id="screenshare-btn-wrap" class="flex flex-col items-center gap-1 hidden">
-                        <button onclick="toggleScreenShare()" id="screenshare-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="Share screen"><i class="fa fa-display"></i></button>
-                        <span class="text-xs text-zinc-400">Share</span>
+                        <button data-app-action="toggle-screen-share" id="screenshare-btn" class="bg-zinc-800 hover:bg-zinc-700 w-16 h-16 rounded-2xl text-xl border border-zinc-700" title="<?= $tr('ui.share_screen') ?>"><i class="fa fa-display"></i></button>
+                        <span class="text-xs text-zinc-400"><?= $tr('ui.share') ?></span>
                     </div>
                     <div class="flex flex-col items-center gap-1">
-                        <button onclick="endCall()" class="bg-red-600 hover:bg-red-500 w-16 h-16 rounded-2xl text-xl border border-red-700" title="End call"><i class="fa fa-phone-slash"></i></button>
-                        <span class="text-xs text-zinc-400">End</span>
+                        <button data-app-action="end-call" class="bg-red-600 hover:bg-red-500 w-16 h-16 rounded-2xl text-xl border border-red-700" title="<?= $tr('ui.end_call_2') ?>"><i class="fa fa-phone-slash"></i></button>
+                        <span class="text-xs text-zinc-400"><?= $tr('ui.end') ?></span>
                     </div>
                 </div>
             </div>
 
             <aside id="call-participants-panel" class="hidden shrink-0 w-full md:w-56 md:min-w-56 bg-zinc-900/80 border border-zinc-700 rounded-2xl p-2.5 min-h-0 overflow-hidden flex flex-col" aria-hidden="true">
-                <div class="text-xs uppercase tracking-wide text-zinc-400 px-1 pb-2">Participants</div>
+                <div class="text-xs uppercase tracking-wide text-zinc-400 px-1 pb-2"><?= $tr('ui.participants') ?></div>
                     <div id="call-participants-list" class="flex-1 flex gap-2 md:flex-col flex-row overflow-x-auto md:overflow-y-auto min-h-0"></div>
             </aside>
         </div>
@@ -497,56 +400,56 @@
 
     <div id="screenshare-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
         <div class="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6">
-            <h3 class="text-lg font-semibold text-zinc-100 mb-1">Share Your Screen</h3>
-            <p class="text-sm text-zinc-400 mb-5">Choose a quality setting. Your browser will let you pick which screen or window to share.</p>
+            <h3 class="text-lg font-semibold text-zinc-100 mb-1"><?= $tr('ui.share_your_screen') ?></h3>
+            <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.choose_a_quality_setting_your_browser') ?></p>
             <div class="space-y-3">
-                <button onclick="startScreenShare('720p-10fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
-                    <div class="font-medium text-zinc-100 text-sm">720P &middot; 10 FPS</div>
-                    <div class="text-xs text-zinc-400 mt-0.5">Low bandwidth, ideal for slow connections</div>
+                <button data-app-action="start-screen-share" data-quality="720p-10fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                    <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.720p_10_fps') ?></div>
+                    <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.low_bandwidth_ideal_for_slow_connections') ?></div>
                 </button>
-                <button onclick="startScreenShare('1080p-30fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
-                    <div class="font-medium text-zinc-100 text-sm">1080P &middot; 30 FPS</div>
-                    <div class="text-xs text-zinc-400 mt-0.5">Balanced quality and performance</div>
+                <button data-app-action="start-screen-share" data-quality="1080p-30fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                    <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.1080p_30_fps') ?></div>
+                    <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.balanced_quality_and_performance') ?></div>
                 </button>
-                <button onclick="startScreenShare('native-60fps')" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
-                    <div class="font-medium text-zinc-100 text-sm">Native Resolution &middot; 60 FPS</div>
-                    <div class="text-xs text-zinc-400 mt-0.5">Highest quality, requires fast connection</div>
+                <button data-app-action="start-screen-share" data-quality="native-60fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                    <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.native_resolution_60_fps') ?></div>
+                    <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.highest_quality_requires_fast_connection') ?></div>
                 </button>
             </div>
-            <button onclick="closeScreenShareModal()" class="mt-4 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2">Cancel</button>
+            <button data-app-action="close-screen-share" class="mt-4 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.cancel') ?></button>
         </div>
     </div>
 
     <div id="call-settings-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
         <div class="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6">
-            <h3 class="text-lg font-semibold text-zinc-100 mb-1">Call Settings</h3>
-            <p class="text-sm text-zinc-400 mb-5">Select your audio and video devices.</p>
+            <h3 class="text-lg font-semibold text-zinc-100 mb-1"><?= $tr('ui.call_settings_2') ?></h3>
+            <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.select_your_audio_and_video_devices') ?></p>
             <div class="space-y-4">
                 <div>
-                    <label for="call-settings-mic" class="block text-sm font-medium text-zinc-300 mb-1.5">Microphone</label>
+                    <label for="call-settings-mic" class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.microphone') ?></label>
                     <select id="call-settings-mic" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <option value="">Loading devices...</option>
+                        <option value=""><?= $tr('ui.loading_devices') ?></option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-zinc-300 mb-1.5">Microphone Volume</label>
+                    <label class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.microphone_volume') ?></label>
                     <input id="call-settings-volume" type="range" min="0" max="100" value="100" class="w-full accent-emerald-500 h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer">
                     <div class="mt-2 w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
-                        <div id="call-settings-level" class="h-full bg-emerald-500 rounded-full transition-none" style="width: 0%"></div>
+                        <div id="call-settings-level" class="h-full bg-emerald-500 rounded-full transition-none"></div>
                     </div>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-zinc-300 mb-1.5">Speaker Volume</label>
+                    <label class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.speaker_volume') ?></label>
                     <input id="call-settings-speaker-volume" type="range" min="0" max="100" value="100" class="w-full accent-emerald-500 h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer">
                 </div>
                 <div id="call-settings-camera-wrap" class="hidden">
-                    <label for="call-settings-camera" class="block text-sm font-medium text-zinc-300 mb-1.5">Camera</label>
+                    <label for="call-settings-camera" class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.camera') ?></label>
                     <select id="call-settings-camera" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <option value="">Loading devices...</option>
+                        <option value=""><?= $tr('ui.loading_devices') ?></option>
                     </select>
                 </div>
             </div>
-            <button onclick="closeCallSettingsModal()" class="mt-5 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2">Close</button>
+            <button data-app-action="close-call-settings" class="mt-5 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.close') ?></button>
         </div>
     </div>
     </div>
@@ -557,15 +460,15 @@
     <div id="report-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
         <div class="h-full w-full flex items-center justify-center">
             <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
-                <h2 id="report-modal-title" class="text-lg font-semibold text-zinc-100">Report content</h2>
-                <p id="report-modal-description" class="mt-2 text-sm text-zinc-400">Help us understand the issue by sharing what happened.</p>
+                <h2 id="report-modal-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.report_content') ?></h2>
+                <p id="report-modal-description" class="mt-2 text-sm text-zinc-400"><?= $tr('ui.help_us_understand_the_issue_by') ?></p>
                 <form id="report-form" class="mt-4 space-y-4">
-                    <label for="report-reason-input" class="block text-sm text-zinc-300">Reason</label>
-                    <textarea id="report-reason-input" rows="4" maxlength="200" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100 resize-y" placeholder="Describe the issue" required></textarea>
+                    <label for="report-reason-input" class="block text-sm text-zinc-300"><?= $tr('ui.reason_2') ?></label>
+                    <textarea id="report-reason-input" rows="4" maxlength="200" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100 resize-y" placeholder="<?= $tr('ui.describe_the_issue') ?>" required></textarea>
                     <div class="text-xs text-zinc-400 text-right" id="report-reason-counter" aria-live="polite">0/200</div>
                     <div class="flex items-center justify-end gap-3">
-                        <button type="button" id="report-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Cancel</button>
-                        <button type="submit" id="report-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white">Submit report</button>
+                        <button type="button" id="report-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.cancel') ?></button>
+                        <button type="submit" id="report-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.submit_report') ?></button>
                     </div>
                 </form>
             </div>
@@ -575,12 +478,13 @@
     <div id="timezone-suggest-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
         <div class="h-full w-full flex items-center justify-center">
             <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="timezone-suggest-title">
-                <h2 id="timezone-suggest-title" class="text-lg font-semibold text-zinc-100">Update time zone?</h2>
-                <p class="mt-2 text-sm text-zinc-400">Your account is currently using UTC+0. Your browser appears to use <span id="timezone-suggest-value" class="text-zinc-200 font-medium">UTC+0</span>.</p>
-                <p class="mt-2 text-sm text-zinc-400">Would you like to switch automatically?</p>
+                <h2 id="timezone-suggest-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.update_time_zone') ?></h2>
+                <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.your_account_uses_utc_0_your') ?> <span id="timezone-suggest-value" class="text-zinc-200 font-medium">UTC+0</span>.</p>
+                <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.would_you_like_to_switch_automatically') ?></p>
+                <p id="timezone-suggest-status" role="status" class="mt-2 text-sm text-zinc-200"></p>
                 <div class="mt-5 flex items-center justify-end gap-3">
-                    <button type="button" id="timezone-suggest-decline" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Keep UTC+0</button>
-                    <button type="button" id="timezone-suggest-accept" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white">Switch time zone</button>
+                    <button type="button" id="timezone-suggest-decline" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.keep_utc_0') ?></button>
+                    <button type="button" id="timezone-suggest-accept" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.switch_time_zone') ?></button>
                 </div>
             </div>
         </div>
@@ -590,8 +494,8 @@
         <div class="w-full max-w-md">
             <div class="text-center mb-6">
                 <div class="inline-flex items-center gap-2 text-2xl font-bold">
-                    <i class="fa-solid fa-comments prologue-accent"></i>
-                    <span>Prologue</span>
+                    <i class="fa-solid fa-comments causette-accent"></i>
+                    <span>Causette</span>
                 </div>
             </div>
             <?= $content ?>
@@ -604,18 +508,18 @@
         <div class="h-full w-full flex items-center justify-center">
             <div class="w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="new-post-modal-title">
                 <div class="flex items-center justify-between mb-4">
-                    <h2 id="new-post-modal-title" class="text-lg font-semibold text-zinc-100">New Post</h2>
-                    <button type="button" id="new-post-modal-close" class="w-8 h-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition" aria-label="Close">
+                    <h2 id="new-post-modal-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.new_post') ?></h2>
+                    <button type="button" id="new-post-modal-close" class="w-8 h-8 flex items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition" aria-label="<?= $tr('ui.close') ?>">
                         <i class="fa fa-xmark"></i>
                     </button>
                 </div>
                 <form id="new-post-modal-form" class="space-y-3">
-                    <textarea id="new-post-modal-input" rows="5" maxlength="500" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 resize-y" placeholder="Share what you're thinking" required></textarea>
+                    <textarea id="new-post-modal-input" rows="5" maxlength="500" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 resize-y" placeholder="<?= $tr('ui.share_what_you_re_thinking') ?>" required></textarea>
                     <div class="flex items-center justify-between gap-3">
                         <span id="new-post-modal-counter" class="text-xs text-zinc-400">0/500</span>
                         <div class="flex items-center gap-3">
-                            <button type="button" id="new-post-modal-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200 text-sm transition">Cancel</button>
-                            <button type="submit" id="new-post-modal-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">Publish</button>
+                            <button type="button" id="new-post-modal-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200 text-sm transition"><?= $tr('ui.cancel') ?></button>
+                            <button type="submit" id="new-post-modal-submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition"><?= $tr('ui.publish') ?></button>
                         </div>
                     </div>
                 </form>
@@ -626,11 +530,11 @@
     <div id="profile-post-delete-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
         <div class="h-full w-full flex items-center justify-center">
             <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="profile-post-delete-title">
-                <h2 id="profile-post-delete-title" class="text-lg font-semibold text-zinc-100">Delete post</h2>
-                <p id="profile-post-delete-description" class="mt-2 text-sm text-zinc-400">Are you sure you want to delete this post? This cannot be undone.</p>
+                <h2 id="profile-post-delete-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.delete_post') ?></h2>
+                <p id="profile-post-delete-description" class="mt-2 text-sm text-zinc-400"><?= $tr('ui.are_you_sure_you_want_to_6') ?></p>
                 <div class="mt-5 flex items-center justify-end gap-3">
-                    <button type="button" id="profile-post-delete-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Cancel</button>
-                    <button type="button" id="profile-post-delete-submit" class="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white">Delete</button>
+                    <button type="button" id="profile-post-delete-cancel" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.cancel') ?></button>
+                    <button type="button" id="profile-post-delete-submit" class="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white"><?= $tr('ui.delete') ?></button>
                 </div>
             </div>
         </div>
@@ -639,29 +543,33 @@
     <div id="server-connection-overlay" class="hidden fixed inset-0 bg-black/90 z-[9998] flex items-center justify-center p-4 md:p-6" aria-hidden="true">
         <div class="w-full max-w-md bg-zinc-900 p-8 rounded-3xl border border-zinc-700 text-center shadow-2xl">
             <div class="mb-4 text-4xl text-amber-400"><i class="fa-solid fa-triangle-exclamation"></i></div>
-            <h2 class="text-2xl font-bold mb-2 text-zinc-100">Unable to connect to server</h2>
-            <p class="text-zinc-400 mb-5">We lost connection and are trying to reconnect in the background.</p>
+            <h2 class="text-2xl font-bold mb-2 text-zinc-100"><?= $tr('ui.unable_to_connect_to_server') ?></h2>
+            <p class="text-zinc-400 mb-5"><?= $tr('ui.we_lost_connection_and_are_trying') ?></p>
             <ul class="text-left text-sm text-zinc-300 space-y-2 mb-6">
-                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span>Check your internet connection.</span></li>
-                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span>Check your server status.</span></li>
-                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span>Try again in a few minutes.</span></li>
+                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span><?= $tr('ui.check_your_internet_connection') ?></span></li>
+                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span><?= $tr('ui.check_your_server_status') ?></span></li>
+                <li class="flex items-start gap-2"><i class="fa-solid fa-circle-check mt-1 text-zinc-500 text-[10px]"></i><span><?= $tr('ui.try_again_in_a_few_minutes') ?></span></li>
             </ul>
-            <button id="server-connection-retry" type="button" class="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition">Retry now</button>
+            <button id="server-connection-retry" type="button" class="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition"><?= $tr('ui.retry_now') ?></button>
         </div>
     </div>
     <?php endif; ?>
     <div id="version-update-overlay" class="hidden fixed inset-0 bg-black/90 z-[9999] flex items-center justify-center p-6">
         <div class="text-center">
             <div class="mb-5 text-5xl text-emerald-400"><i class="fa-solid fa-rotate"></i></div>
-            <h2 class="text-xl font-semibold text-zinc-100 mb-2">System Update Installed</h2>
-            <p class="text-zinc-400 mb-6">Please refresh the page to continue.</p>
-            <button onclick="location.reload()" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition">Refresh Page</button>
+            <h2 class="text-xl font-semibold text-zinc-100 mb-2"><?= $tr('ui.system_update_installed') ?></h2>
+            <p class="text-zinc-400 mb-6"><?= $tr('ui.please_refresh_the_page_to_continue') ?></p>
+            <button data-app-action="reload-page" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition"><?= $tr('ui.refresh_page') ?></button>
         </div>
     </div>
 </body>
-<script>
-    window.APP_VERSION = <?= json_encode(APP_VERSION) ?>;
-    window.CSRF_TOKEN = <?= json_encode($csrf) ?>;
+<script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
+    window.CAUSETTE_UI = <?= \Causette\View\HtmlJson::encode([
+        'language' => $locale->language(),
+        'labels' => $locale->catalog('browser'),
+    ]) ?>;
+    window.APP_VERSION = <?= \Causette\View\HtmlJson::encode(APP_VERSION) ?>;
+    window.CSRF_TOKEN = <?= \Causette\View\HtmlJson::encode($csrf) ?>;
     window.BROWSER_NOTIFICATIONS_ENABLED = <?= $browserNotificationsEnabled ? 'true' : 'false' ?>;
     window.WEB_PUSH_NOTIFICATIONS_ENABLED = <?= $webPushNotificationsEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SOUND_POKE_ENABLED = <?= $pokeSoundEnabled ? 'true' : 'false' ?>;
@@ -669,18 +577,17 @@
     window.NOTIFICATION_SOUND_OTHER_ENABLED = <?= $otherNotificationSoundEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SOUND_OUTGOING_CALL_RING_ENABLED = <?= $outgoingCallRingSoundEnabled ? 'true' : 'false' ?>;
     window.NOTIFICATION_SIDEBAR_EXPANDED = <?= $notificationSidebarExpanded ? 'true' : 'false' ?>;
-    window.USER_TIMEZONE = <?= json_encode($userTimezone) ?>;
-    window.CURRENT_USER_ID = <?= json_encode((int)($currentUser->id ?? 0)) ?>;
-    window.CURRENT_USERNAME = <?= json_encode((string)($currentUser->username ?? '')) ?>;
+    window.USER_TIMEZONE = <?= \Causette\View\HtmlJson::encode($userTimezone) ?>;
+    window.CURRENT_USER_ID = <?= \Causette\View\HtmlJson::encode((int)($currentUser->id ?? 0)) ?>;
+    window.CURRENT_USERNAME = <?= \Causette\View\HtmlJson::encode((string)($currentUser->username ?? '')) ?>;
     window.TOP_LOADING_BAR_ENABLED = <?= $topLoadingBarEnabled ? 'true' : 'false' ?>;
     window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED = <?= $systemMessagesAutoCombineEnabled ? 'true' : 'false' ?>;
-    window.CURRENT_USER_PRESENCE_STATUS = <?= json_encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
-    window.OPENMOJI_FILES = <?= json_encode($openMojiFileNames, JSON_UNESCAPED_SLASHES) ?>;
-    window.OPENMOJI_METADATA = <?= json_encode($openMojiMetadata, JSON_UNESCAPED_SLASHES) ?>;
+    window.CURRENT_USER_PRESENCE_STATUS = <?= \Causette\View\HtmlJson::encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
+    window.CAUSETTE_REACTION_LABELS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::labels($locale)) ?>;
+    window.OPENMOJI_FILES = <?= \Causette\View\HtmlJson::encode($openMojiFileNames) ?>;
+    window.OPENMOJI_METADATA = <?= \Causette\View\HtmlJson::encode($openMojiMetadata) ?>;
 </script>
-<script src="<?= htmlspecialchars(base_url('/assets/js/notification.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script src="<?= htmlspecialchars(base_url('/assets/js/chat.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script src="<?= htmlspecialchars(base_url('/assets/js/call.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script src="<?= htmlspecialchars(base_url('/assets/js/user.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
-<script src="<?= htmlspecialchars(base_url('/assets/js/app.js'), ENT_QUOTES, 'UTF-8') ?>"></script>
+<?php foreach ($scripts as $script): ?>
+    <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" data-app-script="<?= $script ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/' . $script) ?>"></script>
+<?php endforeach; ?>
 </html>

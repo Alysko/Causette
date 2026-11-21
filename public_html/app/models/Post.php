@@ -1,25 +1,15 @@
 <?php
+use Causette\Chat\ReactionCatalog;
+
+require_once __DIR__ . '/../core/ReactionCatalog.php';
+
 class Post extends Model {
     public const MAX_CONTENT_LENGTH = 500;
     public const OWNER_DELETE_WINDOW_SECONDS = 3600;
-    public const REACTION_CODES = [
-        '1F44D',
-        '1F44E',
-        '2665',
-        '1F923',
-        '1F622',
-        '1F436',
-        '1F4A9'
-    ];
+    public const REACTION_CODES = ReactionCatalog::CODES;
 
     public static function normalizeReactionCode($value): string {
-        $code = strtoupper(trim((string)$value));
-        $code = preg_replace('/[^0-9A-F]/', '', $code) ?? '';
-        if ($code === '') {
-            return '';
-        }
-
-        return in_array($code, self::REACTION_CODES, true) ? $code : '';
+        return ReactionCatalog::normalize($value);
     }
 
     public static function normalizeContent($value): string {

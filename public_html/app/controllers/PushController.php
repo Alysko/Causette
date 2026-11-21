@@ -1,4 +1,8 @@
 <?php
+use Causette\Push\PushEndpoint;
+
+require_once __DIR__ . '/../core/PushEndpoint.php';
+
 class PushController extends Controller {
     public function status() {
         Auth::requireAuth();
@@ -26,18 +30,24 @@ class PushController extends Controller {
         }
 
         $userId = (int)Auth::user()->id;
-        $endpoint = trim((string)($_POST['endpoint'] ?? ''));
-        $p256dh = trim((string)($_POST['p256dh'] ?? ''));
-        $auth = trim((string)($_POST['auth'] ?? ''));
-        $userAgent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+        $endpoint = $_POST['endpoint'] ?? null;
+        $p256dh = $_POST['p256dh'] ?? null;
+        $auth = $_POST['auth'] ?? null;
+        $userAgent = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+        $userAgent = preg_match('//u', $userAgent) === 1 ? $userAgent : '';
 
-        if ($endpoint === '' || $p256dh === '' || $auth === '') {
+        if (!is_string($endpoint) || !is_string($p256dh) || !is_string($auth)
+            || PushEndpoint::parse($endpoint, WebPushService::allowedProviders()) === null
+            || !preg_match('/\AB[A-Za-z0-9_-]{86}=?\z/D', $p256dh)
+            || !preg_match('/\A[A-Za-z0-9_-]{22}(?:==)?\z/D', $auth)
+        ) {
             $this->json(['error' => 'Invalid subscription payload'], 400);
         }
 
         $saved = PushSubscription::upsertForUser($userId, $endpoint, $p256dh, $auth, $userAgent);
-        if (!$saved) {
-            $this->json(['error' => 'Unable to save subscription'], 500);
+        if ($saved !== PushSubscription::SAVED) {
+            $message = $saved === PushSubscription::LIMIT ? 'Push subscription limit reached' : 'Push subscription is unavailable';
+            $this->json(['error' => $message], 409);
         }
 
         Setting::set('web_push_notifications_' . $userId, '1');
@@ -54,8 +64,8 @@ class PushController extends Controller {
         Auth::csrfValidate();
 
         $userId = (int)Auth::user()->id;
-        $endpoint = trim((string)($_POST['endpoint'] ?? ''));
-        if ($endpoint !== '') {
+        $endpoint = $_POST['endpoint'] ?? null;
+        if (is_string($endpoint) && $endpoint !== '' && strlen($endpoint) <= PushEndpoint::MAX_LENGTH) {
             PushSubscription::removeForUserByEndpoint($userId, $endpoint);
         }
 

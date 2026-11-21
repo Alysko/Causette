@@ -1,291 +1,215 @@
 <?php
 
-class InstallController extends Controller {
-    public function showInstall() {
-        $connection = $this->databaseConnectionStatus();
-        if (!$connection['ok']) {
-            $this->view('install', [
-                'canInstall' => false,
-                'errorMessage' => $connection['error']
-            ]);
+declare(strict_types=1);
+
+use Causette\Installation\InstallDatabase;
+use Causette\Installation\SetupConfiguration;
+use Causette\Installation\SetupFailure;
+use Causette\Localization\Locale;
+
+require_once __DIR__ . '/../install/SetupConfiguration.php';
+require_once __DIR__ . '/../install/InstallDatabase.php';
+
+class InstallController extends Controller
+{
+    public function showInstall(): void
+    {
+        $prepared = $this->prepared();
+        if ($prepared === null) {
+            $this->renderSetup('closed', 404, 'install.unavailable');
             return;
         }
 
-        if (!$this->isDatabaseEmpty()) {
-            ErrorHandler::abort(404);
-        }
-
-        $this->view('install', [
-            'canInstall' => true,
-            'errorMessage' => ''
-        ]);
+        $screen = $this->authorized($prepared['configuration']) ? 'administrator' : 'operator';
+        $this->renderSetup($screen);
     }
 
-    public function install() {
-        Auth::csrfValidate();
-
-        $connection = $this->databaseConnectionStatus();
-        if (!$connection['ok']) {
-            $this->view('install', [
-                'canInstall' => false,
-                'errorMessage' => $connection['error']
-            ]);
+    public function install(): void
+    {
+        $prepared = $this->prepared();
+        if ($prepared === null) {
+            $this->renderSetup('closed', 404, 'install.unavailable');
             return;
         }
 
-        if (!$this->isDatabaseEmpty()) {
-            ErrorHandler::abort(404);
-        }
-
-        $username = User::normalizeUsername($_POST['username'] ?? '');
-        $email = trim((string)($_POST['email'] ?? ''));
-        $passwordRaw = (string)($_POST['password'] ?? '');
-
-        if (!User::isUsernameFormatValid($username)) {
-            $this->view('install', [
-                'canInstall' => true,
-                'errorMessage' => 'Invalid username format. Use 4-32 lowercase letters/numbers, starting with a letter.',
-                'inputUsername' => $username,
-                'inputEmail' => $email
-            ]);
+        $csrf = $_POST['csrf_token'] ?? null;
+        if (!is_string($csrf) || !isset($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $csrf)) {
+            $this->renderSetup('operator', 403, 'install.csrf');
             return;
         }
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->view('install', [
-                'canInstall' => true,
-                'errorMessage' => 'Invalid email address.',
-                'inputUsername' => $username,
-                'inputEmail' => $email
-            ]);
+        $configuration = $prepared['configuration'];
+        $stage = $_POST['stage'] ?? '';
+        if ($stage === 'authorize') {
+            $this->authorizeOperator($configuration);
+            return;
+        }
+        if ($stage !== 'install' || !$this->authorized($configuration)) {
+            $this->renderSetup('operator', 403, 'install.token_required');
             return;
         }
 
-        if (strlen($passwordRaw) < 8) {
-            $this->view('install', [
-                'canInstall' => true,
-                'errorMessage' => 'Password must be at least 8 characters long.',
-                'inputUsername' => $username,
-                'inputEmail' => $email
-            ]);
+        $username = $_POST['username'] ?? null;
+        $email = $_POST['email'] ?? null;
+        $password = $_POST['password'] ?? null;
+        $fieldErrors = [];
+        if (!is_string($username) || !preg_match('/\A[a-z][a-z0-9]{3,31}\z/D', $username)) {
+            $fieldErrors['admin-username'] = 'install.username_invalid';
+        }
+        if (!is_string($email) || strlen($email) > 254 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $fieldErrors['admin-email'] = 'install.email_invalid';
+        }
+        if (!is_string($password) || strlen($password) < 15 || strlen($password) > 72 || str_contains($password, "\0")) {
+            $fieldErrors['admin-password'] = 'install.password_invalid';
+        }
+        if ($fieldErrors !== []) {
+            $this->renderSetup('administrator', 422, fieldErrors: $fieldErrors);
+            return;
+        }
+
+        $this->completeInstallation($prepared['storage'], $username, $email, $password);
+    }
+
+    private function prepared(): ?array
+    {
+        $storage = SetupConfiguration::privateRoot();
+        if ($storage === null
+            || SetupConfiguration::exists($storage . '/' . SetupConfiguration::RUNTIME_FILE)
+            || SetupConfiguration::exists(__DIR__ . '/../config/config.php')
+        ) {
+            return null;
+        }
+
+        try {
+            $configuration = SetupConfiguration::read($storage . '/' . SetupConfiguration::OPERATOR_FILE);
+            SetupConfiguration::validateSite($configuration);
+            $operatorToken = $configuration['bootstrap_token'] ?? null;
+            if (!is_string($operatorToken) || !preg_match('/\A[A-Za-z0-9_-]{48,128}\z/D', $operatorToken)
+                || !SetupConfiguration::acceptsRequest($configuration['url'], $configuration['trusted_proxies'] ?? [])
+            ) {
+                return null;
+            }
+        } catch (Throwable) {
+            return null;
+        }
+
+        return ['configuration' => $configuration, 'storage' => $storage];
+    }
+
+    private function authorizationFingerprint(array $configuration): string
+    {
+        return hash('sha256', serialize($configuration));
+    }
+
+    private function authorized(array $configuration): bool
+    {
+        return ($_SESSION['setup_authorized_until'] ?? 0) > time()
+            && ($_SESSION['setup_authorization'] ?? '') === $this->authorizationFingerprint($configuration);
+    }
+
+    private function authorizeOperator(array $configuration): void
+    {
+        if (($_SESSION['setup_attempts_expire'] ?? 0) <= time()) {
+            $_SESSION['setup_attempts_expire'] = time() + 900;
+            $_SESSION['setup_attempts'] = 0;
+        }
+        if ($_SESSION['setup_attempts'] >= 5) {
+            $this->renderSetup('operator', 429, 'install.rate_limit');
+            return;
+        }
+
+        $token = $_POST['bootstrap_token'] ?? null;
+        if (!is_string($token) || strlen($token) > 128 || !hash_equals($configuration['bootstrap_token'], $token)) {
+            $_SESSION['setup_attempts']++;
+            unset($_SESSION['setup_authorization'], $_SESSION['setup_authorized_until']);
+            $this->renderSetup('operator', 403, 'install.token_rejected');
+            return;
+        }
+
+        if (!session_regenerate_id(true)) {
+            $this->renderSetup('operator', 503, 'install.protected_session');
+            return;
+        }
+        $_SESSION = [
+            'setup_authorization' => $this->authorizationFingerprint($configuration),
+            'setup_authorized_until' => time() + 600,
+        ];
+        $this->renderSetup('administrator');
+    }
+
+    private function completeInstallation(
+        string $storage,
+        string $username,
+        string $email,
+        string $password,
+    ): void {
+        $required = ['pdo_mysql', 'mbstring', 'fileinfo', 'gd', 'openssl', 'ctype', 'session'];
+        $missing = array_values(array_filter($required, static fn(string $extension): bool => !extension_loaded($extension)));
+        if (PHP_VERSION_ID < 80500) {
+            $this->renderSetup('administrator', 503, 'install.php_version');
+            return;
+        }
+        if ($missing !== []) {
+            $this->renderSetup('administrator', 503, 'install.extensions', parameters: ['extensions' => implode(', ', $missing)]);
+            return;
+        }
+
+        foreach (['', '/attachments', '/avatars', '/logs'] as $directory) {
+            $path = $storage . $directory;
+            if (is_link($path) || realpath($path) !== $path || !is_dir($path) || !is_writable($path)) {
+                $this->renderSetup('administrator', 503, 'install.storage_writable');
+                return;
+            }
+        }
+
+        $lockPath = $storage . '/install.lock';
+        $lock = is_link($lockPath) ? false : @fopen($lockPath, 'c');
+        if ($lock === false) {
+            $this->renderSetup('administrator', 503, 'install.lock_open');
             return;
         }
 
         try {
-            $this->executeDatabaseSchema();
-            Setting::set('database_version', APP_VERSION);
+            if (!flock($lock, LOCK_EX | LOCK_NB)) {
+                $this->renderSetup('administrator', 409, 'install.lock_busy');
+                return;
+            }
 
-            $passwordHash = password_hash($passwordRaw, PASSWORD_DEFAULT);
-            $userNumber = $this->generateUserNumber();
+            // Recheck the operator file and completion state while holding the installation lock.
+            $current = $this->prepared();
+            if ($current === null || !$this->authorized($current['configuration'])) {
+                $this->renderSetup('closed', 404, 'install.unavailable');
+                return;
+            }
 
-            Database::query(
-                "INSERT INTO users (username, email, password, user_number, email_verified_at, role) VALUES (?, ?, ?, ?, NOW(), 'admin')",
-                [$username, $email, $passwordHash, $userNumber]
-            );
-
-            $userId = (int)Database::getInstance()->lastInsertId();
-            Database::query("INSERT INTO username_history (user_id, username) VALUES (?, ?)", [$userId, $username]);
-        } catch (Throwable $exception) {
-            $this->view('install', [
-                'canInstall' => false,
-                'errorMessage' => 'Install failed: ' . $exception->getMessage(),
-                'inputUsername' => $username,
-                'inputEmail' => $email
-            ]);
-            return;
-        }
-
-        $this->flash('success', 'installed');
-        $this->redirect('/login');
-    }
-
-    private function databaseConnectionStatus() {
-        try {
-            Database::getInstance();
-            return ['ok' => true, 'error' => ''];
-        } catch (Throwable $exception) {
-            return ['ok' => false, 'error' => 'Database connection failed: ' . $exception->getMessage()];
+            $databaseVersion = (new InstallDatabase($storage))->install($current['configuration'], $username, $email, $password);
+            @unlink($storage . '/' . SetupConfiguration::OPERATOR_FILE);
+            $_SESSION = [];
+            $this->renderSetup('success', databaseVersion: $databaseVersion);
+        } catch (PDOException) {
+            $this->renderSetup('administrator', 503, 'install.database_error');
+        } catch (SetupFailure $failure) {
+            $this->renderSetup('administrator', $failure->getCode() === 409 ? 409 : 503, $failure->translationKey);
+        } catch (Throwable) {
+            $this->renderSetup('administrator', 503, 'install.retry');
+        } finally {
+            fclose($lock);
         }
     }
 
-    private function isDatabaseEmpty() {
-        $tables = Database::query('SHOW TABLES')->fetchAll();
-        return count($tables) === 0;
-    }
-
-    private function executeDatabaseSchema() {
-        $schemaSql = defined('DATABASE_SCHEMA_SQL') ? (string)DATABASE_SCHEMA_SQL : '';
-
-        if (trim($schemaSql) === '') {
-            throw new RuntimeException('Could not read database schema from DATABASE_SCHEMA_SQL.');
-        }
-
-        $sql = $schemaSql;
-        $schemaSource = 'DATABASE_SCHEMA_SQL';
-
-        $this->applyInstallDatabaseDefaults();
-
-        $schemaSection = explode('/* STEP 2 */', $sql, 2)[0];
-        $statements = $this->splitSqlStatements($schemaSection);
-        if (count($statements) === 0) {
-            throw new RuntimeException('DATABASE_SCHEMA_SQL has no executable SQL statements. Paste the full schema into CONFIG_DATABASE_SCHEMA_SQL.');
-        }
-
-        $executedStatements = 0;
-        foreach ($statements as $index => $statement) {
-            if (preg_match('/^CREATE\s+DATABASE\b/i', $statement)) {
-                continue;
-            }
-
-            if (preg_match('/^USE\s+/i', $statement)) {
-                continue;
-            }
-
-            try {
-                Database::query($statement);
-                $executedStatements++;
-            } catch (Throwable $exception) {
-                $preview = preg_replace('/\s+/', ' ', trim($statement));
-                if ($preview === null) {
-                    $preview = '';
-                }
-                $preview = mb_substr($preview, 0, 180);
-                throw new RuntimeException(
-                    'Schema execution failed at statement #' . ($index + 1) . ' from ' . $schemaSource . ': ' . $preview . ' | ' . $exception->getMessage(),
-                    0,
-                    $exception
-                );
-            }
-        }
-
-        if ($executedStatements === 0) {
-            throw new RuntimeException('DATABASE_SCHEMA_SQL did not execute any table statements. Paste the full schema into CONFIG_DATABASE_SCHEMA_SQL.');
-        }
-
-        $this->assertRequiredInstallTables();
-    }
-
-    private function applyInstallDatabaseDefaults() {
-        $defaults = [
-            "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
-            "SET SESSION default_storage_engine = InnoDB"
-        ];
-
-        foreach ($defaults as $statement) {
-            try {
-                Database::query($statement);
-            } catch (Throwable $exception) {
-            }
-        }
-    }
-
-    private function assertRequiredInstallTables() {
-        $requiredTables = [
-            'settings',
-            'users',
-            'auth_attempt_limits'
-        ];
-
-        $missingTables = [];
-        foreach ($requiredTables as $tableName) {
-            $row = Database::query(
-                'SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1',
-                [DB_NAME, $tableName]
-            )->fetch();
-
-            if (!$row) {
-                $missingTables[] = $tableName;
-            }
-        }
-
-        if (!empty($missingTables)) {
-            throw new RuntimeException('Install incomplete: missing required tables: ' . implode(', ', $missingTables));
-        }
-    }
-
-    private function splitSqlStatements($sql) {
-        $statements = [];
-        $buffer = '';
-        $length = strlen($sql);
-        $inSingleQuote = false;
-        $inDoubleQuote = false;
-        $inLineComment = false;
-        $inBlockComment = false;
-
-        for ($index = 0; $index < $length; $index++) {
-            $char = $sql[$index];
-            $next = ($index + 1 < $length) ? $sql[$index + 1] : '';
-            $previous = ($index > 0) ? $sql[$index - 1] : '';
-
-            if ($inLineComment) {
-                if ($char === "\n") {
-                    $inLineComment = false;
-                }
-                continue;
-            }
-
-            if ($inBlockComment) {
-                if ($char === '*' && $next === '/') {
-                    $inBlockComment = false;
-                    $index++;
-                }
-                continue;
-            }
-
-            if (!$inSingleQuote && !$inDoubleQuote) {
-                if ($char === '-' && $next === '-') {
-                    $third = ($index + 2 < $length) ? $sql[$index + 2] : '';
-                    if ($third === '' || ctype_space($third)) {
-                        $inLineComment = true;
-                        $index++;
-                        continue;
-                    }
-                }
-
-                if ($char === '#') {
-                    $inLineComment = true;
-                    continue;
-                }
-
-                if ($char === '/' && $next === '*') {
-                    $inBlockComment = true;
-                    $index++;
-                    continue;
-                }
-            }
-
-            if ($char === "'" && !$inDoubleQuote && $previous !== '\\') {
-                $inSingleQuote = !$inSingleQuote;
-            } elseif ($char === '"' && !$inSingleQuote && $previous !== '\\') {
-                $inDoubleQuote = !$inDoubleQuote;
-            }
-
-            if ($char === ';' && !$inSingleQuote && !$inDoubleQuote) {
-                $statement = trim($buffer);
-                if ($statement !== '') {
-                    $statements[] = $statement;
-                }
-                $buffer = '';
-                continue;
-            }
-
-            $buffer .= $char;
-        }
-
-        $statement = trim($buffer);
-        if ($statement !== '') {
-            $statements[] = $statement;
-        }
-
-        return $statements;
-    }
-
-    private function generateUserNumber() {
-        do {
-            $userNumber = str_pad((string) random_int(0, 9999999999999999), 16, '0', STR_PAD_LEFT);
-            $exists = Database::query('SELECT id FROM users WHERE user_number = ? LIMIT 1', [$userNumber])->fetch();
-        } while ($exists);
-
-        return $userNumber;
+    private function renderSetup(
+        string $screen,
+        int $status = 200,
+        string $messageKey = '',
+        string $databaseVersion = '',
+        array $parameters = [],
+        array $fieldErrors = [],
+    ): void {
+        http_response_code($status);
+        $locale = Locale::current();
+        header('Content-Language: ' . $locale->language());
+        $csrfToken = $screen === 'operator' || $screen === 'administrator' ? $this->csrfToken() : '';
+        $setupBasePath = defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '';
+        require __DIR__ . '/../views/install.php';
     }
 }

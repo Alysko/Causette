@@ -1,129 +1,210 @@
 <?php
+use Causette\Installation\SetupConfiguration;
+use Causette\Localization\Locale;
+use Causette\Security\BrowserSession;
+use Causette\Security\ContentSecurityPolicy;
+use Causette\Security\IntegrationKeyring;
+use Causette\Security\LegacySite;
+use Causette\Security\RequestOrigin;
+
 date_default_timezone_set('UTC');
-
-require_once __DIR__ . '/app/core/RequestOrigin.php';
-
-function is_https_request(): bool {
-    return prologue_is_https_request();
-}
-
-function is_local_host_request(): bool {
-    $origin = prologue_resolve_request_origin();
-    $host = strtolower(trim((string)($origin['host'] ?? '')));
-    if ($host === '') {
-        return false;
-    }
-
-    return in_array($host, ['localhost', '127.0.0.1', '::1'], true);
-}
-
-function enforce_https_if_needed(): void {
-    if (PHP_SAPI === 'cli' || is_https_request()) {
-        return;
-    }
-
-    $enforceHttps = getenv('SECURITY_ENFORCE_HTTPS');
-    if ($enforceHttps === false) {
-        $enforceHttps = '1';
-    }
-
-    if ($enforceHttps !== '1' || is_local_host_request()) {
-        return;
-    }
-
-    $appUrl = trim((string)(getenv('APP_URL') ?: ''));
-    if ($appUrl === '') {
-        return;
-    }
-
-    $parsedAppUrl = parse_url($appUrl);
-    $host = isset($parsedAppUrl['host']) ? trim((string)$parsedAppUrl['host']) : '';
-    if ($host === '') {
-        return;
-    }
-
-    $port = isset($parsedAppUrl['port']) ? (int)$parsedAppUrl['port'] : 0;
-    $authority = $host;
-    if ($port > 0 && $port !== 443) {
-        $authority .= ':' . $port;
-    }
-
-    $uri = (string)($_SERVER['REQUEST_URI'] ?? '/');
-    if ($uri === '' || $uri[0] !== '/') {
-        $uri = '/';
-    }
-
-    header('Location: https://' . $authority . $uri, true, 301);
+ini_set('display_errors', '0');
+ini_set('zend.exception_ignore_args', '1');
+if (session_status() !== PHP_SESSION_NONE) {
+    header_remove('Set-Cookie');
+    http_response_code(503);
+    echo 'Causette requires PHP sessions with automatic session start disabled.';
     exit;
 }
 
-function configure_secure_session(): void {
-    $isHttps = is_https_request();
+require_once __DIR__ . '/app/core/RequestOrigin.php';
+require_once __DIR__ . '/app/core/BrowserSession.php';
+require_once __DIR__ . '/app/core/ContentSecurityPolicy.php';
+require_once __DIR__ . '/app/core/IntegrationKeyring.php';
+require_once __DIR__ . '/app/core/Locale.php';
+require_once __DIR__ . '/app/install/SetupConfiguration.php';
 
+$publicPath = RequestOrigin::requestPath($_SERVER);
+if ($publicPath === null) {
+    http_response_code(400);
+    exit;
+}
+
+$privateRoot = SetupConfiguration::privateRoot();
+$runtimePath = dirname(__DIR__) . '/storage/' . SetupConfiguration::RUNTIME_FILE;
+$legacyConfiguration = __DIR__ . '/app/config/config.php';
+$privateConfiguration = null;
+$setupOnly = false;
+try {
+    if (SetupConfiguration::exists($runtimePath)) {
+        if ($privateRoot === null) {
+            throw new RuntimeException('The private root could not be validated.');
+        }
+        $privateConfiguration = SetupConfiguration::read($runtimePath);
+        SetupConfiguration::validateRuntime($privateConfiguration);
+        $origin = SetupConfiguration::siteOrigin($privateConfiguration);
+    } elseif (is_file($legacyConfiguration)) {
+        require_once __DIR__ . '/app/core/LegacySite.php';
+        $origin = LegacySite::origin($legacyConfiguration);
+    } else {
+        if ($privateRoot === null || !SetupConfiguration::exists($privateRoot . '/' . SetupConfiguration::OPERATOR_FILE)) {
+            http_response_code($publicPath === '/install' ? 404 : 424);
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo Locale::current()->text('install.unavailable_config');
+            exit;
+        }
+        $configuration = SetupConfiguration::read($privateRoot . '/' . SetupConfiguration::OPERATOR_FILE);
+        SetupConfiguration::validateSite($configuration);
+        $origin = SetupConfiguration::siteOrigin($configuration);
+        $setupOnly = true;
+    }
+} catch (Throwable) {
+    http_response_code(503);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo Locale::current()->text('install.configuration_error');
+    exit;
+}
+
+$scheme = $origin->scheme($_SERVER);
+if (!$origin->acceptsHost($_SERVER, $scheme)) {
+    http_response_code(421);
+    echo 'Open Causette using the configured HTTPS address.';
+    exit;
+}
+if ($scheme === null) {
+    http_response_code(400);
+    echo 'The approved proxy did not report a valid request scheme.';
+    exit;
+}
+
+$requestPath = $origin->routePath($publicPath);
+if ($requestPath === null) {
+    http_response_code(404);
+    exit;
+}
+
+$requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+if ($scheme !== 'https') {
+    header_remove('Set-Cookie');
+    header('Cache-Control: no-store');
+    header('Referrer-Policy: no-referrer');
+    if (in_array($requestMethod, ['GET', 'HEAD'], true)) {
+        // A cleartext URL may contain a recovery token. Do not forward its query.
+        header('Location: ' . $origin->urlFor($requestPath), true, 302);
+    } else {
+        http_response_code(403);
+        echo 'Open the HTTPS page before submitting this request.';
+    }
+    exit;
+}
+
+define('CAUSETTE_CANONICAL_URL', $origin->url);
+define('CAUSETTE_PUBLIC_PATH', $origin->basePath);
+if ($privateRoot !== null) {
+    define('CAUSETTE_INTEGRATION_KEY_FILE', $privateRoot . '/' . IntegrationKeyring::FILE);
+}
+function is_https_request(): bool
+{
+    return true;
+}
+
+$isRecoveryPage = in_array($requestPath, ['/forgot-password', '/reset-password'], true);
+if ($isRecoveryPage) {
+    header('Cache-Control: no-store');
+    header('Referrer-Policy: no-referrer');
+}
+
+if ($requestPath === '/install') {
+    Locale::initialize($requestMethod, CAUSETTE_PUBLIC_PATH);
+    header('Cache-Control: no-store');
+    header('Content-Type: text/html; charset=UTF-8');
+    header('Referrer-Policy: no-referrer');
+    header('X-Content-Type-Options: nosniff');
+    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    if (!$setupOnly) {
+        http_response_code(404);
+        header('Content-Language: ' . Locale::current()->language());
+        echo Locale::current()->html('install.unavailable');
+        exit;
+    }
+    if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 16384) {
+        http_response_code(413);
+        exit;
+    }
+    if (!in_array($requestMethod, ['GET', 'HEAD', 'POST'], true)) {
+        header('Allow: GET, HEAD, POST');
+        http_response_code(405);
+        exit;
+    }
+    start_causette_session(CAUSETTE_PUBLIC_PATH . '/install', 'CAUSETTESETUP', 'Strict');
+
+    require_once __DIR__ . '/app/core/Controller.php';
+    require_once __DIR__ . '/app/controllers/InstallController.php';
+    $installer = new InstallController();
+    if ($requestMethod === 'POST') {
+        $installer->install();
+    } else {
+        $installer->showInstall();
+    }
+    exit;
+}
+
+if ($setupOnly) {
+    http_response_code(424);
+    header('Content-Type: text/plain; charset=UTF-8');
+    echo Locale::current()->text('install.required');
+    exit;
+}
+
+function start_causette_session(string $path, ?string $name = null, string $sameSite = 'Lax'): void
+{
     ini_set('session.use_only_cookies', '1');
     ini_set('session.use_strict_mode', '1');
-    ini_set('session.cookie_httponly', '1');
-    ini_set('session.cookie_secure', $isHttps ? '1' : '0');
-    ini_set('session.cookie_samesite', 'Lax');
-
+    ini_set('session.gc_maxlifetime', (string)BrowserSession::IDLE_SECONDS);
+    if ($name !== null) {
+        session_name($name);
+    }
     session_set_cookie_params([
         'lifetime' => 0,
-        'path' => '/',
-        'secure' => $isHttps,
+        'path' => $path,
+        'domain' => '',
+        'secure' => true,
         'httponly' => true,
-        'samesite' => 'Lax'
+        'samesite' => $sameSite,
     ]);
+    if (!session_start()) {
+        header_remove('Set-Cookie');
+        http_response_code(503);
+        echo 'Causette could not start a protected session.';
+        exit;
+    }
 }
 
-function get_captcha_csp_domains(): array {
-    try {
-        $provider = trim((string)(Setting::get('captcha_provider') ?? ''));
-    } catch (Throwable $e) {
-        return [];
-    }
-
-    if ($provider === 'cloudflare-turnstile') {
-        return ['https://challenges.cloudflare.com'];
-    }
-
-    if ($provider === 'google-recaptcha-v2') {
-        return ['https://www.google.com', 'https://www.gstatic.com'];
-    }
-
-    return [];
-}
-
-function send_security_headers(): void {
+function send_security_headers(bool $isRecoveryPage, ?string $captchaProvider): void {
     if (headers_sent()) {
         return;
     }
 
-    $captchaDomains = get_captcha_csp_domains();
-    $extraScriptSrc = '';
-    $extraFrameSrc = '';
-    $extraConnectSrc = '';
-    if (!empty($captchaDomains)) {
-        $domainStr = ' ' . implode(' ', $captchaDomains);
-        $extraScriptSrc = $domainStr;
-        $extraFrameSrc = '; frame-src' . $domainStr;
-        $extraConnectSrc = $domainStr;
-    }
-
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
-    header('Referrer-Policy: strict-origin-when-cross-origin');
+    if (!$isRecoveryPage) {
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+    }
     header('Permissions-Policy: geolocation=(), payment=(), usb=(), camera=(self), microphone=(self)');
-    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self'" . $extraConnectSrc . "; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com" . $extraScriptSrc . "; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com" . $extraFrameSrc);
+    header('Cache-Control: no-store');
+    header('Content-Security-Policy: ' . ContentSecurityPolicy::forPage($captchaProvider));
 
     if (is_https_request()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
     }
 }
 
-enforce_https_if_needed();
-configure_secure_session();
-session_start();
-require_once __DIR__ . '/app/config/config.php';
+start_causette_session(CAUSETTE_PUBLIC_PATH . '/');
+if ($privateConfiguration !== null) {
+    require __DIR__ . '/app/config/private-runtime.php';
+} else {
+    require $legacyConfiguration;
+}
 
 function flash_get(string $key): ?string {
     if (!isset($_SESSION['_flash'][$key])) {
@@ -150,45 +231,51 @@ spl_autoload_register(function ($class) {
 });
 
 ErrorHandler::register();
-send_security_headers();
 
 try {
-    ErrorHandler::setDebugMode(Setting::get('error_display') === '1');
-} catch (Throwable $exception) {
-}
-
-$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-
-try {
-    $dbVersion = Setting::get('database_version');
-    if ($dbVersion !== null && version_compare((string)$dbVersion, APP_VERSION, '<')) {
-        if ($requestPath !== '/update' && $requestPath !== '/install') {
-            $showUpdateButton = false;
-            try {
-                $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
-                if ($clientIp !== '') {
-                    $adminIpRow = Database::query(
-                        "SELECT us.id FROM user_sessions us JOIN users u ON u.id = us.user_id WHERE u.role = 'admin' AND us.ip_address = ? AND us.last_seen_at > NOW() - INTERVAL 24 HOUR AND us.revoked_at IS NULL LIMIT 1",
-                        [$clientIp]
-                    )->fetch();
-                    $showUpdateButton = (bool)$adminIpRow;
-                }
-            } catch (Throwable $ipCheckException) {}
-            header('X-App-Version: ' . APP_VERSION);
-            http_response_code(503);
-            require __DIR__ . '/app/views/update-required.php';
-            exit;
-        }
+    $installationId = defined('CAUSETTE_INSTALLATION_ID') ? CAUSETTE_INSTALLATION_ID : null;
+    if ($installationId !== null && Setting::get('causette_installation_id') !== $installationId) {
+        header('Cache-Control: no-store');
+        header('Content-Type: text/plain; charset=UTF-8');
+        http_response_code(503);
+        echo 'The Causette private configuration does not match the selected database.';
+        exit;
     }
+    $dbVersion = Setting::get('database_version');
 } catch (Throwable $exception) {
+    ErrorHandler::abort(503, 'The Causette database is unavailable.');
 }
-if (!isset($dbVersion) && $requestPath !== '/install') {
-    ErrorHandler::abort(424, 'Prologue has not been installed yet.');
+if (!is_string($dbVersion) || $dbVersion === '') {
+    ErrorHandler::abort(424, 'Causette has not been installed yet.');
 }
-if (!isset($dbVersion)) {
-    unset($_SESSION['user_id'], $_SESSION['auth_session_token'], $_SESSION['last_activity_touch_at']);
-    if (isset($_COOKIE['remember_me'])) {
-        Auth::clearRememberCookie();
+$captchaProvider = null;
+if (in_array($requestPath, ['/login', '/register', '/forgot-password'], true) && in_array($requestMethod, ['GET', 'HEAD'], true)) {
+    require_once __DIR__ . '/app/modules/captcha/CaptchaManager.php';
+    $captchaProvider = CaptchaManager::getActiveProvider()?->getName();
+}
+send_security_headers($isRecoveryPage, $captchaProvider);
+if ($requestPath === '/credential-upgrade') {
+    (new CredentialUpgradeController())->handle($requestMethod, $dbVersion);
+    exit;
+}
+if ($requestPath === '/reset-password') {
+    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+}
+if ($dbVersion !== APP_VERSION) {
+    header('Cache-Control: no-store');
+    $updateAvailable = UpdateController::supportsVersion($dbVersion);
+    if (!UpdateController::allowsDuringMaintenance($requestPath, $_SERVER['REQUEST_METHOD'] ?? 'GET', $updateAvailable)) {
+        header('X-App-Version: ' . APP_VERSION);
+        header('Referrer-Policy: no-referrer');
+        header("Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+        http_response_code(503);
+        require __DIR__ . '/app/views/update-required.php';
+        exit;
+    }
+} else {
+    try {
+        ErrorHandler::setDebugMode(Setting::get('error_display') === '1');
+    } catch (Throwable $exception) {
     }
 }
 if (strpos($requestPath, '/api') === 0) {
@@ -198,11 +285,9 @@ if (strpos($requestPath, '/api') === 0) {
 $router = new Router();
 
 // Auth
-$router->get('/install', 'InstallController@showInstall');
-$router->post('/install', 'InstallController@install');
-
 $router->get('/update', 'UpdateController@showUpdate');
 $router->post('/update', 'UpdateController@runUpdate');
+$router->post('/update/reauthenticate', 'UpdateController@reauthenticate');
 
 $router->get('/login', 'AuthController@showLogin');
 $router->post('/login', 'AuthController@login');
@@ -213,7 +298,7 @@ $router->post('/verify-email', 'AuthController@verifyEmail');
 $router->post('/verify-email/resend', 'AuthController@resendVerifyEmail');
 $router->get('/register', 'AuthController@showRegister');
 $router->post('/register', 'AuthController@register');
-$router->get('/logout', 'AuthController@logout');
+$router->post('/logout', 'AuthController@logout');
 $router->get('/forgot-password', 'AuthController@showForgot');
 $router->post('/forgot-password', 'AuthController@forgotPassword');
 $router->get('/reset-password', 'AuthController@showReset');
@@ -319,11 +404,11 @@ $router->post('/trash/delete', 'TrashController@delete');
 
 // Settings
 $router->get('/settings', 'SettingsController@index');
+$router->post('/settings/display-preferences', 'SettingsController@saveDisplayPreferences');
 $router->get('/apikeys', 'ApiKeyController@index');
 $router->post('/apikeys/create', 'ApiKeyController@create');
 $router->post('/apikeys/expire', 'ApiKeyController@expire');
 $router->post('/apikeys/update', 'ApiKeyController@update');
-$router->post('/apikeys/view-key', 'ApiKeyController@viewKey');
 $router->get('/apikeys/docs', 'ApiKeyController@docs');
 
 // Admin (admin only)
@@ -332,6 +417,7 @@ $router->post('/admin/mail/test', 'AdminController@sendTestMail');
 $router->post('/admin/storage/recalculate', 'AdminController@recalculateStorageStats');
 $router->post('/admin/check-updates', 'AdminController@checkForUpdatesNow');
 $router->post('/admin/accounts', 'AdminController@saveAccountSettings');
+$router->post('/admin/display-defaults', 'AdminController@saveDisplayDefaults');
 $router->post('/admin/attachments', 'AdminController@saveAttachmentSettings');
 $router->post('/admin/announcement', 'AdminController@saveAnnouncementSettings');
 $router->post('/admin/more', 'AdminController@saveMoreSettings');
@@ -355,6 +441,7 @@ $router->post('/settings/2fa/totp/setup', 'HomeController@totpSetupBegin');
 $router->post('/settings/2fa/totp/confirm', 'HomeController@totpSetupConfirm');
 $router->post('/settings/2fa/totp/disable', 'HomeController@totpDisable');
 $router->post('/settings/2fa/frequency', 'HomeController@saveTwofaFrequency');
+$router->post('/settings/2fa/trusted/revoke', 'HomeController@revokeTrustedBrowsers');
 
 // API routes (JSON only)
 $router->group('/api', function($r) {
@@ -378,4 +465,4 @@ $router->group('/api', function($r) {
 });
 
 // Dispatch
-$router->dispatch();
+$router->dispatch($requestPath);

@@ -1,0 +1,3 @@
+# The historical API example matches the curl auth rule on the literal placeholder YOUR_API_KEY.
+# Owner: release maintainer. Recheck against the original commit and current rule by 2027-02-19.
+ca9633ba84022909e780432742e416bba5d19b0a:public_html/app/views/apikeys_docs.php:curl-auth-header:79

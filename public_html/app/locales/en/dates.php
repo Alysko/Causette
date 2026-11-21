@@ -1,0 +1,18 @@
+<?php
+
+return [
+    'compact_date' => '{month} {day}, {year}',
+    'compact_date_time' => '{date}, {time}',
+    'month_01' => 'Jan',
+    'month_02' => 'Feb',
+    'month_03' => 'Mar',
+    'month_04' => 'Apr',
+    'month_05' => 'May',
+    'month_06' => 'Jun',
+    'month_07' => 'Jul',
+    'month_08' => 'Aug',
+    'month_09' => 'Sep',
+    'month_10' => 'Oct',
+    'month_11' => 'Nov',
+    'month_12' => 'Dec',
+];

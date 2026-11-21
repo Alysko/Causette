@@ -1,5 +1,11 @@
 <?php
 
+require_once __DIR__ . '/../core/BrowserSession.php';
+require_once __DIR__ . '/../core/CredentialDigest.php';
+
+use Causette\Security\BrowserSession;
+use Causette\Security\CredentialDigest;
+
 class ApiKey extends Model {
 
     public static function generateKey(): string {
@@ -7,19 +13,25 @@ class ApiKey extends Model {
     }
 
     public static function findByKey(string $apiKey) {
+        $digest = CredentialDigest::api($apiKey);
+        if ($digest === null) {
+            return false;
+        }
         return self::query(
-            "SELECT ak.*, u.is_banned
+            "SELECT ak.id, ak.user_id, ak.name, ak.type, ak.status, ak.allowed_ips, ak.allowed_chats,
+                    ak.expires_at, u.is_banned
              FROM api_keys ak
              JOIN users u ON u.id = ak.user_id
-             WHERE ak.api_key = ? LIMIT 1",
-            [$apiKey]
+             WHERE ak.api_key = CAST(? AS BINARY) LIMIT 1",
+            [$digest]
         )->fetch();
     }
 
     public static function getAllForUser(int $userId): array {
         return self::query(
             "SELECT id, name, type, status, allowed_ips, allowed_chats,
-                    LEFT(api_key, 8) AS key_prefix, expires_at, created_at
+                    CASE WHEN api_key LIKE 'a1.%' THEN SUBSTRING(api_key, 4, 8)
+                         ELSE LEFT(api_key, 8) END AS key_prefix, expires_at, created_at
              FROM api_keys
              WHERE user_id = ?
              ORDER BY status ASC, created_at DESC",
@@ -27,15 +39,43 @@ class ApiKey extends Model {
         )->fetchAll();
     }
 
-    public static function create(int $userId, string $rawKey, string $name,
-                                   string $type, ?string $allowedIps,
-                                   ?string $allowedChats, ?string $expiresAt): int {
-        self::query(
-            "INSERT INTO api_keys (user_id, api_key, name, type, allowed_ips, allowed_chats, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [$userId, $rawKey, $name, $type, $allowedIps, $allowedChats, $expiresAt]
-        );
-        return (int)Database::getInstance()->lastInsertId();
+    public static function createForSession(
+        int $userId,
+        string $sessionToken,
+        string $rawKey,
+        string $name,
+        string $type,
+        ?string $allowedIps,
+        ?string $allowedChats,
+        ?string $expiresAt,
+    ): ?int {
+        $digest = CredentialDigest::api($rawKey);
+        if ($digest === null) {
+            return null;
+        }
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            // Serialize key issuance with password changes and recovery on the account row.
+            $user = self::query('SELECT is_banned FROM users WHERE id = ? FOR UPDATE', [$userId])->fetch();
+            if (!$user || User::isBanned($user) || !BrowserSession::lockActive($userId, $sessionToken)) {
+                $connection->rollBack();
+                return null;
+            }
+
+            self::query(
+                'INSERT INTO api_keys (user_id, api_key, name, type, allowed_ips, allowed_chats, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [$userId, $digest, $name, $type, $allowedIps, $allowedChats, $expiresAt],
+            );
+            $keyId = (int)$connection->lastInsertId();
+            $connection->commit();
+            return $keyId;
+        } catch (Throwable $failure) {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+            throw $failure;
+        }
     }
 
     public static function expireKey(int $keyId, int $userId): void {
@@ -102,7 +142,8 @@ class ApiKey extends Model {
 
     public static function getById(int $keyId, int $userId) {
         return self::query(
-            "SELECT * FROM api_keys WHERE id = ? AND user_id = ?",
+            "SELECT id, user_id, name, type, status, allowed_ips, allowed_chats, expires_at, created_at
+             FROM api_keys WHERE id = ? AND user_id = ?",
             [$keyId, $userId]
         )->fetch();
     }

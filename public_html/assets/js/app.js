@@ -1,3 +1,4 @@
+const documentScriptNonce = document.currentScript?.nonce;
 let currentChat = null;
 let currentUserId = Number(window.CURRENT_USER_ID || 0) || null;
 let localStream = null;
@@ -497,9 +498,12 @@ function clearRouteScopedIntervals() {
 
 function shouldHandleClientNavigationForUrl(targetUrl) {
     if (!window.CURRENT_USER_ID) return false;
+    if (targetUrl.searchParams.has('lang')) return false;
 
     const pathname = String(targetUrl.pathname || '');
-    const blockedPrefixes = ['/auth', '/install', '/update'];
+    const blockedPrefixes = [
+        '/auth', '/install', '/update', '/login', '/register', '/forgot-password', '/reset-password', '/credential-upgrade',
+    ];
     if (blockedPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
         return false;
     }
@@ -507,36 +511,43 @@ function shouldHandleClientNavigationForUrl(targetUrl) {
     return true;
 }
 
-function executeScriptsInContainer(container) {
-    if (!(container instanceof Element)) return;
+function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
+    const responseNonce = policy?.match(/(?:^|;)\s*script-src\s+[^;]*?'nonce-([A-Za-z0-9+/]{32})'/)?.[1];
+    if (!documentScriptNonce || !responseNonce) return false;
 
-    const scripts = Array.from(container.querySelectorAll('script'));
-    scripts.forEach((oldScript) => {
-        const newScript = document.createElement('script');
-
-        for (const attribute of oldScript.attributes) {
-            newScript.setAttribute(attribute.name, attribute.value);
-        }
-
-        if (!oldScript.src) {
-            newScript.textContent = oldScript.textContent || '';
-        }
-
-        oldScript.replaceWith(newScript);
-    });
-}
-
-function replaceMainContentFromHtml(htmlText, targetUrl, options = {}) {
     const parser = new DOMParser();
     const nextDoc = parser.parseFromString(htmlText, 'text/html');
+    const nextScripts = Array.from(nextDoc.querySelectorAll('script[data-app-script]'), (script) => script.getAttribute('src'));
+    const currentScripts = Array.from(document.querySelectorAll('script[data-app-script]'), (script) => script.getAttribute('src'));
+    if (nextDoc.documentElement.lang !== document.documentElement.lang ||
+        nextDoc.documentElement.dataset.dateFormat !== document.documentElement.dataset.dateFormat ||
+        nextDoc.documentElement.dataset.timeFormat !== document.documentElement.dataset.timeFormat ||
+        nextScripts.length !== currentScripts.length ||
+        nextScripts.some((url, index) => url !== currentScripts[index])) {
+        return false;
+    }
     const nextMain = nextDoc.getElementById('app-main-content') || nextDoc.querySelector('main');
     const currentMain = document.getElementById('app-main-content') || document.querySelector('main');
     if (!nextMain || !currentMain) {
         return false;
     }
 
+    const pageScripts = [];
+    for (const script of nextMain.querySelectorAll('script')) {
+        // Only view scripts authorized by the fetched response may run after a document swap.
+        if (script.nonce === responseNonce && script.hasAttribute('data-page-script') && !script.hasAttribute('src') && !script.hasAttribute('type')) {
+            pageScripts.push(script);
+        } else {
+            script.remove();
+        }
+    }
     currentMain.replaceWith(nextMain);
-    executeScriptsInContainer(nextMain);
+    for (const original of pageScripts) {
+        const script = document.createElement('script');
+        script.nonce = documentScriptNonce;
+        script.textContent = original.textContent;
+        original.replaceWith(script);
+    }
 
     const nextTitle = String(nextDoc.querySelector('title')?.textContent || '').trim();
     if (nextTitle) {
@@ -581,6 +592,7 @@ async function navigateApp(url, options = {}) {
 
         const response = await fetch(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
             method: 'GET',
+            mode: 'same-origin',
             headers: {
                 'X-Requested-With': 'XMLHttpRequest'
             }
@@ -592,7 +604,8 @@ async function navigateApp(url, options = {}) {
         }
 
         const htmlText = await response.text();
-        const swapped = replaceMainContentFromHtml(htmlText, targetUrl, { updateHistory: options.updateHistory !== false });
+        const policy = response.headers.get('Content-Security-Policy');
+        const swapped = replaceMainContentFromHtml(htmlText, policy, targetUrl, { updateHistory: options.updateHistory !== false });
         if (!swapped) {
             window.location.href = toUrl;
             return false;
@@ -721,9 +734,25 @@ function escapeHtml(value) {
         .replaceAll("'", '&#039;');
 }
 
-const JUST_A_MOMENT_AGO_LABEL = 'Just a moment ago';
 const ONE_MINUTE_IN_MS = 60 * 1000;
 let utcTimestampRefreshTimeoutId = null;
+const timestampFormatters = new Map();
+
+function uiText(key, parameters = {}) {
+    const label = window.CAUSETTE_UI?.labels?.[key];
+    return (typeof label === 'string' ? label : key).replace(/\{([a-z_]+)\}/g,
+        (token, name) => Object.hasOwn(parameters, name) ? String(parameters[name]) : token);
+}
+
+function uiLanguage() {
+    return window.CAUSETTE_UI?.language || 'en';
+}
+
+function uiActionError(message, fallbackKey) {
+    return uiLanguage() === 'en' && typeof message === 'string' && message !== ''
+        ? message
+        : uiText(fallbackKey);
+}
 
 function parseUtcTimestamp(value) {
     const fullTimestamp = String(value ?? '').trim();
@@ -785,18 +814,17 @@ function parseUtcTimestamp(value) {
     return new Date(Date.UTC(year, month - 1, day, hours, minutes, seconds));
 }
 
-function formatCompactMessageTimestamp(value) {
+function formatCompactMessageTimestamp(value, { relative = true, dateOnly = false } = {}) {
     const fullTimestamp = String(value || '').trim();
     if (!fullTimestamp) return '';
 
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
     const date = parseUtcTimestamp(fullTimestamp);
     if (!date) return fullTimestamp;
 
     const diffFromNowMs = Date.now() - date.getTime();
-    if (diffFromNowMs >= 0 && diffFromNowMs < ONE_MINUTE_IN_MS) {
-        return JUST_A_MOMENT_AGO_LABEL;
+    if (relative && !dateOnly && diffFromNowMs >= 0 && diffFromNowMs < ONE_MINUTE_IN_MS) {
+        return uiText('just_now');
     }
 
     const tz = String(window.USER_TIMEZONE || 'UTC+0');
@@ -806,12 +834,31 @@ function formatCompactMessageTimestamp(value) {
         : 0;
 
     const local = new Date(date.getTime() + offsetMins * 60 * 1000);
-    const year = local.getUTCFullYear();
-    const monthIndex = local.getUTCMonth();
-    const day = local.getUTCDate();
-    const hours = String(local.getUTCHours()).padStart(2, '0');
-    const mins = String(local.getUTCMinutes()).padStart(2, '0');
-    return `${monthNames[monthIndex]} ${day}, ${year} ${hours}:${mins}`;
+    const { dateFormat, timeFormat } = document.documentElement?.dataset ?? {};
+    const twelveHours = timeFormat === '12h';
+    if (dateFormat === 'dmy' || dateFormat === 'mdy' || dateFormat === 'ymd') {
+        const twoDigits = (number) => String(number).padStart(2, '0');
+        const day = twoDigits(local.getUTCDate());
+        const month = twoDigits(local.getUTCMonth() + 1);
+        const year = String(local.getUTCFullYear()).padStart(4, '0');
+        const formattedDate = { dmy: day + '/' + month + '/' + year, mdy: month + '/' + day + '/' + year, ymd: year + '-' + month + '-' + day }[dateFormat];
+        if (dateOnly) return formattedDate;
+        const hour = local.getUTCHours();
+        const minute = twoDigits(local.getUTCMinutes());
+        return formattedDate + ' ' + twoDigits(twelveHours ? (hour % 12 || 12) : hour) + ':' + minute
+            + (twelveHours ? (hour >= 12 ? ' PM' : ' AM') : '');
+    }
+
+    const language = uiLanguage();
+    const formatterKey = [language, dateOnly, twelveHours].join(':');
+    if (!timestampFormatters.has(formatterKey)) {
+        const options = { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' };
+        if (!dateOnly) {
+            Object.assign(options, { hour: '2-digit', minute: '2-digit', hourCycle: twelveHours ? 'h12' : 'h23' });
+        }
+        timestampFormatters.set(formatterKey, new Intl.DateTimeFormat(language, options));
+    }
+    return timestampFormatters.get(formatterKey).format(local);
 }
 
 function getUtcTimestampTargets(root = document) {
@@ -833,6 +880,7 @@ function scheduleUtcTimestampRefresh() {
     let nextRefreshDelay = Infinity;
 
     document.querySelectorAll('[data-utc]').forEach((el) => {
+        if (el.dataset.dateOnly !== undefined) return;
         const date = parseUtcTimestamp(el.dataset.utc);
         if (!date) return;
 
@@ -860,7 +908,9 @@ function scheduleUtcTimestampRefresh() {
 function refreshUtcTimestamps(root = document) {
     const targets = getUtcTimestampTargets(root);
     targets.forEach((el) => {
-        const converted = formatCompactMessageTimestamp(el.dataset.utc);
+        const converted = formatCompactMessageTimestamp(el.dataset.utc, {
+            dateOnly: el.dataset.dateOnly !== undefined,
+        });
         if (converted) {
             el.textContent = converted;
         }
@@ -945,7 +995,7 @@ function renderMessageAttachments(attachments, canDelete = false) {
             const category = getAttachmentCategory(attachment.file_extension);
             const downloadAttr = escapeHtml(attachment.original_name || `${attachment.file_name}.${attachment.file_extension}`);
             const deleteButton = canDelete
-                ? `<button type="button" class="text-red-300 hover:text-red-200 js-attachment-delete" data-attachment-id="${attachment.id}" title="Delete attachment" aria-label="Delete attachment"><i class="fa-solid fa-trash"></i></button>`
+                ? `<button type="button" class="text-red-300 hover:text-red-200 js-attachment-delete" data-attachment-id="${attachment.id}" title="${escapeHtml(uiText('delete_attachment'))}" aria-label="${escapeHtml(uiText('delete_attachment'))}"><i class="fa-solid fa-trash"></i></button>`
                 : '';
 
             if (category === 'image') {
@@ -963,7 +1013,7 @@ function renderMessageAttachments(attachments, canDelete = false) {
                             <span>${escapeHtml(formatFileSize(attachment.file_size))}</span>
                             <div class="flex items-center gap-2">
                                 ${deleteButton}
-                                <a href="${escapeHtml(attachment.url)}" download="${downloadAttr}" class="text-zinc-300 hover:text-zinc-100" title="Download">
+                                <a href="${escapeHtml(attachment.url)}" download="${downloadAttr}" class="text-zinc-300 hover:text-zinc-100" title="${escapeHtml(uiText('download'))}">
                                     <i class="fa-solid fa-download"></i>
                                 </a>
                             </div>
@@ -984,7 +1034,7 @@ function renderMessageAttachments(attachments, canDelete = false) {
                         <span class="truncate" title="${escapeHtml(attachment.original_name)}">${escapeHtml(attachment.original_name)}</span>
                         <div class="flex items-center gap-2 shrink-0">
                             ${deleteButton}
-                            <a href="${escapeHtml(attachment.url)}" download="${downloadAttr}" class="text-zinc-300 hover:text-zinc-100" title="Download">
+                            <a href="${escapeHtml(attachment.url)}" download="${downloadAttr}" class="text-zinc-300 hover:text-zinc-100" title="${escapeHtml(uiText('download'))}">
                                 <i class="fa-solid fa-download"></i>
                             </a>
                         </div>
@@ -1174,7 +1224,7 @@ async function init() {
             const content = input?.value?.trim();
             if (!content || !currentChat) return;
             if (content.length > 16384) {
-                showToast('Message exceeds the maximum length of 16,384 characters', 'error');
+                showToast(uiText('message_exceeds_the_maximum_length_of_16_384'), 'error');
                 return;
             }
             if (normalizeChatType(currentChat.type) === 'personal' && currentChat.can_send_messages === false) {
@@ -1205,7 +1255,7 @@ async function init() {
                 await pollMessages({ scrollMode: 'bottom' });
                 await loadSidebarChats();
             } else {
-                showToast(result.error || 'Failed to send message', 'error');
+                showToast(uiActionError(result.error, 'failed_to_send_message'), 'error');
             }
         });
     }
@@ -1283,7 +1333,6 @@ async function init() {
     bindTimezoneSuggestionModal();
     bindStatusMenu();
     bindNotificationSettingsToggles();
-    bindTwofaFrequencyRadios();
     bindNotificationSoundPreviewButtons();
     bindBrowserPermissionChecks();
 
@@ -1301,8 +1350,6 @@ async function init() {
         if (typeof clearCurrentChatMessageNotifications === 'function') {
             await clearCurrentChatMessageNotifications().catch(() => {});
         }
-        bindNotificationHistory();
-        renderToastHistory();
         if (notificationPollIntervalId) {
             clearInterval(notificationPollIntervalId);
         }
@@ -1323,7 +1370,6 @@ async function init() {
         loadSidebarChats().catch(() => {});
     }, 5000);
 
-    bindSidebarToggle();
 }
 
 function bindTrashDeleteModal() {
@@ -1337,19 +1383,19 @@ function bindTrashDeleteModal() {
 
     if (!modal || !form || !cancel || !submit || !chatIdInput || !description || triggerButtons.length === 0) return;
 
-    const defaultDescription = 'Are you sure you want to permanently delete this chat and all associated data?';
+    const defaultDescription = uiText('delete_chat_confirm');
 
     const setOpenState = (isOpen) => {
         modal.classList.toggle('hidden', !isOpen);
 
         if (!isOpen) {
             submit.disabled = false;
-            submit.textContent = 'Delete Permanently';
+            submit.textContent = uiText('delete_permanently');
             return;
         }
 
         submit.disabled = false;
-        submit.textContent = 'Delete Permanently';
+        submit.textContent = uiText('delete_permanently');
         const focusableElements = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
         if (focusableElements.length > 0) focusableElements[0].focus();
     };
@@ -1367,7 +1413,7 @@ function bindTrashDeleteModal() {
 
             chatIdInput.value = chatId;
             description.textContent = chatTitle
-                ? `Are you sure you want to permanently delete “${chatTitle}” and all associated data?`
+                ? uiText('delete_named_chat_confirm', { name: chatTitle })
                 : defaultDescription;
 
             setOpenState(true);
@@ -1409,30 +1455,13 @@ function bindTrashDeleteModal() {
 
     form.addEventListener('submit', () => {
         submit.disabled = true;
-        submit.textContent = 'Deleting...';
+        submit.textContent = uiText('deleting');
     });
-}
-
-function resolveTimezoneDisplayLabel(offsetLabel) {
-    const offset = String(offsetLabel || '').trim();
-    if (!offset) return 'UTC (UTC+0)';
-
-    const timezoneOption = Array.from(document.querySelectorAll('[data-timezone-option]')).find(
-        (option) => String(option.getAttribute('data-timezone-offset') || '') === offset
-    );
-    if (timezoneOption) {
-        const label = String(timezoneOption.getAttribute('data-timezone-label') || '').trim();
-        if (label) {
-            return label;
-        }
-    }
-
-    return `UTC (${offset})`;
 }
 
 function bindTimezoneCombobox() {
     const root = document.querySelector('[data-timezone-combobox]');
-    if (!root) return;
+    if (!root || root.dataset.bound === '1') return;
 
     const searchInput = document.getElementById('timezone-search-input');
     const hiddenInput = document.getElementById('timezone-hidden-input');
@@ -1441,6 +1470,7 @@ function bindTimezoneCombobox() {
     const emptyState = root.querySelector('[data-timezone-empty]');
     const options = Array.from(root.querySelectorAll('[data-timezone-option]'));
     if (!searchInput || !hiddenInput || !selectedLabel || !listbox || options.length === 0) return;
+    root.dataset.bound = '1';
 
     const normalize = (value) => String(value || '').toLowerCase().trim();
     let activeOptionId = '';
@@ -1525,11 +1555,15 @@ function bindTimezoneCombobox() {
         }
     };
 
+    const optionForOffset = (offset) => options.find((option) => option.getAttribute('data-timezone-offset') === offset);
     const currentOffset = String(hiddenInput.value || window.USER_TIMEZONE || 'UTC+0');
-    const currentOption = options.find((option) => String(option.getAttribute('data-timezone-offset') || '') === currentOffset) || options[0];
-    applySelection(currentOption);
+    applySelection(optionForOffset(currentOffset) || options[0]);
     searchInput.value = '';
     filterOptions();
+
+    root.addEventListener('causette:timezone-saved', (event) => {
+        applySelection(optionForOffset(event.detail));
+    });
 
     searchInput.addEventListener('focus', () => {
         setAriaExpanded(getVisibleOptions().length > 0);
@@ -1571,11 +1605,7 @@ function bindTimezoneCombobox() {
 
         if (event.key === 'Escape') {
             event.preventDefault();
-            const selectedOffset = String(hiddenInput.value || 'UTC+0');
-            const selectedOption = options.find((option) => String(option.getAttribute('data-timezone-offset') || '') === selectedOffset) || null;
-            if (selectedOption) {
-                applySelection(selectedOption);
-            }
+            applySelection(optionForOffset(hiddenInput.value || 'UTC+0'));
             searchInput.value = '';
             filterOptions();
             setAriaExpanded(false);
@@ -1632,9 +1662,10 @@ function bindTimezoneSuggestionModal() {
 
     const modal = document.getElementById('timezone-suggest-modal');
     const value = document.getElementById('timezone-suggest-value');
+    const status = document.getElementById('timezone-suggest-status');
     const accept = document.getElementById('timezone-suggest-accept');
     const decline = document.getElementById('timezone-suggest-decline');
-    if (!modal || !value || !accept || !decline) return;
+    if (!modal || !value || !status || !accept || !decline || modal.dataset.bound === '1') return;
 
     const guessedTimezone = detectBrowserTimezoneLabel();
     if (!guessedTimezone || guessedTimezone === 'UTC+0') return;
@@ -1648,51 +1679,54 @@ function bindTimezoneSuggestionModal() {
     } catch {
     }
 
-    value.textContent = resolveTimezoneDisplayLabel(guessedTimezone);
+    modal.dataset.bound = '1';
+    const previousFocus = document.activeElement;
+    value.textContent = guessedTimezone;
     modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    decline.focus();
 
     const closeModal = () => {
         modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        previousFocus?.focus();
     };
 
-    decline.addEventListener('click', () => {
-        closeModal();
-    });
+    decline.addEventListener('click', closeModal);
 
     accept.addEventListener('click', async () => {
         accept.disabled = true;
         decline.disabled = true;
+        status.textContent = uiText('saving_time_zone');
 
-        try {
-            const result = await postForm('/settings/timezone', {
-                csrf_token: getCsrfToken(),
-                timezone: guessedTimezone
-            });
+        const result = await postForm('/settings/timezone', {
+            csrf_token: getCsrfToken(),
+            timezone: guessedTimezone
+        }).catch(() => null);
 
-            if (result && result.success) {
-                const savedTimezone = String(result.timezone || guessedTimezone || 'UTC+0');
-                window.USER_TIMEZONE = savedTimezone;
-                showToast(`Time zone updated to ${resolveTimezoneDisplayLabel(savedTimezone)}.`, 'success');
-                closeModal();
-                return;
-            }
-
-            showToast(result?.error || 'Failed to update time zone.', 'error');
-        } catch {
-            showToast('Failed to update time zone.', 'error');
-        } finally {
-            accept.disabled = false;
-            decline.disabled = false;
+        accept.disabled = false;
+        decline.disabled = false;
+        if (result?.success !== true || result.timezone !== guessedTimezone) {
+            status.textContent = uiText('could_not_save_the_time_zone_please_try');
+            return;
         }
+
+        window.USER_TIMEZONE = result.timezone;
+        document.querySelector('[data-timezone-combobox]')?.dispatchEvent(
+            new CustomEvent('causette:timezone-saved', { detail: result.timezone })
+        );
+        closeModal();
+        refreshUtcTimestamps();
+        showToast(uiText('timezone_updated', { zone: result.timezone }), 'success');
     });
 
     modal.addEventListener('click', (event) => {
-        if (event.target !== modal) return;
+        if (event.target !== modal || accept.disabled) return;
         closeModal();
     });
 
     document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape') return;
+        if (event.key !== 'Escape' || accept.disabled) return;
         if (modal.classList.contains('hidden')) return;
         closeModal();
     });
@@ -1733,6 +1767,12 @@ function bindDashboardPostNavigation() {
     });
 }
 
+function syncMobileOverlayBackdrop() {
+    const backdrop = document.getElementById('mobile-overlay-backdrop');
+    const openOverlay = document.querySelector('#app-sidebar.mobile-open, #notification-history-panel.mobile-open');
+    backdrop?.classList.toggle('visible', window.innerWidth < 1024 && openOverlay !== null);
+}
+
 function bindSidebarToggle() {
     const sidebar = document.getElementById('app-sidebar');
     const toggleBtn = document.getElementById('sidebar-toggle-mobile');
@@ -1753,23 +1793,19 @@ function bindSidebarToggle() {
 
     const setSidebarOpen = (open) => {
         sidebar.classList.toggle('mobile-open', open);
-        backdrop.classList.toggle('visible', open);
+        syncMobileOverlayBackdrop();
     };
 
     toggleBtn.addEventListener('click', () => {
         if (!isMobileLayout()) return;
         const isOpen = sidebar.classList.contains('mobile-open');
-        // Close notification panel if open
-        const notifPanel = document.getElementById('notification-history-panel');
-        if (notifPanel) notifPanel.classList.remove('mobile-open');
+        window.collapseNotificationPanel?.();
         setSidebarOpen(!isOpen);
     });
 
     backdrop.addEventListener('click', () => {
         setSidebarOpen(false);
-        // Also close the notification panel if it's open on mobile
-        const notifPanel = document.getElementById('notification-history-panel');
-        if (notifPanel) notifPanel.classList.remove('mobile-open');
+        window.collapseNotificationPanel?.(true);
     });
 
     // Auto-close sidebar on mobile when a navigation link or chat item is clicked
@@ -1814,7 +1850,6 @@ window.toggleScreenShare = toggleScreenShare;
 window.startScreenShare = startScreenShare;
 window.closeScreenShareModal = closeScreenShareModal;
 window.endCall = endCall;
-window.logout = logout;
 
 let appInitStarted = false;
 
@@ -1834,6 +1869,71 @@ function bindDynamicViewportHeight() {
     window.visualViewport?.addEventListener('scroll', syncViewportHeight);
 }
 
+function bindAppActions() {
+    const actions = new Map(Object.entries({
+        'start-voice-call': () => startVoiceCall(),
+        'join-call': () => joinCall(),
+        'accept-call': () => acceptCall(),
+        'decline-call': () => declineCall(),
+        'end-call': () => endCall(),
+        'decline-incoming-call': () => declineIncomingCallWaiting(),
+        'switch-incoming-call': () => switchToIncomingCallWaiting(),
+        'toggle-call-participants': () => toggleCallParticipantsPanel(),
+        'open-call-settings': () => openCallSettingsModal(),
+        'close-call-settings': () => closeCallSettingsModal(),
+        'set-call-overlay': (data) => setCallOverlayMode(data.mode),
+        'toggle-pip': () => togglePipMode(),
+        'toggle-mute': () => toggleMute(),
+        'toggle-video': () => toggleVideoInCall(),
+        'toggle-screen-share': () => toggleScreenShare(),
+        'start-screen-share': (data) => startScreenShare(data.quality),
+        'close-screen-share': () => closeScreenShareModal(),
+        'clear-notifications': () => clearAllNotifications(),
+        'new-post': () => openNewPostModal(),
+        'create-group-chat': () => createGroupChat(),
+        'open-add-user': () => window.openAddUserModal?.(),
+        'approve-group-join': (data) => approveGroupJoinRequest(Number(data.userId)),
+        'deny-group-join': (data) => denyGroupJoinRequest(Number(data.userId)),
+        'poke-group-member': (data) => pokeGroupMember(Number(data.userId), data.username),
+        'demote-group-moderator': (data) => demoteGroupModerator(Number(data.userId), data.username),
+        'promote-group-moderator': (data) => promoteGroupModerator(Number(data.userId), data.username),
+        'unmute-group-member': (data) => unmuteGroupMember(Number(data.userId), data.username),
+        'mute-group-member': (data) => muteGroupMember(Number(data.userId), data.username),
+        'remove-group-member': (data) => removeGroupMember(Number(data.userId), data.username),
+        'toggle-favorite-user': (data) => toggleFavoriteUser(Number(data.userId), data.favorite === '1' ? 1 : 0),
+        'unfriend': (data) => openUnfriendModal(Number(data.userId)),
+        'accept-friend-request': (data) => acceptFriendRequest(Number(data.userId)),
+        'cancel-friend-request': (data) => cancelFriendRequest(Number(data.userId)),
+        'send-friend-request': (data) => sendFriendRequestByValue(data.userNumber),
+        'report-user': (data) => reportTarget('user', Number(data.userId)),
+        'toggle-admin-user-menu': (data) => toggleAdminUserMenu(Number(data.userId)),
+        'confirm-admin-user-role': (data) => confirmAdminUserRoleAction(Number(data.userId)),
+        'confirm-admin-user-ban': (data) => confirmAdminUserBanAction(Number(data.userId)),
+        'delete-admin-user': (data) => deleteAdminUser(Number(data.userId)),
+        'manage-api-key': (data) => window.manageKey?.(Number(data.keyId), data.keyName, data.keyChats, data.keyIps, data.keyType),
+        'expire-api-key': (data) => window.expireKey?.(Number(data.keyId), data.keyName),
+        'copy-api-key': () => window.copyNewKey?.(),
+        'reload-page': () => location.reload(),
+        'copy-recovery-codes': async (data, button) => {
+            const codes = Array.from(document.querySelectorAll('#recovery-codes-grid span'), (entry) => entry.textContent);
+            await navigator.clipboard.writeText(codes.join('\n'));
+            button.textContent = data.copiedLabel;
+            setTimeout(() => { button.textContent = data.copyLabel; }, 2000);
+        },
+    }));
+    document.addEventListener('click', (event) => {
+        const button = event.target instanceof Element && event.target.closest('button[data-app-action]');
+        if (!button || button.disabled) return;
+        actions.get(button.dataset.appAction)?.(button.dataset, button);
+    });
+    document.addEventListener('submit', (event) => {
+        const message = event.target.dataset?.confirmMessage;
+        if (message && !window.confirm(message)) {
+            event.preventDefault();
+        }
+    });
+}
+
 function startAppInitOnce() {
     if (appInitStarted) return;
     appInitStarted = true;
@@ -1848,6 +1948,9 @@ function startAppInitOnce() {
     }
     currentClientRenderedUrl = window.location.pathname + window.location.search + window.location.hash;
     bindClientNavigation();
+    bindAppActions();
+    bindNotificationHistory();
+    bindSidebarToggle();
     init().catch(() => {});
 }
 

@@ -1,0 +1,15 @@
+# Public identity and upstream references
+
+Use Causette for the product name in interface text, mail, notifications, the TOTP issuer and release materials. The README credits the upstream project. Preserve its attribution, license notices and the historical audit. User-authored content and existing records retain their original text.
+
+The source distribution test allows the following technical references to the upstream name.
+
+| Location | Reason |
+| --- | --- |
+| `README.md` | Upstream attribution and source link. |
+| `public_html/app/core/LegacySite.php` | Request-origin helper names used by existing executable configurations. |
+| `public_html/app/controllers/AdminUserController.php`, `public_html/app/models/User.php` | Reserved legacy username and synthetic email identifiers attached to retained messages from deleted accounts. Stable identifiers let the application recognise and reuse those records. |
+| `public_html/assets/js/app.js` | Internal navigation event names for existing browser scripts. |
+| `public_html/assets/js/call.js`, `public_html/assets/js/chat.js` | Saved device, volume, call and chat preferences in browsers. |
+
+Automatic update discovery is disabled until Causette has a trusted release feed. Existing administrators can still access database maintenance when the installed package requires it. The maintenance path requires separate security and browser acceptance testing.

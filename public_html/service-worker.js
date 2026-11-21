@@ -41,7 +41,7 @@ self.addEventListener('push', (event) => {
                     const firstUnread = notifications.find((item) => Number(item?.read) === 0) || notifications[0] || null;
                     if (firstUnread) {
                         title = String(firstUnread.title || title || 'New message').trim();
-                        body = String(firstUnread.message || body || 'You have a new notification in Prologue.').trim();
+                        body = String(firstUnread.message || body || 'You have a new notification in Causette.').trim();
                         link = String(firstUnread.link || link || '/').trim();
                         notificationType = String(firstUnread.type || notificationType || '').trim().toLowerCase();
                     }
@@ -55,7 +55,7 @@ self.addEventListener('push', (event) => {
             title = 'New message';
         }
         if (!body) {
-            body = 'You have a new notification in Prologue.';
+            body = 'You have a new notification in Causette.';
         }
         if (!link) {
             link = '/';

@@ -1,399 +1,159 @@
 <?php
 
-if (!function_exists('prologue_env_flag_enabled')) {
-    function prologue_env_flag_enabled(string $name, bool $default = false): bool {
-        $raw = getenv($name);
-        if ($raw === false) {
-            return $default;
+declare(strict_types=1);
+
+namespace Causette\Security;
+
+use InvalidArgumentException;
+
+final class RequestOrigin
+{
+    public readonly string $basePath;
+    public readonly string $url;
+    private readonly string $host;
+    private readonly int $port;
+    private readonly array $proxyRanges;
+
+    public function __construct(string $url, array $trustedProxies = [], string $legacyPath = '')
+    {
+        if (!preg_match('~\Ahttps://([^/?#]+)(/[^?#]*)?\z~i', $url, $parts)
+            || ($authority = self::authority($parts[1])) === null
+        ) {
+            throw new InvalidArgumentException('Configure an explicit canonical HTTPS URL.');
         }
 
-        $value = strtolower(trim((string)$raw));
-        if ($value === '') {
-            return $default;
-        }
-
-        return in_array($value, ['1', 'true', 'yes', 'on'], true);
-    }
-}
-
-if (!function_exists('prologue_parse_proxy_allowlist')) {
-    function prologue_parse_proxy_allowlist(): array {
-        $raw = trim((string)(getenv('APP_TRUSTED_PROXIES') ?: ''));
-        if ($raw === '') {
-            return [];
-        }
-
-        $items = preg_split('/\s*,\s*/', $raw) ?: [];
-        $allowlist = [];
-        foreach ($items as $item) {
-            $candidate = trim((string)$item);
-            if ($candidate !== '') {
-                $allowlist[] = $candidate;
+        [$this->host, $port] = $authority;
+        $this->port = $port ?? 443;
+        $path = rtrim($parts[2] ?? '', '/');
+        $legacyPath = trim($legacyPath, '/');
+        if ($legacyPath !== '') {
+            if ($path !== '' && $path !== '/' . $legacyPath) {
+                throw new InvalidArgumentException('The configured URL and application subdirectory differ.');
             }
+            $path = '/' . $legacyPath;
+        }
+        if (strlen($path) > 256 || ($path !== '' && (
+            !preg_match('~\A(?:/[A-Za-z0-9._\~-]+)+\z~', $path)
+            || preg_match('~/(?:\.|\.\.)(?:/|\z)~', $path)
+        ))) {
+            throw new InvalidArgumentException('The canonical application subdirectory is invalid.');
         }
 
-        return $allowlist;
+        $this->basePath = $path;
+        $this->url = 'https://' . $this->host . ($this->port === 443 ? '' : ':' . $this->port) . $path;
+        if (!array_is_list($trustedProxies) || count($trustedProxies) > 32) {
+            throw new InvalidArgumentException('Configure a list of up to 32 trusted proxy addresses or networks.');
+        }
+        $this->proxyRanges = array_map(self::proxyRange(...), $trustedProxies);
     }
-}
 
-if (!function_exists('prologue_ip_in_cidr')) {
-    function prologue_ip_in_cidr(string $ip, string $cidr): bool {
-        $cidr = trim($cidr);
-        if ($cidr === '') {
-            return false;
+    public static function requestPath(array $server): ?string
+    {
+        $path = explode('?', (string)($server['REQUEST_URI'] ?? '/'), 2)[0];
+        if (strlen($path) > 4096 || !str_starts_with($path, '/') || str_starts_with($path, '//')
+            || preg_match('/[\x00-\x20\x7f\\\\#]|%(?:2f|5c|0[0-9a-f]|1[0-9a-f]|7f)|%(?![0-9a-f]{2})/i', $path)
+            || preg_match('~/(?:\.|\.\.)(?:/|\z)~', rawurldecode($path))
+        ) {
+            return null;
         }
 
-        if (strpos($cidr, '/') === false) {
-            return $ip === $cidr;
-        }
-
-        [$subnet, $prefixLengthRaw] = explode('/', $cidr, 2);
-        $subnet = trim($subnet);
-        $prefixLength = (int)trim($prefixLengthRaw);
-
-        $ipPacked = @inet_pton($ip);
-        $subnetPacked = @inet_pton($subnet);
-        if ($ipPacked === false || $subnetPacked === false) {
-            return false;
-        }
-
-        $size = strlen($ipPacked);
-        if ($size !== strlen($subnetPacked)) {
-            return false;
-        }
-
-        $maxPrefix = $size * 8;
-        if ($prefixLength < 0 || $prefixLength > $maxPrefix) {
-            return false;
-        }
-
-        $fullBytes = intdiv($prefixLength, 8);
-        $remainingBits = $prefixLength % 8;
-
-        if ($fullBytes > 0 && substr($ipPacked, 0, $fullBytes) !== substr($subnetPacked, 0, $fullBytes)) {
-            return false;
-        }
-
-        if ($remainingBits === 0) {
-            return true;
-        }
-
-        $mask = (0xFF << (8 - $remainingBits)) & 0xFF;
-        $ipByte = ord($ipPacked[$fullBytes]);
-        $subnetByte = ord($subnetPacked[$fullBytes]);
-
-        return (($ipByte & $mask) === ($subnetByte & $mask));
+        return $path;
     }
-}
 
-if (!function_exists('prologue_request_is_from_trusted_proxy')) {
-    function prologue_request_is_from_trusted_proxy(): bool {
-        if (!prologue_env_flag_enabled('APP_TRUST_PROXY', false)) {
+    public function routePath(string $path): ?string
+    {
+        if ($this->basePath === '') {
+            return $path;
+        }
+        if ($path === $this->basePath) {
+            return '/';
+        }
+        return str_starts_with($path, $this->basePath . '/') ? substr($path, strlen($this->basePath)) : null;
+    }
+
+    public function urlFor(string $route): string
+    {
+        return $this->url . '/' . ltrim($route, '/');
+    }
+
+    public function acceptsHost(array $server, ?string $scheme): bool
+    {
+        $authority = self::authority((string)($server['HTTP_HOST'] ?? ''));
+        if ($authority === null || $authority[0] !== $this->host) {
             return false;
         }
 
-        $allowlist = prologue_parse_proxy_allowlist();
-        if (empty($allowlist)) {
-            return false;
+        $port = $authority[1];
+        return $scheme === 'https'
+            ? ($port ?? 443) === $this->port
+            : ($port === null || $port === 80 || $port === $this->port);
+    }
+
+    public function scheme(array $server): ?string
+    {
+        if ($this->isTrustedProxy((string)($server['REMOTE_ADDR'] ?? ''))) {
+            // The approved immediate peer must replace this header with one scheme.
+            $scheme = strtolower(trim((string)($server['HTTP_X_FORWARDED_PROTO'] ?? ''), " \t"));
+            return in_array($scheme, ['http', 'https'], true) ? $scheme : null;
         }
 
-        $remoteAddr = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-        if ($remoteAddr === '') {
-            return false;
+        return in_array(strtolower((string)($server['HTTPS'] ?? '')), ['on', '1'], true) ? 'https' : 'http';
+    }
+
+    private static function authority(string $authority): ?array
+    {
+        if (!preg_match('/\A(\[[a-f0-9:.]+\]|[a-z0-9.-]+)(?::([1-9][0-9]{0,4}))?\z/i', $authority, $parts)) {
+            return null;
         }
 
-        foreach ($allowlist as $entry) {
-            if (prologue_ip_in_cidr($remoteAddr, $entry)) {
+        $host = strtolower($parts[1]);
+        if ($host[0] === '[') {
+            $address = substr($host, 1, -1);
+            if (!filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                return null;
+            }
+            $host = '[' . inet_ntop(inet_pton($address)) . ']';
+        } elseif (str_ends_with($host, '.') || !filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            return null;
+        }
+
+        $port = isset($parts[2]) ? (int)$parts[2] : null;
+        return $port !== null && $port > 65535 ? null : [$host, $port];
+    }
+
+    private static function proxyRange(mixed $entry): array
+    {
+        $parts = is_string($entry) ? explode('/', $entry, 2) : [];
+        if (!filter_var($parts[0] ?? '', FILTER_VALIDATE_IP)) {
+            throw new InvalidArgumentException('A trusted proxy address is invalid.');
+        }
+
+        $address = inet_pton($parts[0]);
+        $maximum = strlen($address) * 8;
+        if (isset($parts[1]) && (!preg_match('/\A[1-9][0-9]{0,2}\z/', $parts[1]) || (int)$parts[1] > $maximum)) {
+            throw new InvalidArgumentException('A trusted proxy network prefix is invalid.');
+        }
+        return [$address, isset($parts[1]) ? (int)$parts[1] : $maximum];
+    }
+
+    private function isTrustedProxy(string $address): bool
+    {
+        if ($this->proxyRanges === [] || !filter_var($address, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        $packed = inet_pton($address);
+        foreach ($this->proxyRanges as [$network, $bits]) {
+            if (strlen($packed) !== strlen($network)) {
+                continue;
+            }
+            $bytes = intdiv($bits, 8);
+            $remaining = $bits % 8;
+            if (substr($packed, 0, $bytes) === substr($network, 0, $bytes)
+                && ($remaining === 0 || (ord($packed[$bytes]) >> (8 - $remaining)) === (ord($network[$bytes]) >> (8 - $remaining)))
+            ) {
                 return true;
             }
         }
-
         return false;
-    }
-}
-
-if (!function_exists('prologue_first_header_value')) {
-    function prologue_first_header_value(string $header): string {
-        $raw = trim((string)($_SERVER[$header] ?? ''));
-        if ($raw === '') {
-            return '';
-        }
-
-        $parts = explode(',', $raw);
-        return trim((string)($parts[0] ?? ''));
-    }
-}
-
-if (!function_exists('prologue_parse_forwarded_header')) {
-    function prologue_parse_forwarded_header(): array {
-        $raw = trim((string)($_SERVER['HTTP_FORWARDED'] ?? ''));
-        if ($raw === '') {
-            return ['proto' => '', 'host' => '', 'port' => 0];
-        }
-
-        $firstHop = trim((string)(explode(',', $raw)[0] ?? ''));
-        if ($firstHop === '') {
-            return ['proto' => '', 'host' => '', 'port' => 0];
-        }
-
-        $proto = '';
-        $host = '';
-        $port = 0;
-
-        $pairs = explode(';', $firstHop);
-        foreach ($pairs as $pair) {
-            $segments = explode('=', $pair, 2);
-            if (count($segments) !== 2) {
-                continue;
-            }
-
-            $key = strtolower(trim((string)$segments[0]));
-            $value = trim((string)$segments[1]);
-            if ($value !== '' && $value[0] === '"' && substr($value, -1) === '"') {
-                $value = substr($value, 1, -1);
-            }
-
-            if ($key === 'proto' && $proto === '') {
-                $proto = $value;
-            }
-            if ($key === 'host' && $host === '') {
-                $host = $value;
-            }
-        }
-
-        if ($host !== '') {
-            $hostParts = prologue_parse_authority($host);
-            $host = $hostParts['host'];
-            if ((int)$hostParts['port'] > 0) {
-                $port = (int)$hostParts['port'];
-            }
-        }
-
-        return ['proto' => $proto, 'host' => $host, 'port' => $port];
-    }
-}
-
-if (!function_exists('prologue_normalize_scheme')) {
-    function prologue_normalize_scheme(string $scheme): string {
-        $candidate = strtolower(trim($scheme));
-        if ($candidate === 'https') {
-            return 'https';
-        }
-        if ($candidate === 'http') {
-            return 'http';
-        }
-        return '';
-    }
-}
-
-if (!function_exists('prologue_parse_authority')) {
-    function prologue_parse_authority(string $authority): array {
-        $authority = trim($authority);
-        if ($authority === '') {
-            return ['host' => '', 'port' => 0];
-        }
-
-        if (strpos($authority, '://') !== false) {
-            $parsed = parse_url($authority);
-            if (is_array($parsed)) {
-                $host = trim((string)($parsed['host'] ?? ''));
-                $port = (int)($parsed['port'] ?? 0);
-                return [
-                    'host' => prologue_sanitize_host($host),
-                    'port' => prologue_sanitize_port($port),
-                ];
-            }
-        }
-
-        $host = $authority;
-        $port = 0;
-
-        if ($host !== '' && $host[0] === '[') {
-            $endPos = strpos($host, ']');
-            if ($endPos !== false) {
-                $ipv6 = substr($host, 1, $endPos - 1);
-                $remainder = substr($host, $endPos + 1);
-                if (strpos($remainder, ':') === 0) {
-                    $port = (int)substr($remainder, 1);
-                }
-                $host = $ipv6;
-            }
-        } else {
-            $colonCount = substr_count($host, ':');
-            if ($colonCount === 1) {
-                $segments = explode(':', $host, 2);
-                $host = trim((string)$segments[0]);
-                $port = (int)trim((string)($segments[1] ?? '0'));
-            }
-        }
-
-        return [
-            'host' => prologue_sanitize_host($host),
-            'port' => prologue_sanitize_port($port),
-        ];
-    }
-}
-
-if (!function_exists('prologue_sanitize_host')) {
-    function prologue_sanitize_host(string $host): string {
-        $host = strtolower(trim($host));
-        if ($host === '') {
-            return '';
-        }
-
-        if (strpos($host, '/') !== false || strpos($host, ' ') !== false) {
-            return '';
-        }
-
-        if (filter_var($host, FILTER_VALIDATE_IP)) {
-            return $host;
-        }
-
-        if ($host === 'localhost') {
-            return $host;
-        }
-
-        if (!preg_match('/^[a-z0-9.-]+$/', $host)) {
-            return '';
-        }
-
-        $labels = explode('.', $host);
-        foreach ($labels as $label) {
-            if ($label === '' || strlen($label) > 63) {
-                return '';
-            }
-            if ($label[0] === '-' || substr($label, -1) === '-') {
-                return '';
-            }
-        }
-
-        return $host;
-    }
-}
-
-if (!function_exists('prologue_sanitize_port')) {
-    function prologue_sanitize_port(int $port): int {
-        if ($port < 1 || $port > 65535) {
-            return 0;
-        }
-        return $port;
-    }
-}
-
-if (!function_exists('prologue_default_origin')) {
-    function prologue_default_origin(): array {
-        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-        if ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443) {
-            $https = true;
-        }
-
-        $scheme = $https ? 'https' : 'http';
-        $authority = trim((string)($_SERVER['HTTP_HOST'] ?? 'localhost:8088'));
-        $parsed = prologue_parse_authority($authority);
-
-        $host = $parsed['host'] !== '' ? $parsed['host'] : 'localhost';
-        $port = (int)$parsed['port'];
-
-        if ($port === 0) {
-            $serverPort = (int)($_SERVER['SERVER_PORT'] ?? 0);
-            if ($serverPort > 0) {
-                $port = $serverPort;
-            }
-        }
-
-        return [
-            'scheme' => $scheme,
-            'host' => $host,
-            'port' => $port,
-        ];
-    }
-}
-
-if (!function_exists('prologue_resolve_request_origin')) {
-    function prologue_resolve_request_origin(): array {
-        $origin = prologue_default_origin();
-
-        if (!prologue_request_is_from_trusted_proxy()) {
-            return $origin;
-        }
-
-        $forwarded = prologue_parse_forwarded_header();
-
-        $protoCandidate = prologue_first_header_value('HTTP_X_FORWARDED_PROTO');
-        if ($protoCandidate === '') {
-            $protoCandidate = (string)$forwarded['proto'];
-        }
-        $scheme = prologue_normalize_scheme($protoCandidate);
-        if ($scheme !== '') {
-            $origin['scheme'] = $scheme;
-        }
-
-        $hostCandidate = prologue_first_header_value('HTTP_X_FORWARDED_HOST');
-        if ($hostCandidate === '') {
-            $hostCandidate = (string)$forwarded['host'];
-        }
-        if ($hostCandidate !== '') {
-            $parsedHost = prologue_parse_authority($hostCandidate);
-            if ($parsedHost['host'] !== '') {
-                $origin['host'] = $parsedHost['host'];
-            }
-            if ((int)$parsedHost['port'] > 0) {
-                $origin['port'] = (int)$parsedHost['port'];
-            }
-        }
-
-        $portCandidate = prologue_first_header_value('HTTP_X_FORWARDED_PORT');
-        $port = prologue_sanitize_port((int)$portCandidate);
-        if ($port === 0 && (int)$forwarded['port'] > 0) {
-            $port = prologue_sanitize_port((int)$forwarded['port']);
-        }
-        if ($port > 0) {
-            $origin['port'] = $port;
-        }
-
-        return $origin;
-    }
-}
-
-if (!function_exists('prologue_is_https_request')) {
-    function prologue_is_https_request(): bool {
-        $origin = prologue_resolve_request_origin();
-        return $origin['scheme'] === 'https';
-    }
-}
-
-if (!function_exists('prologue_build_authority')) {
-    function prologue_build_authority(string $host, int $port = 0): string {
-        $authorityHost = $host;
-        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $authorityHost = '[' . $host . ']';
-        }
-
-        if ($port > 0) {
-            return $authorityHost . ':' . $port;
-        }
-
-        return $authorityHost;
-    }
-}
-
-if (!function_exists('prologue_origin_base_url')) {
-    function prologue_origin_base_url(array $origin, string $basePath = ''): string {
-        $scheme = ($origin['scheme'] ?? 'http') === 'https' ? 'https' : 'http';
-        $host = prologue_sanitize_host((string)($origin['host'] ?? ''));
-        if ($host === '') {
-            $host = 'localhost';
-        }
-
-        $port = prologue_sanitize_port((int)($origin['port'] ?? 0));
-        if (($scheme === 'https' && $port === 443) || ($scheme === 'http' && $port === 80)) {
-            $port = 0;
-        }
-
-        $authority = prologue_build_authority($host, $port);
-        $prefix = trim($basePath, " \t\n\r\0\x0B/");
-        $path = $prefix !== '' ? '/' . $prefix : '';
-
-        return rtrim($scheme . '://' . $authority . $path, '/');
     }
 }

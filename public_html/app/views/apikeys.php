@@ -1,4 +1,9 @@
 <?php
+$locale = \Causette\Localization\Locale::current();
+$tr = $locale->html(...);
+require_once __DIR__ . '/../core/HtmlJson.php';
+?>
+<?php
     $keyList = $keys ?? [];
     $chatList = $groupChats ?? [];
     $toastMessage = '';
@@ -6,7 +11,7 @@
 
     $flashSuccess = flash_get('success');
     if ($flashSuccess === 'key_expired') {
-        $toastMessage = 'API key expired successfully.';
+        $toastMessage = $locale->text('feedback.api_key_expired');
         $toastKind = 'success';
     }
 
@@ -19,29 +24,29 @@
 <div class="p-8 overflow-auto space-y-6">
 
     <div class="flex items-center justify-between flex-wrap gap-4">
-        <h1 class="text-3xl font-bold">API Keys</h1>
+        <h1 class="text-3xl font-bold"><?= $tr('ui.api_keys') ?></h1>
         <div class="flex gap-3">
             <a href="<?= htmlspecialchars(base_url('/apikeys/docs')) ?>"
                class="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition">
                 <i class="fa-solid fa-book"></i>
-                Documentation
+                <?= $tr('ui.documentation') ?>
             </a>
             <button type="button" data-modal-open="ak-create-modal"
                     class="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition">
                 <i class="fa-solid fa-plus"></i>
-                Create API Key
+                <?= $tr('ui.create_api_key') ?>
             </button>
         </div>
     </div>
 
     <p class="text-sm text-zinc-400">
-        API keys allow you to integrate your Prologue account with other applications and systems. Build something fun!
+        <?= $tr('ui.api_keys_allow_you_to_integrate') ?>
     </p>
 
     <?php if (empty($keyList)): ?>
         <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-8 text-center">
             <i class="fa-solid fa-key text-4xl text-zinc-600 mb-3"></i>
-            <p class="text-zinc-400">No API keys yet. Create one to get started.</p>
+            <p class="text-zinc-400"><?= $tr('ui.no_api_keys_yet_create_one') ?></p>
         </div>
     <?php else: ?>
         <div class="space-y-3" id="ak-key-list">
@@ -50,11 +55,11 @@
                 $isExpired = !$isActive;
                 $expiresAtLabel = '';
                 if ($key->expires_at === null && $isActive) {
-                    $expiresAtLabel = 'Never';
+                    $expiresAtLabel = \Causette\Localization\Locale::current()->text('ui.never');
                 } elseif ($key->expires_at !== null) {
-                    $expiresAtLabel = date('M j, Y g:i A', strtotime($key->expires_at));
+                    $expiresAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($key->expires_at);
                 }
-                $createdAtLabel = date('M j, Y g:i A', strtotime($key->created_at));
+                $createdAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp((string)$key->created_at);
                 $ipLabel = ($key->allowed_ips === null || $key->allowed_ips === '') ? 'Any' : $key->allowed_ips;
             ?>
                 <div class="rounded-2xl border <?= $isExpired ? 'border-zinc-800 opacity-60' : 'border-zinc-700' ?> bg-zinc-900 p-5">
@@ -80,26 +85,17 @@
                         </div>
                         <?php if ($isActive): ?>
                             <div class="flex gap-2 shrink-0">
-                                <?php if ($key->type === 'bot'): ?>
-                                    <button type="button"
-                                            onclick="viewApiKey(<?= (int)$key->id ?>)"
-                                            class="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 transition"
-                                            title="View API Key">
-                                        <i class="fa-solid fa-eye"></i>
-                                        View Key
-                                    </button>
-                                <?php endif; ?>
                                 <button type="button"
-                                        onclick="manageKey(<?= (int)$key->id ?>, '<?= htmlspecialchars(addslashes($key->name)) ?>', '<?= htmlspecialchars(addslashes($key->allowed_chats ?? '')) ?>', '<?= htmlspecialchars(addslashes($key->allowed_ips ?? '')) ?>', '<?= htmlspecialchars($key->type) ?>')"
+                                        data-app-action="manage-api-key" data-key-id="<?= (int)$key->id ?>" data-key-name="<?= htmlspecialchars($key->name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-chats="<?= htmlspecialchars($key->allowed_chats ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-ips="<?= htmlspecialchars($key->allowed_ips ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-key-type="<?= htmlspecialchars($key->type, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                                         class="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 transition">
                                     <i class="fa-solid fa-gear"></i>
-                                    Manage
+                                    <?= $tr('ui.manage') ?>
                                 </button>
                                 <button type="button"
-                                        onclick="expireKey(<?= (int)$key->id ?>, '<?= htmlspecialchars(addslashes($key->name)) ?>')"
+                                        data-app-action="expire-api-key" data-key-id="<?= (int)$key->id ?>" data-key-name="<?= htmlspecialchars($key->name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                                         class="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 hover:bg-red-500/20 transition">
                                     <i class="fa-solid fa-ban"></i>
-                                    Expire
+                                    <?= $tr('ui.expire') ?>
                                 </button>
                             </div>
                         <?php endif; ?>
@@ -117,7 +113,7 @@
     <div class="<?= $modalCenterClass ?>">
         <div class="<?= $modalBoxClass ?>" data-modal-box>
             <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold">Create API Key</h3>
+                <h3 class="text-xl font-semibold"><?= $tr('ui.create_api_key') ?></h3>
                 <button type="button" data-modal-close="ak-create-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
 
@@ -125,39 +121,39 @@
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
 
                 <div>
-                    <label class="block text-sm text-zinc-300 mb-1">Name</label>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.name') ?></label>
                     <input type="text" name="name" maxlength="100" required data-modal-autofocus
-                           placeholder="e.g. Fabulous Bot"
+                           placeholder="<?= $tr('ui.e_g_fabulous_bot') ?>"
                            class="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                 </div>
 
                 <div>
-                    <label class="block text-sm text-zinc-300 mb-2">Type</label>
+                    <label class="block text-sm text-zinc-300 mb-2"><?= $tr('ui.type') ?></label>
                     <div class="flex gap-3">
                         <label class="flex-1 cursor-pointer">
                             <input type="radio" name="type" value="bot" class="peer hidden" checked>
                             <div class="rounded-xl border border-zinc-700 bg-zinc-800 p-3 text-center peer-checked:border-emerald-500 peer-checked:bg-emerald-500/10 transition">
                                 <i class="fa-solid fa-robot text-lg text-blue-400 mb-1"></i>
-                                <div class="text-sm font-medium">Bot</div>
-                                <div class="text-xs text-zinc-400 mt-0.5">Send messages to specific chats</div>
+                                <div class="text-sm font-medium"><?= $tr('ui.bot') ?></div>
+                                <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.send_messages_to_specific_chats') ?></div>
                             </div>
                         </label>
-                        <label class="flex-1 cursor-not-allowed opacity-50" title="Coming soon">
+                        <label class="flex-1 cursor-not-allowed opacity-50" title="<?= $tr('ui.coming_soon') ?>">
                             <input type="radio" name="type" value="user" class="peer hidden" disabled>
                             <div class="rounded-xl border border-zinc-700 bg-zinc-800 p-3 text-center transition">
                                 <i class="fa-solid fa-user text-lg text-purple-400 mb-1"></i>
-                                <div class="text-sm font-medium">User</div>
-                                <div class="text-xs text-zinc-500 mt-0.5">Coming soon</div>
+                                <div class="text-sm font-medium"><?= $tr('ui.user') ?></div>
+                                <div class="text-xs text-zinc-500 mt-0.5"><?= $tr('ui.coming_soon') ?></div>
                             </div>
                         </label>
                     </div>
                 </div>
 
                 <div id="ak-chat-selector">
-                    <label class="block text-sm text-zinc-300 mb-1">Allowed Group Chats</label>
-                    <p class="text-xs text-zinc-400 mb-2">Select which group chats this bot can send messages to. Only chats you own are shown.</p>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.allowed_group_chats') ?></label>
+                    <p class="text-xs text-zinc-400 mb-2"><?= $tr('ui.select_which_group_chats_this_bot') ?></p>
                     <?php if (empty($chatList)): ?>
-                        <p class="text-sm text-zinc-500 italic">You don't own any group chats yet.</p>
+                        <p class="text-sm text-zinc-500 italic"><?= $tr('ui.you_don_t_own_any_group') ?></p>
                     <?php else: ?>
                         <div class="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-zinc-700 bg-zinc-800 p-3">
                             <?php foreach ($chatList as $gc): ?>
@@ -173,33 +169,33 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm text-zinc-300 mb-1">Expiry</label>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.expiry') ?></label>
                     <select name="expiry"
                             class="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                        <option value="never">Never</option>
-                        <option value="24h">24 Hours</option>
-                        <option value="7d">7 Days</option>
-                        <option value="30d" selected>30 Days</option>
-                        <option value="1y">1 Year</option>
+                        <option value="never"><?= $tr('ui.never') ?></option>
+                        <option value="24h"><?= $tr('ui.24_hours') ?></option>
+                        <option value="7d"><?= $tr('ui.7_days') ?></option>
+                        <option value="30d" selected><?= $tr('ui.30_days') ?></option>
+                        <option value="1y"><?= $tr('ui.1_year') ?></option>
                     </select>
                 </div>
 
                 <div>
-                    <label class="block text-sm text-zinc-300 mb-1">IP Restrictions <span class="text-zinc-500">(optional)</span></label>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.ip_restrictions') ?> <span class="text-zinc-500"><?= $tr('ui.optional') ?></span></label>
                     <input type="text" name="allowed_ips"
-                           placeholder="e.g. 192.168.1.1, 2001:db8::1"
+                           placeholder="<?= $tr('ui.e_g_192_168_1_1') ?>"
                            class="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <p class="text-xs text-zinc-400 mt-1">Comma-separated IPv4 or IPv6 addresses. Leave blank to allow any IP.</p>
+                    <p class="text-xs text-zinc-400 mt-1"><?= $tr('ui.comma_separated_ipv4_or_ipv6_addresses') ?></p>
                 </div>
 
                 <div class="flex gap-2 pt-2">
                     <button type="submit"
                             class="flex-1 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 transition">
-                        Create Key
+                        <?= $tr('ui.create_key') ?>
                     </button>
                     <button type="button" data-modal-close="ak-create-modal"
                             class="rounded-xl bg-zinc-700 px-6 py-2.5 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition">
-                        Cancel
+                        <?= $tr('ui.cancel') ?>
                     </button>
                 </div>
             </form>
@@ -213,21 +209,21 @@
     <div class="<?= $modalCenterClass ?>">
         <div class="<?= $modalBoxClass ?>" data-modal-box>
             <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold">API Key Created</h3>
+                <h3 class="text-xl font-semibold"><?= $tr('ui.api_key_created') ?></h3>
                 <button type="button" data-modal-close="ak-created-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
 
             <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 mb-4">
                 <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-                This key will only be shown once. Copy it now and store it securely.
+                <?= $tr('ui.this_key_will_only_be_shown') ?>
             </div>
 
             <div class="mb-4">
-                <label class="block text-sm text-zinc-300 mb-1">Your API Key</label>
+                <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.your_api_key') ?></label>
                 <div class="flex gap-2">
                     <input type="text" id="ak-new-key-display" readonly
                            class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 font-mono text-sm text-zinc-100 select-all focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <button type="button" id="ak-copy-btn" onclick="copyNewKey()"
+                    <button type="button" id="ak-copy-btn" data-app-action="copy-api-key"
                             class="shrink-0 rounded-xl bg-zinc-700 px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-600 transition">
                         <i class="fa-regular fa-copy"></i>
                     </button>
@@ -235,9 +231,9 @@
             </div>
 
             <div class="flex gap-2">
-                <button type="button" data-modal-close="ak-created-modal" onclick="location.reload()"
+                <button type="button" data-modal-close="ak-created-modal" data-app-action="reload-page"
                         class="flex-1 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 transition">
-                    Done
+                    <?= $tr('ui.done') ?>
                 </button>
             </div>
         </div>
@@ -250,7 +246,7 @@
     <div class="<?= $modalCenterClass ?>">
         <div class="<?= $modalBoxClass ?>" data-modal-box>
             <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold">Manage: <span id="ak-manage-key-name"></span></h3>
+                <h3 class="text-xl font-semibold"><?= $tr('ui.manage_2') ?> <span id="ak-manage-key-name"></span></h3>
                 <button type="button" data-modal-close="ak-manage-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
 
@@ -258,10 +254,10 @@
                 <input type="hidden" name="key_id" id="ak-manage-key-id" value="">
 
                 <div id="ak-manage-chat-selector">
-                    <label class="block text-sm text-zinc-300 mb-1">Allowed Group Chats</label>
-                    <p class="text-xs text-zinc-400 mb-2">Select which group chats this bot can send messages to.</p>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.allowed_group_chats') ?></label>
+                    <p class="text-xs text-zinc-400 mb-2"><?= $tr('ui.select_which_group_chats_this_bot_2') ?></p>
                     <?php if (empty($chatList)): ?>
-                        <p class="text-sm text-zinc-500 italic">You don't own any group chats yet.</p>
+                        <p class="text-sm text-zinc-500 italic"><?= $tr('ui.you_don_t_own_any_group') ?></p>
                     <?php else: ?>
                         <div class="max-h-48 overflow-y-auto space-y-1 rounded-xl border border-zinc-700 bg-zinc-800 p-3">
                             <?php foreach ($chatList as $gc): ?>
@@ -277,21 +273,21 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm text-zinc-300 mb-1">IP Restrictions <span class="text-zinc-500">(optional)</span></label>
+                    <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.ip_restrictions') ?> <span class="text-zinc-500"><?= $tr('ui.optional') ?></span></label>
                     <input type="text" name="allowed_ips" id="ak-manage-ips"
-                           placeholder="e.g. 192.168.1.1, 2001:db8::1"
+                           placeholder="<?= $tr('ui.e_g_192_168_1_1') ?>"
                            class="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <p class="text-xs text-zinc-400 mt-1">Comma-separated IPv4 or IPv6 addresses. Leave blank to allow any IP.</p>
+                    <p class="text-xs text-zinc-400 mt-1"><?= $tr('ui.comma_separated_ipv4_or_ipv6_addresses') ?></p>
                 </div>
 
                 <div class="flex gap-2 pt-2">
                     <button type="submit"
                             class="flex-1 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 transition">
-                        Save Changes
+                        <?= $tr('ui.save_changes') ?>
                     </button>
                     <button type="button" data-modal-close="ak-manage-modal"
                             class="rounded-xl bg-zinc-700 px-6 py-2.5 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition">
-                        Cancel
+                        <?= $tr('ui.cancel') ?>
                     </button>
                 </div>
             </form>
@@ -299,44 +295,6 @@
     </div>
 </div>
 
-<!-- View API Key Modal -->
-<div id="ak-view-key-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true">
-    <div class="<?= $modalBackdropClass ?>" data-modal-close="ak-view-key-modal"></div>
-    <div class="<?= $modalCenterClass ?>">
-        <div class="<?= $modalBoxClass ?>" data-modal-box>
-            <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold">API Key</h3>
-                <button type="button" data-modal-close="ak-view-key-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
-            </div>
-
-            <div id="ak-view-key-loading" class="text-center py-4">
-                <i class="fa-solid fa-spinner fa-spin text-zinc-400"></i>
-                <p class="text-sm text-zinc-400 mt-2">Loading...</p>
-            </div>
-
-            <div id="ak-view-key-content" class="hidden">
-                <div class="mb-4">
-                    <label class="block text-sm text-zinc-300 mb-1">Your API Key</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="ak-view-key-display" readonly
-                               class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 font-mono text-sm text-zinc-100 select-all focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                        <button type="button" id="ak-view-copy-btn" onclick="copyViewKey()"
-                                class="shrink-0 rounded-xl bg-zinc-700 px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-600 transition">
-                            <i class="fa-regular fa-copy"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="flex gap-2">
-                    <button type="button" data-modal-close="ak-view-key-modal"
-                            class="flex-1 rounded-xl bg-zinc-700 px-6 py-2.5 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition">
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
 
 <!-- Expire Confirmation Modal -->
 <div id="ak-expire-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true">
@@ -344,22 +302,22 @@
     <div class="<?= $modalCenterClass ?>">
         <div class="<?= $modalBoxClass ?>" data-modal-box>
             <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold">Expire API Key</h3>
+                <h3 class="text-xl font-semibold"><?= $tr('ui.expire_api_key') ?></h3>
                 <button type="button" data-modal-close="ak-expire-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
 
             <p class="text-sm text-zinc-300 mb-4">
-                Are you sure you want to expire <strong id="ak-expire-key-name"></strong>? This action cannot be undone. The key will no longer work for API requests.
+                <?= $tr('ui.are_you_sure_you_want_to_7') ?> <strong id="ak-expire-key-name"></strong><?= $tr('ui.this_action_cannot_be_undone_the') ?>
             </p>
 
             <div class="flex gap-2">
                 <button type="button" id="ak-expire-confirm-btn"
                         class="flex-1 rounded-xl bg-red-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-red-500 transition">
-                    Expire Key
+                    <?= $tr('ui.expire_key') ?>
                 </button>
                 <button type="button" data-modal-close="ak-expire-modal"
                         class="rounded-xl bg-zinc-700 px-6 py-2.5 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition">
-                    Cancel
+                    <?= $tr('ui.cancel') ?>
                 </button>
             </div>
         </div>
@@ -373,7 +331,7 @@
          class="hidden" aria-hidden="true"></div>
 <?php endif; ?>
 
-<script>
+<script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
 (function () {
     // ---- Generic modal open/close ----
     var openButtons = document.querySelectorAll('[data-modal-open]');
@@ -476,7 +434,7 @@
                 body.append('chat_ids[]', id);
             });
 
-            fetch(<?= json_encode(base_url('/apikeys/create')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/create')) ?>, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -520,7 +478,7 @@
         expireConfirmBtn.addEventListener('click', function () {
             if (pendingExpireKeyId <= 0) return;
 
-            postForm(<?= json_encode(base_url('/apikeys/expire')) ?>, {
+            postForm(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/expire')) ?>, {
                 csrf_token: getCsrfToken(),
                 key_id: String(pendingExpireKeyId)
             }).then(function (result) {
@@ -575,7 +533,7 @@
                 body.append('chat_ids[]', id);
             });
 
-            fetch(<?= json_encode(base_url('/apikeys/update')) ?>, {
+            fetch(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/update')) ?>, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -600,50 +558,6 @@
         });
     }
 
-    // ---- View key (bot only) ----
-    window.viewApiKey = function (keyId) {
-        var loading = document.getElementById('ak-view-key-loading');
-        var content = document.getElementById('ak-view-key-content');
-        var display = document.getElementById('ak-view-key-display');
-
-        if (loading) loading.classList.remove('hidden');
-        if (content) content.classList.add('hidden');
-        if (display) display.value = '';
-
-        openModal('ak-view-key-modal');
-
-        postForm(<?= json_encode(base_url('/apikeys/view-key')) ?>, {
-            csrf_token: getCsrfToken(),
-            key_id: String(keyId)
-        }).then(function (result) {
-            if (result.success) {
-                if (display) display.value = result.api_key;
-                if (loading) loading.classList.add('hidden');
-                if (content) content.classList.remove('hidden');
-            } else {
-                closeModal('ak-view-key-modal');
-                showToast(result.error || 'Failed to retrieve key', 'error');
-            }
-        }).catch(function () {
-            closeModal('ak-view-key-modal');
-            showToast('An error occurred', 'error');
-        });
-    };
-
-    window.copyViewKey = function () {
-        var keyDisplay = document.getElementById('ak-view-key-display');
-        var copyBtn = document.getElementById('ak-view-copy-btn');
-        if (!keyDisplay) return;
-
-        navigator.clipboard.writeText(keyDisplay.value).then(function () {
-            if (copyBtn) {
-                copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                setTimeout(function () {
-                    copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
-                }, 2000);
-            }
-        });
-    };
 
     // ---- Copy key ----
     window.copyNewKey = function () {

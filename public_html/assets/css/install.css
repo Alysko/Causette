@@ -1,0 +1,46 @@
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+}
+
+main {
+    width: min(100% - 2rem, 34rem);
+    margin: 3rem auto;
+}
+
+.language-links {
+    display: flex;
+    gap: 1rem;
+}
+
+.language-links [aria-current="true"] {
+    font-weight: 700;
+}
+
+[role="alert"] {
+    border: 1px solid currentColor;
+    border-radius: 0.4rem;
+    padding: 0.65rem 1rem;
+}
+
+[role="alert"] h2 {
+    font-size: 1rem;
+    margin-top: 0;
+}
+
+form {
+    display: grid;
+    gap: 0.65rem;
+}
+
+input,
+button {
+    box-sizing: border-box;
+    font: inherit;
+    padding: 0.65rem;
+}
+
+button {
+    justify-self: start;
+    margin-top: 0.5rem;
+}

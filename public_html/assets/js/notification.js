@@ -70,7 +70,7 @@ function syncToastHostPosition() {
     const host = document.getElementById('toast-host');
     if (!host) return;
 
-    if (isNotificationHistoryExpanded()) {
+    if (isNotificationHistoryExpanded() && window.innerWidth >= 1024) {
         host.style.right = 'calc(min(95vw, 24rem) + 1.25rem)';
         return;
     }
@@ -230,9 +230,9 @@ function appendTextWithOpenMojiNodes(container, value) {
 
         if (deleteChatPattern.test(matchedUrl)) {
             anchor.className = 'text-red-400 hover:text-red-300 hover:underline underline-offset-2';
-            anchor.textContent = 'Delete chat';
+            anchor.textContent = uiText('delete_chat');
         } else {
-            anchor.className = 'prologue-accent hover:text-emerald-300 hover:underline underline-offset-2';
+            anchor.className = 'causette-accent hover:text-emerald-300 hover:underline underline-offset-2';
             anchor.target = '_blank';
             anchor.rel = 'noopener noreferrer';
             anchor.textContent = matchedUrl;
@@ -321,7 +321,7 @@ function getBaseDocumentTitle() {
     if (baseDocumentTitle) return baseDocumentTitle;
 
     const currentTitle = String(document.title || '').trim();
-    baseDocumentTitle = currentTitle.replace(/^\(\d+\+?\)\s*/, '').trim() || 'Prologue';
+    baseDocumentTitle = currentTitle.replace(/^\(\d+\+?\)\s*/, '').trim() || 'Causette';
     return baseDocumentTitle;
 }
 
@@ -356,54 +356,9 @@ function updateFriendRequestBadges(count) {
     setCountBadgeState(document.getElementById('friends-requests-tab-badge'), count);
 }
 
-function updateMobileNotificationState() {
+function updateMobileNotificationBadge() {
     const mobileBadge = document.getElementById('notification-history-count-mobile');
-    const mobileButton = document.getElementById('notification-history-button-mobile');
-    const count = Math.max(unreadNotificationCount, toastHistory.length);
-
-    if (mobileBadge) {
-        setCountBadgeState(mobileBadge, count);
-    }
-    if (mobileButton) {
-        if (count > 0) {
-            mobileButton.disabled = false;
-            mobileButton.classList.remove('opacity-30', 'pointer-events-none');
-        } else {
-            mobileButton.disabled = true;
-            mobileButton.classList.add('opacity-30', 'pointer-events-none');
-        }
-    }
-}
-
-function syncNotificationPanelVisibility(hasNotifications) {
-    const panel = document.getElementById('notification-history-panel');
-    const mobileButton = document.getElementById('notification-history-button-mobile');
-    const hasAny = Boolean(hasNotifications);
-
-    if (panel) {
-        if (!hasAny) {
-            panel.classList.remove('mobile-open', 'w-96', 'max-w-[95vw]');
-            panel.classList.add('w-20');
-            panel.classList.remove('panel-visible');
-            panel.classList.add('panel-hidden');
-            panel.setAttribute('aria-hidden', 'true');
-        } else {
-            panel.classList.remove('panel-hidden');
-            panel.classList.add('panel-visible');
-            panel.setAttribute('aria-hidden', 'false');
-        }
-    }
-
-    if (mobileButton) {
-        mobileButton.classList.toggle('hidden', !hasAny);
-    }
-
-    if (!hasAny) {
-        const backdrop = document.getElementById('mobile-overlay-backdrop');
-        if (backdrop) {
-            backdrop.classList.remove('visible');
-        }
-    }
+    setCountBadgeState(mobileBadge, Math.max(unreadNotificationCount, toastHistory.length));
 }
 
 let webPushStatusCache = null;
@@ -682,7 +637,7 @@ function bindNotificationSettingsToggles() {
                 }
 
                 setNotificationSettingsStatus('Failed to save. Please try again.', 'error');
-                showToast(error.message || 'Unable to save notification setting', 'error');
+                showToast(uiActionError(error.message, 'unable_to_save_notification_setting'), 'error');
             } finally {
                 toggleNode.disabled = false;
             }
@@ -801,7 +756,7 @@ function bindNotificationSoundPreviewButtons() {
             activeAudio.currentTime = 0;
         }
         if (activeButton) {
-            activeButton.textContent = 'Preview';
+            activeButton.textContent = uiText('preview');
         }
         activeButton = null;
         activeAudio = null;
@@ -839,7 +794,7 @@ function bindNotificationSoundPreviewButtons() {
 
             activeButton = previewButton;
             activeAudio = audio;
-            previewButton.textContent = 'Pause';
+            previewButton.textContent = uiText('pause');
 
             audio.addEventListener('ended', function onEnded() {
                 audio.removeEventListener('ended', onEnded);
@@ -1037,7 +992,7 @@ function bindBrowserPermissionChecks() {
 
             const previousText = buttonNode.textContent;
             buttonNode.disabled = true;
-            buttonNode.textContent = 'Testing…';
+            buttonNode.textContent = uiText('testing');
 
             try {
                 await testBrowserPermission(type);
@@ -1045,7 +1000,7 @@ function bindBrowserPermissionChecks() {
                 const errorName = String(error?.name || '').trim();
                 const isDenied = errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError';
                 if (!isDenied) {
-                    showToast(error.message || 'Unable to test permission', 'error');
+                    showToast(uiActionError(error.message, 'unable_to_test_permission'), 'error');
                 }
             } finally {
                 await updateBrowserPermissionsStatuses().catch(() => {});
@@ -1083,7 +1038,7 @@ async function fetchNotifications() {
         return total + 1;
     }, 0);
     updateNotificationCountInTitle(unreadNotificationCount);
-    updateMobileNotificationState();
+    updateMobileNotificationBadge();
     const incomingFriendRequestCount = Number(data.incoming_friend_request_count);
     if (Number.isFinite(incomingFriendRequestCount) && incomingFriendRequestCount >= 0) {
         updateFriendRequestBadges(incomingFriendRequestCount);
@@ -1261,9 +1216,7 @@ function renderToastHistory() {
         }
     }
 
-    syncNotificationPanelVisibility(visibleToasts.length > 0);
-
-    updateMobileNotificationState();
+    updateMobileNotificationBadge();
 
     const clearBtn = document.getElementById('notification-clear-all-btn');
     if (clearBtn) {
@@ -1286,7 +1239,7 @@ function renderToastHistory() {
             ? Math.max(0, expiresAt - now)
             : 0;
         const expiryBorder = isTemporary
-            ? `<div class="absolute bottom-0 left-0 h-0.5 bg-zinc-500 origin-left" style="width:100%; animation: notification-expire-bar ${remainingMs}ms linear forwards;"></div>`
+            ? `<div class="absolute bottom-0 left-0 h-0.5 bg-zinc-500 origin-left" data-toast-expiry-ms="${remainingMs}"></div>`
             : '';
         const createdAt = String(toast.createdAt || '');
         return `
@@ -1296,7 +1249,11 @@ function renderToastHistory() {
                 ${expiryBorder}
             </div>
         `;
-    }).join('') || '<div class="px-4 py-3 text-zinc-400 text-sm">No notifications yet</div>';
+    }).join('') || `<div class="px-4 py-3 text-zinc-400 text-sm">${escapeHtml(uiText('no_notifications_yet'))}</div>`;
+
+    list.querySelectorAll('[data-toast-expiry-ms]').forEach((bar) => {
+        bar.style.animationDuration = `${bar.dataset.toastExpiryMs}ms`;
+    });
 
     const messageNodes = list.querySelectorAll('[data-toast-message-index]');
     messageNodes.forEach((node) => {
@@ -1342,8 +1299,8 @@ function getNotificationAction(toast) {
         return { href: meta.link };
     }
 
-    if (type === 'report' && title === 'update available' && String(meta.link).includes('github.com/michaelstaake/Prologue/releases')) {
-        return { href: meta.link, openInNewTab: true };
+    if (type === 'report' && title === 'update available') {
+        return null;
     }
 
     if (type === 'report' || title === 'new report') {
@@ -1395,7 +1352,7 @@ async function handleToastHistoryClick(event) {
         if (result.success) {
             unreadNotificationCount = Math.max(0, unreadNotificationCount - 1);
             updateNotificationCountInTitle(unreadNotificationCount);
-            updateMobileNotificationState();
+            updateMobileNotificationBadge();
         }
     }
 
@@ -1405,20 +1362,16 @@ async function handleToastHistoryClick(event) {
             window.collapseNotificationPanel();
         }
 
-        if (action.openInNewTab) {
-            window.open(action.href, '_blank', 'noopener,noreferrer');
-        } else {
-            const targetUrl = new URL(action.href, window.location.origin);
-            if (targetUrl.origin === window.location.origin && typeof window.navigateApp === 'function') {
-                window.navigateApp(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
-                    source: 'notification-click',
-                    updateHistory: true
-                }).catch(() => {
-                    window.location.href = action.href;
-                });
-            } else {
+        const targetUrl = new URL(action.href, window.location.origin);
+        if (targetUrl.origin === window.location.origin && typeof window.navigateApp === 'function') {
+            window.navigateApp(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
+                source: 'notification-click',
+                updateHistory: true
+            }).catch(() => {
                 window.location.href = action.href;
-            }
+            });
+        } else {
+            window.location.href = action.href;
         }
     }
 }
@@ -1430,144 +1383,78 @@ function bindNotificationHistory() {
     const list = document.getElementById('notification-history-list');
     const title = document.getElementById('notification-history-title');
     const header = document.getElementById('notification-history-header');
-    if (!button || !panel) return;
-    if (button.dataset.bound === '1') return;
-    button.dataset.bound = '1';
+    const clear = document.getElementById('notification-clear-all-btn');
+    if (!button || !mobileButton || !panel || !list || !title || !header || !clear) return;
 
-    const isMobileLayout = () => window.innerWidth < 1024;
+    const mobileLayout = window.matchMedia('(max-width: 1023px)');
+    const sidebar = document.getElementById('app-sidebar');
+    let pendingSave = null;
+    let saving = false;
 
-    const setExpanded = (expanded) => {
-        const hasNotifications = toastHistory.length > 0;
+    const applyExpandedState = () => {
+        const expanded = isNotificationHistoryExpanded();
+        const mobileOpen = mobileLayout.matches && expanded;
+        panel.classList.toggle('mobile-open', mobileOpen);
+        panel.classList.toggle('w-20', !expanded);
+        panel.classList.toggle('w-96', expanded);
+        panel.classList.toggle('max-w-[95vw]', expanded);
+        list.classList.toggle('hidden', !expanded);
+        title.classList.toggle('hidden', !expanded);
+        clear.classList.toggle('hidden', !expanded || toastHistory.length === 0);
+        header.classList.toggle('justify-center', !expanded);
+        header.classList.toggle('justify-between', expanded);
+        button.setAttribute('aria-expanded', String(expanded));
+        mobileButton.setAttribute('aria-expanded', String(expanded));
 
-        if (!hasNotifications) {
-            syncNotificationPanelVisibility(false);
-            expanded = false;
-        } else {
-            syncNotificationPanelVisibility(true);
-        }
-
-        if (isMobileLayout()) {
-            panel.classList.toggle('mobile-open', expanded);
-            // Close sidebar if open, then show/hide shared backdrop
-            const sidebar = document.getElementById('app-sidebar');
-            if (sidebar) sidebar.classList.remove('mobile-open');
-            const backdrop = document.getElementById('mobile-overlay-backdrop');
-            if (backdrop) backdrop.classList.toggle('visible', expanded);
-        } else {
-            panel.classList.toggle('w-20', !expanded);
-            panel.classList.toggle('w-96', expanded);
-            panel.classList.toggle('max-w-[95vw]', expanded);
-        }
-        if (list) {
-            list.classList.toggle('hidden', !expanded);
-        }
-        if (title) {
-            title.classList.toggle('hidden', !expanded);
-        }
-        const clearBtn = document.getElementById('notification-clear-all-btn');
-        if (clearBtn) {
-            clearBtn.classList.toggle('hidden', !expanded || toastHistory.length === 0);
-        }
-        if (header) {
-            header.classList.toggle('justify-center', !expanded);
-            header.classList.toggle('justify-between', expanded);
-        }
-
-        const iconPreview = document.getElementById('notification-icon-preview');
-        if (iconPreview) {
-            iconPreview.classList.toggle('hidden', expanded || isMobileLayout());
-        }
-
+        if (mobileOpen) sidebar?.classList.remove('mobile-open');
+        syncMobileOverlayBackdrop();
         syncToastHostPosition();
+        renderNotificationIconPreview();
     };
 
-    let expanded = Boolean(window.NOTIFICATION_SIDEBAR_EXPANDED);
-    if (toastHistory.length === 0 || isMobileLayout()) {
-        expanded = false;
-    }
-    window.NOTIFICATION_SIDEBAR_EXPANDED = expanded;
-    setExpanded(expanded);
-
-    const handleToggle = () => {
-        if (toastHistory.length === 0) {
-            return;
+    const saveExpandedState = async (expanded) => {
+        pendingSave = expanded;
+        if (saving) return;
+        saving = true;
+        // Keep at most one write in flight so quick toggles persist in the right order.
+        while (pendingSave !== null) {
+            const value = pendingSave;
+            pendingSave = null;
+            await postForm('/api/notifications/sidebar-state', {
+                csrf_token: getCsrfToken(),
+                expanded: value ? '1' : '0'
+            }).catch(() => {});
         }
+        saving = false;
+    };
 
-        expanded = !expanded;
-        setExpanded(expanded);
+    const setExpanded = (expanded, restoreFocus = false) => {
+        if (expanded === isNotificationHistoryExpanded()) return;
         window.NOTIFICATION_SIDEBAR_EXPANDED = expanded;
-
+        applyExpandedState();
         if (expanded) {
             dismissVisibleNotificationToasts();
+            if (mobileLayout.matches) button.focus();
+        } else if (restoreFocus) {
+            (mobileLayout.matches ? mobileButton : button).focus();
         }
-
-        postForm('/api/notifications/sidebar-state', {
-            csrf_token: getCsrfToken(),
-            expanded: expanded ? '1' : '0'
-        }).catch(() => {});
+        saveExpandedState(expanded);
     };
 
-    button.addEventListener('click', handleToggle);
-
-    if (mobileButton) {
-        mobileButton.addEventListener('click', handleToggle);
-    }
-
-    document.addEventListener('click', (event) => {
-        if (!expanded || toastHistory.length > 0) return;
-
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-
-        if (panel.contains(target)) return;
-        if (button.contains(target)) return;
-        if (mobileButton && mobileButton.contains(target)) return;
-
-        if (typeof window.collapseNotificationPanel === 'function') {
-            window.collapseNotificationPanel();
-        }
+    const toggle = () => setExpanded(!isNotificationHistoryExpanded(), true);
+    button.addEventListener('click', toggle);
+    mobileButton.addEventListener('click', toggle);
+    list.addEventListener('click', handleToastHistoryClick);
+    panel.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !isNotificationHistoryExpanded()) return;
+        event.preventDefault();
+        setExpanded(false, true);
     });
+    window.collapseNotificationPanel = (restoreFocus = false) => setExpanded(false, restoreFocus);
+    mobileLayout.addEventListener('change', applyExpandedState);
 
-    if (list) {
-        list.addEventListener('click', (event) => {
-            handleToastHistoryClick(event);
-        });
-    }
-
-    window.collapseNotificationPanel = () => {
-        if (!expanded) return;
-        expanded = false;
-        window.NOTIFICATION_SIDEBAR_EXPANDED = false;
-        setExpanded(false);
-        postForm('/api/notifications/sidebar-state', {
-            csrf_token: getCsrfToken(),
-            expanded: '0'
-        }).catch(() => {});
-    };
-
-    // Reset panel state when crossing the mobile/desktop breakpoint
-    let wasMobile = isMobileLayout();
-    window.addEventListener('resize', () => {
-        const nowMobile = isMobileLayout();
-        if (wasMobile === nowMobile) return;
-        wasMobile = nowMobile;
-
-        // Clean up mobile-specific state
-        panel.classList.remove('mobile-open');
-        const backdrop = document.getElementById('mobile-overlay-backdrop');
-        if (backdrop) backdrop.classList.remove('visible');
-
-        // Clean up desktop-specific width classes
-        panel.classList.remove('w-96', 'max-w-[95vw]');
-        panel.classList.add('w-20');
-
-        // Reset to collapsed state
-        expanded = false;
-        window.NOTIFICATION_SIDEBAR_EXPANDED = false;
-        setExpanded(false);
-    });
-
-    syncNotificationPanelVisibility(toastHistory.length > 0);
+    applyExpandedState();
+    renderToastHistory();
 }
 
 function shouldSuppressNotificationToast(notification) {
@@ -1645,21 +1532,6 @@ async function clearCurrentChatMessageNotifications() {
 }
 
 
-function setTwofaSettingsStatus(text, kind) {
-    var statusEl = document.getElementById('twofa-settings-status');
-    if (!statusEl) return;
-
-    var kindClassMap = {
-        info: 'text-zinc-500',
-        success: 'text-emerald-400',
-        error: 'text-red-400'
-    };
-
-    statusEl.classList.remove('text-zinc-500', 'text-emerald-400', 'text-red-400');
-    statusEl.classList.add(kindClassMap[kind] || kindClassMap.info);
-    statusEl.textContent = text;
-}
-
 async function clearAllNotifications() {
     const btn = document.getElementById('notification-clear-all-btn');
     if (btn) btn.disabled = true;
@@ -1669,7 +1541,7 @@ async function clearAllNotifications() {
             csrf_token: getCsrfToken()
         });
     } catch (e) {
-        showToast('Failed to clear notifications', 'error');
+        showToast(uiText('failed_to_clear_notifications'), 'error');
         if (btn) btn.disabled = false;
         return;
     }
@@ -1686,37 +1558,3 @@ async function clearAllNotifications() {
 }
 
 window.initWebPushNotifications = initWebPushNotifications;
-
-function bindTwofaFrequencyRadios() {
-    const radios = Array.from(document.querySelectorAll('[data-twofa-frequency]'));
-    if (radios.length === 0) return;
-
-    radios.forEach((radio) => {
-        radio.addEventListener('change', async () => {
-            const frequency = radio.value;
-            radios.forEach((r) => { r.disabled = true; });
-            setTwofaSettingsStatus('Saving…', 'info');
-
-            try {
-                const result = await postForm('/settings/2fa/frequency', {
-                    csrf_token: getCsrfToken(),
-                    frequency
-                });
-
-                if (!result.success) {
-                    throw new Error(result.error || 'Unable to save 2FA frequency');
-                }
-
-                setTwofaSettingsStatus('Saved', 'success');
-            } catch (error) {
-                const previous = frequency === 'always' ? 'trusted' : 'always';
-                const previousRadio = radios.find((r) => r.value === previous);
-                if (previousRadio) previousRadio.checked = true;
-                setTwofaSettingsStatus('Failed to save', 'error');
-                showToast(error.message || 'Unable to save 2FA frequency', 'error');
-            } finally {
-                radios.forEach((r) => { r.disabled = false; });
-            }
-        });
-    });
-}

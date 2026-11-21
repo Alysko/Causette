@@ -1,3 +1,7 @@
+<?php
+$locale = \Causette\Localization\Locale::current();
+$tr = $locale->html(...);
+?>
 <div class="p-8 overflow-auto">
     <?php $inviteReferralPromptData = is_array($inviteReferralPrompt ?? null) ? $inviteReferralPrompt : null; ?>
 
@@ -14,10 +18,10 @@
             <div class="h-full w-full flex items-center justify-center">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="invite-referral-modal-title">
                     <h2 id="invite-referral-modal-title" class="text-lg font-semibold text-zinc-100">You were referred by <?= htmlspecialchars((string)$inviteReferralPromptData['username'], ENT_QUOTES, 'UTF-8') ?></h2>
-                    <p class="mt-2 text-sm text-zinc-400">Would you like to send them a friend request now?</p>
+                    <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.would_you_like_to_send_them') ?></p>
                     <div class="mt-5 flex items-center justify-end gap-3">
-                        <button type="button" id="invite-referral-modal-skip" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200">Not now</button>
-                        <button type="button" id="invite-referral-modal-send" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white">Send Request</button>
+                        <button type="button" id="invite-referral-modal-skip" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.not_now') ?></button>
+                        <button type="button" id="invite-referral-modal-send" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white"><?= $tr('ui.send_request') ?></button>
                     </div>
                 </div>
             </div>
@@ -25,15 +29,15 @@
     <?php endif; ?>
 
     <div class="mb-6 flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
-        <h1 class="text-3xl font-bold">Dashboard</h1>
+        <h1 class="text-3xl font-bold"><?= $tr('ui.dashboard') ?></h1>
         <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <a href="<?= htmlspecialchars(base_url('/search'), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition">
                 <i class="fa fa-magnifying-glass text-xs"></i>
-                Search
+                <?= $tr('ui.search') ?>
             </a>
             <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition">
                     <i class="fa-solid fa-cog text-xs"></i>
-                    Settings
+                    <?= $tr('ui.settings') ?>
                 </a>
         </div>
     </div>
@@ -68,18 +72,18 @@
     ?>
     <?php if ($dashboardAnnouncement !== ''): ?>
         <div class="mb-6 rounded-xl border px-5 py-4 <?= htmlspecialchars($announcementClasses['container'], ENT_QUOTES, 'UTF-8') ?>">
-            <p class="text-sm font-semibold mb-1 <?= htmlspecialchars($announcementClasses['heading'], ENT_QUOTES, 'UTF-8') ?>">Announcement</p>
+            <p class="text-sm font-semibold mb-1 <?= htmlspecialchars($announcementClasses['heading'], ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.announcement') ?></p>
             <p class="text-sm whitespace-pre-wrap break-words <?= htmlspecialchars($announcementClasses['body'], ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($dashboardAnnouncement, ENT_QUOTES, 'UTF-8') ?></p>
             <?php if (strtolower((string)(Auth::user()->role ?? '')) === 'admin'): ?>
                 <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="mt-3 inline-flex items-center gap-2 text-xs transition <?= htmlspecialchars($announcementClasses['link'], ENT_QUOTES, 'UTF-8') ?>">
-                    Manage Announcement <i class="fa fa-arrow-right text-[10px]"></i>
+                    <?= $tr('ui.manage_announcement') ?> <i class="fa fa-arrow-right text-[10px]"></i>
                 </a>
             <?php endif; ?>
         </div>
     <?php endif; ?>
 
     <section class="mb-8">
-    <h2 class="text-xl font-semibold text-zinc-300 mb-4">Friends</h2>
+    <h2 class="text-xl font-semibold text-zinc-300 mb-4"><?= $tr('ui.friends') ?></h2>
 
     <?php
         $toastMessage = '';
@@ -87,11 +91,11 @@
         $flashError = flash_get('error');
         $flashSuccess = flash_get('success');
         if ($flashError === 'invalid_chat') {
-            $toastMessage = 'That chat was not found.';
+            $toastMessage = $locale->text('feedback.chat_not_found');
         } elseif ($flashError === 'user_not_found') {
-            $toastMessage = 'That user was not found.';
+            $toastMessage = $locale->text('feedback.user_not_found');
         } elseif ($flashSuccess === 'update_complete') {
-            $toastMessage = 'Database updated successfully.';
+            $toastMessage = $locale->text('feedback.update_complete');
             $toastKind = 'success';
         }
     ?>
@@ -112,12 +116,12 @@
     ?>
 
     <div class="flex flex-wrap items-center gap-3 mb-4">
-        <a href="<?= htmlspecialchars(base_url('/?tab=all'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'all'), ENT_QUOTES, 'UTF-8') ?>">All</a>
-        <a href="<?= htmlspecialchars(base_url('/?tab=favorites'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'favorites'), ENT_QUOTES, 'UTF-8') ?>">Favorites</a>
-        <a href="<?= htmlspecialchars(base_url('/?tab=online'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'online'), ENT_QUOTES, 'UTF-8') ?>">Online</a>
+        <a href="<?= htmlspecialchars(base_url('/?tab=all'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'all'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.all') ?></a>
+        <a href="<?= htmlspecialchars(base_url('/?tab=favorites'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'favorites'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.favorites') ?></a>
+        <a href="<?= htmlspecialchars(base_url('/?tab=online'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'online'), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.online') ?></a>
         <a href="<?= htmlspecialchars(base_url('/?tab=requests'), ENT_QUOTES, 'UTF-8') ?>" class="px-5 py-2.5 rounded-xl border transition <?= htmlspecialchars($tabClass($tab === 'requests'), ENT_QUOTES, 'UTF-8') ?>">
             <span class="inline-flex items-center gap-2">
-                <span>Requests</span>
+                <span><?= $tr('ui.requests') ?></span>
                 <span
                     id="friends-requests-tab-badge"
                     class="min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs inline-flex items-center justify-center <?= $incomingRequestCount > 0 ? '' : 'hidden' ?>"
@@ -134,7 +138,7 @@
                 $hasRequests = !empty($incomingRequests) || !empty($outgoingRequests);
             ?>
             <?php if (!$hasRequests): ?>
-                <p class="text-zinc-400 text-sm">No pending requests.</p>
+                <p class="text-zinc-400 text-sm"><?= $tr('ui.no_pending_requests') ?></p>
             <?php else: ?>
                         <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                     <?php foreach ($incomingRequests as $request): ?>
@@ -151,10 +155,10 @@
                                     <?php endif; ?>
                                     <div class="min-w-0">
                                         <div class="font-medium truncate"><?= htmlspecialchars($request->username, ENT_QUOTES, 'UTF-8') ?></div>
-                                        <div class="text-[11px] text-emerald-400 mt-0.5">Incoming request</div>
+                                        <div class="text-[11px] text-emerald-400 mt-0.5"><?= $tr('ui.incoming_request') ?></div>
                                     </div>
                                 </div>
-                                <button class="bg-emerald-600 hover:bg-emerald-500 text-sm px-3 py-1.5 rounded-lg" onclick="acceptFriendRequest(<?= (int)$request->requester_id ?>)">Accept</button>
+                                <button class="bg-emerald-600 hover:bg-emerald-500 text-sm px-3 py-1.5 rounded-lg" data-app-action="accept-friend-request" data-user-id="<?= (int)$request->requester_id ?>"><?= $tr('ui.accept') ?></button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -173,10 +177,10 @@
                                     <?php endif; ?>
                                     <div class="min-w-0">
                                         <div class="font-medium truncate"><?= htmlspecialchars($request->username, ENT_QUOTES, 'UTF-8') ?></div>
-                                        <div class="text-[11px] text-zinc-400 mt-0.5">Outgoing request</div>
+                                        <div class="text-[11px] text-zinc-400 mt-0.5"><?= $tr('ui.outgoing_request') ?></div>
                                     </div>
                                 </div>
-                                <button class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" onclick="cancelFriendRequest(<?= (int)($request->target_user_id ?? 0) ?>)">Cancel</button>
+                                <button class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" data-app-action="cancel-friend-request" data-user-id="<?= (int)($request->target_user_id ?? 0) ?>"><?= $tr('ui.cancel') ?></button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -187,7 +191,7 @@
         <section>
                     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 <?php if (empty($friendList)): ?>
-                    <p class="text-zinc-400 text-sm">No friends in this list.</p>
+                    <p class="text-zinc-400 text-sm"><?= $tr('ui.no_friends_in_this_list') ?></p>
                 <?php else: ?>
                     <?php foreach ($friendList as $friend): ?>
                         <?php $friendAvatar = User::avatarUrl($friend); ?>
@@ -204,7 +208,7 @@
                                     <div class="font-medium truncate flex items-center gap-2">
                                         <span class="truncate"><?= htmlspecialchars($friend->username, ENT_QUOTES, 'UTF-8') ?></span>
                                         <?php if ((int)($friend->is_favorite ?? 0) === 1): ?>
-                                            <i class="fa-solid fa-star text-amber-400 text-[10px]" title="Favorite"></i>
+                                            <i class="fa-solid fa-star text-amber-400 text-[10px]" title="<?= $tr('ui.favorite') ?>"></i>
                                         <?php endif; ?>
                                     </div>
                                     <div class="text-xs <?= htmlspecialchars($friend->effective_status_text_class ?? 'text-zinc-500', ENT_QUOTES, 'UTF-8') ?> mt-0.5">
@@ -224,7 +228,7 @@
     <div class="min-w-8">
 
     <section class="mb-6">
-        <h2 class="text-xl font-semibold text-zinc-300 mb-3">Groups</h2>
+        <h2 class="text-xl font-semibold text-zinc-300 mb-3"><?= $tr('ui.groups') ?></h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <?php if (!empty($lastGroupChat)): ?>
                 <a href="<?= htmlspecialchars(base_url('/c/' . User::formatUserNumber((string)$lastGroupChat->chat_number)), ENT_QUOTES, 'UTF-8') ?>" class="block bg-zinc-800 rounded-xl p-3 hover:bg-zinc-700 transition">
@@ -234,19 +238,19 @@
                         </div>
                         <div class="min-w-0">
                             <div class="font-medium truncate"><?= htmlspecialchars((string)$lastGroupChat->chat_title, ENT_QUOTES, 'UTF-8') ?></div>
-                            <p class="text-xs text-zinc-400 mt-1">Your most recently active group</p>
+                            <p class="text-xs text-zinc-400 mt-1"><?= $tr('ui.your_most_recently_active_group') ?></p>
                         </div>
                     </div>
                 </a>
             <?php endif; ?>
 
-            <button type="button" onclick="createGroupChat()" class="w-full bg-zinc-800 hover:bg-zinc-700 rounded-xl p-3 flex items-center gap-3 transition">
+            <button type="button" data-app-action="create-group-chat" class="w-full bg-zinc-800 hover:bg-zinc-700 rounded-xl p-3 flex items-center gap-3 transition">
                 <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center bg-zinc-900 text-zinc-300">
                     <i class="fa fa-user-group text-sm"></i>
                 </div>
                 <div class="min-w-0 text-left">
-                    <span class="font-medium block">New Group</span>
-                    <p class="text-xs text-zinc-400 mt-1">Make something awesome</p>
+                    <span class="font-medium block"><?= $tr('ui.new_group') ?></span>
+                    <p class="text-xs text-zinc-400 mt-1"><?= $tr('ui.make_something_awesome') ?></p>
                 </div>
             </button>
         </div>
@@ -255,14 +259,14 @@
     <?php if (($invitesEnabled ?? false) === true): ?>
         <?php $inviteProfileUrl = base_url('/u/' . User::formatUserNumber((string)Auth::user()->user_number)); ?>
         <section class="mt-8">
-            <h2 class="text-xl font-semibold text-zinc-300 mb-2">Invites</h2>
+            <h2 class="text-xl font-semibold text-zinc-300 mb-2"><?= $tr('ui.invites') ?></h2>
             <p class="text-zinc-400 text-sm mb-4 leading-relaxed">
-                Invite your friends, family, or teammates to join you on this Prologue Server. Each user will need an invite code to create an account. If they don't receive the verification email after creating an account using the invite code you provided them, remind them to check their spam folder.
+                <?= $tr('ui.invite_your_friends_family_or_teammates') ?>
             </p>
 
             <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>"
             class="inline-flex items-center gap-2 text-sm text-emerald-400 hover:text-emerald-300 transition">
-                Manage Invites <i class="fa fa-arrow-right text-xs"></i>
+                <?= $tr('ui.manage_invites') ?> <i class="fa fa-arrow-right text-xs"></i>
             </a>
         </section>
     <?php endif; ?>
@@ -272,10 +276,10 @@
 
     <section class="mt-0">
         <div class="flex items-center justify-between gap-3 mb-4">
-            <h2 class="text-xl font-semibold text-zinc-300">Posts</h2>
+            <h2 class="text-xl font-semibold text-zinc-300"><?= $tr('ui.posts') ?></h2>
             <div class="flex items-center gap-3">
-                <button type="button" onclick="openNewPostModal()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
-                    <i class="fa fa-plus text-xs"></i> New Post
+                <button type="button" data-app-action="new-post" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
+                    <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
                 </button>
             </div>
         </div>
@@ -286,7 +290,7 @@
             $dashboardCurrentUserId = (int)($dashboardCurrentUser->id ?? 0);
         ?>
         <?php if (empty($recentPosts)): ?>
-            <p class="text-zinc-400 text-sm">No posts from friends yet.</p>
+            <p class="text-zinc-400 text-sm"><?= $tr('ui.no_posts_from_friends_yet') ?></p>
         <?php else: ?>
             <div class="space-y-3">
                 <?php foreach ($recentPosts as $post): ?>
@@ -303,8 +307,8 @@
                         $postAuthorNumber = (string)($post->user_number ?? '');
                         $postAuthorUrl = base_url('/u/' . User::formatUserNumber($postAuthorNumber));
                         $postCreatedAtRaw = trim((string)($post->created_at ?? ''));
-                        $postCreatedAtTs = $postCreatedAtRaw !== '' ? strtotime($postCreatedAtRaw) : false;
-                        $postCreatedAtLabel = $postCreatedAtTs !== false ? date('M j, Y H:i', $postCreatedAtTs) : 'Unknown';
+                        $postCreatedAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($postCreatedAtRaw)
+                            ?: \Causette\Localization\Locale::current()->text('ui.unknown_date');
                         $postDestinationUrl = base_url('/posts?post=' . $postId);
                         $postAvatar = User::avatarUrl($post);
                     ?>
@@ -313,7 +317,7 @@
                         data-dashboard-post-url="<?= htmlspecialchars($postDestinationUrl, ENT_QUOTES, 'UTF-8') ?>"
                         role="link"
                         tabindex="0"
-                        title="Open this post"
+                        title="<?= $tr('ui.open_this_post') ?>"
                     >
                         <div class="flex items-center gap-2 mb-2">
                             <?php if ($postAvatar): ?>
@@ -323,7 +327,7 @@
                                     <?= htmlspecialchars(User::avatarInitial((string)($post->username ?? '')), ENT_QUOTES, 'UTF-8') ?>
                                 </div>
                             <?php endif; ?>
-                            <a href="<?= htmlspecialchars($postAuthorUrl, ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-medium text-zinc-200 hover:text-white transition" onclick="event.stopPropagation()"><?= $postAuthorUsername ?></a>
+                            <a href="<?= htmlspecialchars($postAuthorUrl, ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-medium text-zinc-200 hover:text-white transition"><?= $postAuthorUsername ?></a>
                             <span class="text-xs text-zinc-500 ml-auto" data-utc="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($postCreatedAtRaw, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($postCreatedAtLabel, ENT_QUOTES, 'UTF-8') ?></span>
                         </div>
                         <p class="text-sm text-zinc-100 whitespace-pre-wrap break-words leading-6"><?= nl2br(htmlspecialchars($postContent, ENT_QUOTES, 'UTF-8')) ?></p>
@@ -332,7 +336,7 @@
             </div>
             <div class="mt-4">
                 <a href="<?= htmlspecialchars(base_url('/posts'), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-2 text-sm text-emerald-400 hover:text-emerald-300 transition">
-                    All Posts <i class="fa fa-arrow-right text-xs"></i>
+                    <?= $tr('ui.all_posts') ?> <i class="fa fa-arrow-right text-xs"></i>
                 </a>
             </div>
         <?php endif; ?>

@@ -1,20 +1,20 @@
+<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <div class="p-8 overflow-auto">
     <div class="flex items-center justify-between gap-4 mb-6">
-        <h1 class="text-3xl font-bold">Invite Tree</h1>
-        <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl text-sm">Back to Settings</a>
+        <h1 class="text-3xl font-bold"><?= $tr('ui.invite_tree') ?></h1>
+        <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl text-sm"><?= $tr('ui.back_to_settings') ?></a>
     </div>
 
     <section class="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-5xl">
         <?php if (empty($tree)): ?>
-            <p class="text-zinc-400 text-sm">No invite relationships found yet.</p>
+            <p class="text-zinc-400 text-sm"><?= $tr('ui.no_invite_relationships_found_yet') ?></p>
         <?php else: ?>
             <?php
-                $renderInviteNode = function ($node, $depth = 0) use (&$renderInviteNode) {
+                $renderInviteNode = function ($node, $depth = 0) use (&$renderInviteNode, $tr) {
                     $username = (string)($node['user']['username'] ?? 'Unknown');
                     $userNumber = User::formatUserNumber((string)($node['user']['user_number'] ?? '0000000000000000'));
                     $createdAtRaw = (string)($node['user']['created_at'] ?? '');
-                    $createdAtTs = strtotime($createdAtRaw . ' UTC');
-                    $createdAtLabel = $createdAtTs ? date('M j, Y', $createdAtTs) : 'Unknown';
+                    $createdAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($createdAtRaw, dateOnly: true);
                     $invitees = $node['invitees'] ?? [];
             ?>
                 <li class="relative">
@@ -23,7 +23,7 @@
                             <span class="font-medium text-zinc-100\"><?= htmlspecialchars($username, ENT_QUOTES, 'UTF-8') ?></span>
                             <span class="text-zinc-500\">(<?= htmlspecialchars($userNumber, ENT_QUOTES, 'UTF-8') ?>)</span>
                         </div>
-                        <div class="mt-1 text-xs text-zinc-400">Joined <?= htmlspecialchars($createdAtLabel, ENT_QUOTES, 'UTF-8') ?></div>
+                        <div class="mt-1 text-xs text-zinc-400"><?= $tr('ui.joined') ?> <?= $createdAtLabel !== '' ? htmlspecialchars($createdAtLabel, ENT_QUOTES, 'UTF-8') : $tr('ui.unknown_date') ?></div>
                     </div>
 
                     <?php if (!empty($invitees)): ?>

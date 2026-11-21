@@ -4,9 +4,9 @@ class Notification extends Model {
         Database::query("INSERT INTO notifications (user_id, type, title, message, link) VALUES (?, ?, ?, ?, ?)", [$userId, $type, $title, $message, $link]);
 
         try {
-            WebPushService::sendForNotification($userId, $type, $title, $message, $link);
-        } catch (Throwable $exception) {
-            // Push delivery errors must never block core notification persistence.
+            WebPushService::sendForNotification((int)$userId, (string)$type);
+        } catch (Throwable) {
+            WebPushService::reportUnexpectedFailure();
         }
     }
 }

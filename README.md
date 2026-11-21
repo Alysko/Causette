@@ -1,28 +1,32 @@
-# Prologue
-Chat, voice call, video call, screenshare, and more. Always free and privacy first. Self-hosted on the web hosting provider or server of your choice. This app is the Prologue, and you and your friends create the story. Enjoy! 
+# Causette
 
-## Favorite Features
-- **Chat** - Real time messaging with group chats, direct messages, mentions, quotes, reactions, and attachments.
-- **Voice and Video Calls** - Whether it's one friend or your whole group, Prologue offers high quality, low latency calling using WebRTC.
-- **Screen Share** - Choose from multiple streaming qualities, up to your native resolution at 60FPS. Uses your browsers native interface to allow selection of what to stream.
+Causette is a self-hosted chat app with direct and group messages, file sharing, mentions, reactions, posts and polls. Voice and video calls support screen sharing in the browser.
 
-## Extra Features
-- **Polls** - Create a poll in your group chat. Choose when it expires or close it at any time.
-- **Posts** - Share your thoughts and comments with the rest of your community using a simple X-ish posts system.
-- **Many More** - Prologue has oodles of other neat features that you'll fall in love with. Just download it, host it, and explore it.
+## Development status
 
-## Why Prologue?
-- **Free and Open Source** - No subscriptions, no paywalls, no ads.
-- **Privacy First** - Prologue is self hosted. You deploy on your own web host, web server, or using Docker. You always retain full control of your data.
-- **Web Based** - Once Prologue is set up on your server, you and your users can get right into it using any modern browser. No additional client software downloads required.
+Causette is still in development. Wait for a tested release ZIP before deploying a live instance.
 
-## Get Started
-- [Web Hosting or Web Server (Recommended)](https://github.com/michaelstaake/Prologue/wiki/Quick-Start-Guide-(Web-Hosting-or-Web-Server))
-- [Docker](https://github.com/michaelstaake/Prologue/wiki/Quick-Start-Guide-(Docker))
+## Hosting
 
-## Useful Links
-- [Project Website](https://prologue.chat/)
-- [Download Latest Version](https://github.com/michaelstaake/Prologue/releases)
-- [Report Problems](https://github.com/michaelstaake/Prologue/issues)
-- [Community Forum](https://github.com/michaelstaake/Prologue/discussions)
-- [Documentation](https://github.com/michaelstaake/Prologue/wiki)
+Causette targets shared hosting with Apache, PHP and MySQL. Install, update and restore it with a browser, the hosting panel, a database manager and file transfer.
+
+Serve `public_html/` over HTTPS. Keep `storage/` next to it, outside the document root, without an Apache alias. The app serves attachments, avatars and emoji. Use a database account scoped to Causette's database.
+
+The first release targets PHP 8.5 or later. CI checks PHP 8.5 and 8.6. Use your host's latest PHP security patch. The release ZIP will list the tested versions, extensions and server settings.
+
+[Installation and setup recovery](docs/install.md) · [Backup, update and restore](docs/maintenance.md)
+
+## Development checks
+
+Run these source checks in a Git checkout with PHP and Node.js installed.
+
+```sh
+node scripts/check-syntax.mjs
+node --test tests/source-distribution.test.mjs
+```
+
+If `php` is missing from `PATH`, set `CAUSETTE_PHP` to the PHP executable. Use separate integration tests for installation, upgrades and browser workflows.
+
+## License and upstream
+
+Causette is based on [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms, the source notices for component credits and the [branding record](docs/branding.md) for compatibility references.

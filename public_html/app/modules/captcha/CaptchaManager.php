@@ -48,17 +48,20 @@ class CaptchaManager {
     }
 
     public static function getActiveProvider(): ?CaptchaProviderInterface {
+        static $resolved = false;
+        static $activeProvider = null;
+        if ($resolved) {
+            return $activeProvider;
+        }
+
         $providerName = trim((string)(Setting::get('captcha_provider') ?? ''));
-        if ($providerName === '') {
-            return null;
-        }
-
-        $provider = self::getProviderByName($providerName);
+        $provider = $providerName === '' ? null : self::getProviderByName($providerName);
         if ($provider !== null && $provider->isAvailable()) {
-            return $provider;
+            $activeProvider = $provider;
         }
 
-        return null;
+        $resolved = true;
+        return $activeProvider;
     }
 
     public static function getProviderByName(string $name): ?CaptchaProviderInterface {

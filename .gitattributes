@@ -1,0 +1,2 @@
+/tests/apache-storage-routing.sh text eol=lf
+/public_html/app/config/example.config.php export-ignore

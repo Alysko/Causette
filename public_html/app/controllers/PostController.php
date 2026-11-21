@@ -1,4 +1,7 @@
 <?php
+use Causette\Chat\ReactionCatalog;
+use Causette\Localization\Locale;
+
 class PostController extends Controller {
     public function create() {
         Auth::requireAuth();
@@ -70,16 +73,8 @@ class PostController extends Controller {
 
         if ($action === 'set' && $postOwnerId > 0 && $postOwnerId !== $userId) {
             $actorUsername = User::normalizeUsername(Auth::user()->username ?? '') ?: 'Someone';
-            $reactionDisplayByCode = [
-                '1F44D' => '👍 Like',
-                '1F44E' => '👎 Dislike',
-                '2665' => '♥ Love',
-                '1F923' => '🤣 Laugh',
-                '1F622' => '😢 Cry',
-                '1F436' => '🐶 Pup',
-                '1F4A9' => '💩 Poop'
-            ];
-            $reactionDisplay = $reactionDisplayByCode[$reactionCode] ?? $reactionCode;
+            $reactionDisplay = mb_chr(hexdec($reactionCode), 'UTF-8') . ' '
+                . ReactionCatalog::label($reactionCode, Locale::resolve('en'));
             Notification::create(
                 $postOwnerId,
                 'report',
