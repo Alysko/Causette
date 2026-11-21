@@ -14,6 +14,7 @@ return [
     'attachment_quota_exceeded' => 'The attachment quota is full. Remove an attachment or contact an administrator.',
     'attachment_upload_busy' => 'Attachment storage is busy. Try again in a moment.',
     'attachment_unavailable' => 'An attachment is no longer available. Remove it from the draft or attach it again.',
+    'attachment_batch_too_large' => 'There are too many attachments in this draft. Remove some and try again.',
     'call_in_progress' => 'Call in progress',
     'call_muted' => 'Call muted',
     'call_started' => 'Call started',

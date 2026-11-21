@@ -1960,18 +1960,18 @@ function displayAttachmentUploadError(message) {
     }
 }
 
-async function uploadAttachmentFile(file, expirySeconds = 0) {
-    if (!currentChat) return;
-    if (normalizeChatType(currentChat.type) === 'personal' && currentChat.can_send_messages === false) {
-        showToast(getPersonalChatMessageRestrictionToast(currentChat.message_restriction_reason), 'error');
+async function uploadAttachmentFile(file, chat) {
+    if (!chat || chat !== currentChat) return;
+    if (normalizeChatType(chat.type) === 'personal' && chat.can_send_messages === false) {
+        displayAttachmentUploadError(getPersonalChatMessageRestrictionToast(chat.message_restriction_reason));
         return;
     }
 
     const formData = new FormData();
     formData.append('csrf_token', getCsrfToken());
-    formData.append('chat_id', String(currentChat.id));
+    formData.append('chat_id', String(chat.id));
     formData.append('attachment', file);
-    formData.append('expiry_seconds', String(Number(expirySeconds || 0)));
+    formData.append('expiry_seconds', '0');
 
     const response = await fetch('/api/attachments/upload', {
         method: 'POST',
@@ -1979,6 +1979,7 @@ async function uploadAttachmentFile(file, expirySeconds = 0) {
     });
 
     const text = await response.text();
+    if (chat !== currentChat) return;
     let payload = { success: response.ok };
     try {
         payload = JSON.parse(text);
@@ -2085,12 +2086,14 @@ function bindAttachmentsDrawer() {
     });
 
     input.addEventListener('change', async () => {
+        const chat = currentChat;
         const files = Array.from(input.files || []);
         if (files.length === 0) return;
         displayAttachmentUploadError('');
 
         for (const file of files) {
-            await uploadAttachmentFile(file, 0);
+            if (chat !== currentChat) break;
+            await uploadAttachmentFile(file, chat);
         }
 
         input.value = '';

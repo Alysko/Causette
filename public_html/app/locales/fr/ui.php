@@ -121,6 +121,7 @@ return [
     'recovery_codes_copied' => 'Copié !',
     'confirm_delete_invite_code' => 'Supprimer ce code d’invitation ?',
     'confirm_end_session' => 'Terminer cette session ?',
+    'personal_chat_delete_failed' => 'La conversation n’a pas pu être supprimée. Réessayez dans un instant.',
     'copy_group_number' => 'Copier le numéro du groupe',
     'copy_link_to_group' => 'Copier le lien du groupe',
     'copy_to_clipboard' => 'Copier dans le presse-papiers',

@@ -16,7 +16,7 @@ const DB_PASS = 'fixture-only-database-password';
 
 $application = __DIR__ . '/../public_html/app/';
 foreach (['core/Database.php', 'core/Model.php', 'models/Setting.php', 'models/Attachment.php',
-    'install/SetupConfiguration.php', 'install/InstallDatabase.php'] as $source) {
+    'core/Controller.php', 'controllers/ChatController.php', 'install/SetupConfiguration.php', 'install/InstallDatabase.php'] as $source) {
     require_once $application . $source;
 }
 
@@ -159,6 +159,16 @@ try {
         usleep(20000);
     }
     expectUpload($ready, 'Upload fixture did not start.');
+
+    $test('message attachment list limit', static function (): void {
+        $controller = new ChatController();
+        $parse = new ReflectionMethod(ChatController::class, 'parseAttachmentIds');
+        expectUpload($parse->invoke($controller, '12,13') === [12, 13], 'An ordinary selection must remain usable.');
+        expectUpload($parse->invoke($controller, implode(',', range(1, 101))) === null,
+            'Too many attachment IDs must be refused before taking the storage lock.');
+        expectUpload($parse->invoke($controller, str_repeat('1,', 1500)) === null,
+            'The parameter text must have a size limit even when IDs repeat.');
+    });
 
     foreach ($cases as $name => [$key, $value, $user, $chat]) {
         $test($name, static function () use ($address, $pdf, $files, $db, $key, $value, $user, $chat): void {

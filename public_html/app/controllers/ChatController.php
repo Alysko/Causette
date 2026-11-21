@@ -1128,6 +1128,9 @@ class ChatController extends Controller {
         if ($chatId <= 0 || $rawContent === '') {
             $this->json(['error' => 'Invalid payload'], 400);
         }
+        if ($attachmentIds === null) {
+            $this->json(['error' => 'attachment_batch_too_large'], 400);
+        }
 
         if (mb_strlen($rawContent) > 16384) {
             $this->json(['error' => 'Message exceeds the maximum length of 16,384 characters'], 400);
@@ -1344,7 +1347,7 @@ class ChatController extends Controller {
                 $this->json(['error' => 'attachment_upload_busy'], 503);
             }
             if (!$deleted) {
-                $this->json(['error' => 'Attachment not found'], 404);
+                $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : 'Attachment not found'], 404);
             }
 
             $this->json(['success' => true]);
@@ -2040,6 +2043,7 @@ class ChatController extends Controller {
             'chat' => $chat,
             'chatNumberFormatted' => $chatNumberFormatted,
             'chatTitle' => $chatTitle,
+            'deleteFailed' => ($_GET['error'] ?? null) === 'delete_failed',
             'csrf' => $this->csrfToken()
         ]);
     }
@@ -2053,7 +2057,9 @@ class ChatController extends Controller {
             $this->redirect('/');
         }
 
-        $this->permanentlyDeletePersonalChat((int)$chat->id);
+        if (!Attachment::deleteChatWithFiles((int)$chat->id, static fn() => self::deleteChatRows((int)$chat->id))) {
+            $this->redirect('/c/' . User::formatUserNumber((string)$chat->chat_number) . '/delete?error=delete_failed');
+        }
         $this->redirect('/');
     }
 
@@ -2081,14 +2087,6 @@ class ChatController extends Controller {
         }
 
         return $chat;
-    }
-
-    private function permanentlyDeletePersonalChat(int $chatId): void {
-        if ($chatId <= 0) {
-            return;
-        }
-
-        Attachment::deleteChatWithFiles($chatId, static fn() => self::deleteChatRows($chatId));
     }
 
     private function deleteEmptyChat(int $chatId): void {
@@ -2930,8 +2928,11 @@ class ChatController extends Controller {
         ]);
     }
 
-    private function parseAttachmentIds($raw): array {
-        $value = trim((string)$raw);
+    private function parseAttachmentIds(mixed $raw): ?array {
+        if (!is_string($raw) || strlen($raw) > AttachmentBudget::MAX_PENDING_COUNT * 24) {
+            return null;
+        }
+        $value = trim($raw);
         if ($value === '') {
             return [];
         }
@@ -2942,6 +2943,9 @@ class ChatController extends Controller {
             $id = (int)$token;
             if ($id > 0) {
                 $ids[$id] = true;
+                if (count($ids) > AttachmentBudget::MAX_PENDING_COUNT) {
+                    return null;
+                }
             }
         }
 

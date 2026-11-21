@@ -119,6 +119,25 @@ test('a bot message is labeled even next to messages by its owner', () => {
     assert.equal((markup.match(/href="\/u\//g) || []).length, 2);
 });
 
+test('an attachment response from a previous conversation leaves the current draft alone', async () => {
+    const { context } = fixture();
+    const originatingChat = context.currentChat;
+    context.FormData = FormData;
+    context.getCsrfToken = () => 'fixture-csrf';
+    context.pendingAttachments = [];
+    context.normalizeAttachment = (attachment) => attachment;
+    context.renderPendingAttachmentList = () => {};
+    let resolveUpload;
+    context.fetch = () => new Promise((resolve) => { resolveUpload = resolve; });
+
+    const upload = context.uploadAttachmentFile(new Blob(['fixture']), originatingChat);
+    context.currentChat = { id: 8, type: 'group', is_group_member: true };
+    resolveUpload({ ok: true, text: async () => JSON.stringify({ success: true, attachment: { id: 13 } }) });
+    await upload;
+
+    assert.deepEqual(context.pendingAttachments, []);
+});
+
 test('poll labels and tooltips are literal and malformed values cannot enable actions', () => {
     const { context, element } = fixture();
     const labels = ['<mark>Thé</mark>', 'Café & lait'];

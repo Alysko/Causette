@@ -11,6 +11,7 @@ use Setting;
 final class AttachmentBudget
 {
     public const MINIMUM_CHARGE = 4096;
+    public const MAX_PENDING_COUNT = 100;
     private const MAX_IMAGE_PIXELS = 8_000_000;
     private const MAX_IMAGE_WORK_BYTES = 128 * 1024 * 1024;
     private const IMAGE_WORK_OVERHEAD = 8 * 1024 * 1024;
@@ -50,7 +51,7 @@ final class AttachmentBudget
             [self::MINIMUM_CHARGE, $userId, self::MINIMUM_CHARGE, $chatId, self::MINIMUM_CHARGE, $userId]
         )->fetch();
 
-        if ((int)$usage->pending_count >= self::setting('attachments_pending_limit', 12)) {
+        if ((int)$usage->pending_count >= min(self::MAX_PENDING_COUNT, self::setting('attachments_pending_limit', 12))) {
             return 0;
         }
 

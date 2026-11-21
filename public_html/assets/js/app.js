@@ -1259,7 +1259,7 @@ async function init() {
                 sendTypingStatus(false).catch(() => {});
                 await pollMessages({ scrollMode: 'bottom' });
                 await loadSidebarChats();
-            } else if (attachmentError && ['attachment_upload_busy', 'attachment_unavailable'].includes(result.error)) {
+            } else if (attachmentError && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result.error)) {
                 attachmentError.textContent = uiText(result.error);
                 attachmentError.classList.remove('hidden');
             } else {

@@ -14,6 +14,7 @@ return [
     'attachment_quota_exceeded' => 'Le quota de pièces jointes est atteint. Supprimez une pièce jointe ou contactez un administrateur.',
     'attachment_upload_busy' => 'Le stockage des pièces jointes est occupé. Réessayez dans un instant.',
     'attachment_unavailable' => 'Une pièce jointe est indisponible. Retirez-la du brouillon ou ajoutez-la à nouveau.',
+    'attachment_batch_too_large' => 'Le brouillon contient trop de pièces jointes. Retirez-en puis réessayez.',
     'call_in_progress' => 'Appel en cours',
     'call_muted' => 'Micro coupé',
     'call_started' => 'Appel lancé',
