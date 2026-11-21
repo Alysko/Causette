@@ -94,6 +94,31 @@ test('pinned messages use text nodes and preserve supported rich content', () =>
     assert.equal(element('pinned-message-goto').disabled, true);
 });
 
+test('a bot message is labeled even next to messages by its owner', () => {
+    const { context, element } = fixture();
+    const container = element('messages');
+    context.document.createRange = () => ({ createContextualFragment: (markup) => markup });
+    context.MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 72;
+    context.getProfileUrlForUser = () => '/u/0000-0000-0000-0007';
+    context.renderAvatarMarkup = () => '<span>Member avatar</span>';
+    context.renderMessageAttachments = () => '';
+    context.uiText = (key, { name } = {}) => ({ bot: 'Bot', bot_name: `Bot: ${name}` })[key] ?? key;
+    const owner = { user_id: 7, user_number: '0000000000000007', username: 'member', content: 'Fixture message' };
+
+    context.renderMessages([
+        { ...owner, id: 1 },
+        { ...owner, id: 2, username: '<b>member</b>', bot_name: '<b>member</b>' },
+        { ...owner, id: 3 }
+    ], { scrollMode: 'bottom' });
+
+    const [markup] = container.children;
+    const bot = markup.split('data-message-id="2"')[1].split('data-message-id="3"')[0];
+    assert.match(bot, /data-bot-badge[^>]*>Bot<\/span>/);
+    assert.match(bot, /&lt;b&gt;member&lt;\/b&gt;/);
+    assert.doesNotMatch(bot, /href="\/u\/|Member avatar|<b>member<\/b>/);
+    assert.equal((markup.match(/href="\/u\//g) || []).length, 2);
+});
+
 test('poll labels and tooltips are literal and malformed values cannot enable actions', () => {
     const { context, element } = fixture();
     const labels = ['<mark>Thé</mark>', 'Café & lait'];

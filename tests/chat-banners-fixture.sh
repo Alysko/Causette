@@ -38,6 +38,19 @@ if [ "$mode" = seed ]; then
     seed_fixture
     exit 0
 fi
+if [ "$mode" = seed-bot ]; then
+    php <<'PHP'
+<?php
+$pdo = new PDO('mysql:host=localhost;dbname=causette_recovery_fixture;charset=utf8mb4', 'causette_fixture', 'fixture-only-database-password', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+$pdo->exec("INSERT INTO messages (id, chat_id, user_id, content, bot_name) VALUES
+    (55, 8, 1, 'Human fixture message', NULL), (56, 8, 1, 'Bot fixture result', 'Helper <team>'),
+    (58, 9, 1, 'Bot fixture result', '0')");
+$pdo->exec("INSERT INTO messages (id, chat_id, user_id, content, quoted_message_id, quoted_user_id, quoted_content)
+    VALUES (57, 8, 1, 'Fixture reply', 56, 1, 'Bot fixture result')");
+$pdo->exec("UPDATE settings SET `value` = '56' WHERE `key` = 'pinned_message_chat_8'");
+PHP
+    exit 0
+fi
 
 test ! -e /case/storage/causette.json
 printf '%s\n' 'pdo_mysql.default_socket=/run/mysqld/mysqld.sock' >/usr/local/etc/php/conf.d/fixture-socket.ini

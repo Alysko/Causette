@@ -182,8 +182,16 @@ if (($argv[1] ?? '') === 'change') {
     expectRecoveryState(submitFixturePasswordChange($sessionA, 'fixture-incorrect-password') === '/settings', 'Invalid current password must return to settings');
     expectRecoveryState(($_SESSION['_flash']['error'] ?? '') === 'password_current_invalid'
         && User::find(1)->password === $oldPasswordHash, 'Invalid current password must preserve the password');
+    expectRecoveryState(str_ends_with((string)Setting::get('auth_limit_settings_password_1'), ':1'),
+        'Checking the current password must spend the shared settings budget');
     expectRecoveryState((int)$pdo->query('SELECT COUNT(*) FROM user_sessions WHERE user_id = 1 AND revoked_at IS NULL')->fetchColumn() === 2,
         'Invalid current password must preserve both sessions');
+
+    Setting::set('auth_limit_settings_password_1', intdiv(time(), 600) . ':8');
+    expectRecoveryState(submitFixturePasswordChange($sessionA, 'fixture-only-old-password') === '/settings'
+        && ($_SESSION['_flash']['error'] ?? '') === 'password_current_invalid'
+        && User::find(1)->password === $oldPasswordHash, 'An exhausted settings budget must prevent a password change');
+    Setting::set('auth_limit_settings_password_1', intdiv(time(), 600) . ':1');
 
     $pdo->exec("CREATE TRIGGER fixture_refuse_other_revocation BEFORE UPDATE ON user_sessions FOR EACH ROW
         BEGIN

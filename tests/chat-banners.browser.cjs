@@ -890,6 +890,54 @@ async function checkPrologueImport(browser, errors) {
     console.log('Prologue import, administrator update, existing authenticator sign-in, chat, poll and attachment passed over HTTPS.');
 }
 
+async function checkBotLabels(browser, errors) {
+    const member = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const response = await member.evaluate(async () => {
+        const source = await fetch(location.pathname);
+        return { status: source.status, html: await source.text() };
+    });
+    assert.equal(response.status, 200);
+    const readAttribution = (html) => {
+        const root = html === null ? document : new DOMParser().parseFromString(html, 'text/html');
+        const bot = root.querySelector('[data-message-id="56"]');
+        const quote = root.querySelector('[data-message-id="57"]');
+        const hasProfile = (message) => Array.from(message?.querySelectorAll('a[href]') || []).some(
+            link => new URL(link.getAttribute('href'), location.origin).pathname.startsWith('/u/')
+        );
+        return {
+            badge: bot?.querySelector('[data-bot-badge]')?.textContent.trim(),
+            name: bot?.querySelector('bdi')?.textContent,
+            humanAvatarOrProfile: Boolean(bot?.querySelector('img')) || hasProfile(bot),
+            previousProfile: [54, 55].some(id => hasProfile(root.querySelector(`[data-message-id="${id}"]`))),
+            nextProfile: hasProfile(quote),
+            replyDraft: bot?.querySelector('[data-quote-username]')?.dataset.quoteUsername,
+            quote: quote?.textContent.includes('Bot: Helper <team>'),
+            pin: root.querySelector('#pinned-message-username')?.textContent.trim(),
+        };
+    };
+    const expected = {
+        badge: 'Bot', name: 'Helper <team>', humanAvatarOrProfile: false, previousProfile: true, nextProfile: true,
+        replyDraft: 'Bot: Helper <team>', quote: true, pin: 'Bot: Helper <team>',
+    };
+    assert.deepEqual(await member.evaluate(readAttribution, response.html), expected);
+    await member.evaluate(() => pollMessages({ forceRender: true }));
+    assert.deepEqual(await member.evaluate(readAttribution, null), expected);
+
+    const getJson = (path) => member.evaluate(async (url) => (await fetch(url)).json(), path);
+    const conversations = await getJson('/api/chats');
+    assert.equal(conversations.chats.find(chat => Number(chat.id) === 9)?.last_message_bot_name, '0');
+    const results = await getJson('/api/messages/search?q=Bot%20fixture%20result');
+    assert.equal(results.messages.find(message => Number(message.message_id) === 56)?.bot_name, 'Helper <team>');
+
+    const mobile = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'fr',
+        { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const badge = mobile.locator('[data-message-id="56"] [data-bot-badge]');
+    await badge.waitFor({ state: 'visible' });
+    assert.equal(await badge.textContent(), 'Bot');
+    assert.match(await mobile.locator('#pinned-message-username').textContent(), /Bot : Helper <team>/);
+    console.log('Bot attribution passed for server-rendered chat, live history, quotes, pins and mobile layout.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -897,6 +945,12 @@ async function run() {
         if (process.argv.includes('--prologue-import')) {
             console.log(`Chromium ${browser.version()}`);
             await checkPrologueImport(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--bot-labels')) {
+            console.log(`Chromium ${browser.version()}`);
+            await checkBotLabels(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

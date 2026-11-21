@@ -149,6 +149,8 @@ return [
     'edit' => 'Edit',
     'delete' => 'Delete',
     'quote' => 'Quote',
+    'bot' => 'Bot',
+    'bot_name' => 'Bot: {name}',
     'react' => 'React',
     'video_calling' => 'Video calling',
     'screen_sharing' => 'Screen sharing',

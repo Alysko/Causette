@@ -333,19 +333,9 @@ class HomeController extends Controller {
             $this->redirect('/settings');
         }
 
-        $invite = Database::query(
-            "SELECT id FROM invite_codes WHERE code = ? AND creator_id = ? AND used_by IS NULL LIMIT 1",
-            [$inviteCode, $user->id]
-        )->fetch();
-
-        if (!$invite) {
-            $this->flash('error', 'invite_delete_unavailable');
-            $this->redirect('/settings');
-        }
-
         $deleted = Database::query(
-            "DELETE FROM invite_codes WHERE id = ? AND creator_id = ? AND used_by IS NULL",
-            [$invite->id, $user->id]
+            "DELETE FROM invite_codes WHERE code = ? AND creator_id = ? AND used_by IS NULL AND used_at IS NULL",
+            [$inviteCode, $user->id]
         );
 
         if ($deleted->rowCount() < 1) {
@@ -446,17 +436,9 @@ class HomeController extends Controller {
         Auth::csrfValidate();
 
         $user = Auth::user();
-        if (!$user) {
-            $this->redirect('/login');
-        }
-        $currentPassword = $_POST['current_password'] ?? '';
+        $this->requireSettingsPassword($user, 'password_current_invalid', 'current_password');
         $newPassword = $_POST['new_password'] ?? '';
         $confirmPassword = $_POST['confirm_password'] ?? '';
-
-        if (!is_string($currentPassword) || !password_verify($currentPassword, (string)$user->password)) {
-            $this->flash('error', 'password_current_invalid');
-            $this->redirect('/settings');
-        }
 
         if (!is_string($newPassword) || strlen($newPassword) < 8 || str_contains($newPassword, "\0")) {
             $this->flash('error', 'password_invalid');
@@ -848,11 +830,11 @@ class HomeController extends Controller {
         throw new RuntimeException('Failed to generate a unique invite code.');
     }
 
-    private function requireSettingsPassword(?object $account, string $error): void {
+    private function requireSettingsPassword(?object $account, string $error, string $field = 'password'): void {
         if (!$account) {
             $this->redirect('/login');
         }
-        $password = $_POST['password'] ?? '';
+        $password = $_POST[$field] ?? '';
         if (!AuthBudget::allow('settings_password', (int)$account->id, $_SERVER['REMOTE_ADDR'] ?? '', 8)
             || !is_string($password) || !password_verify($password, (string)$account->password)
         ) {
