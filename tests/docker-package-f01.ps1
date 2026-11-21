@@ -25,12 +25,27 @@ param(
 
     [switch]$DisplayPreferences,
 
-    [switch]$AccountMenu
+    [switch]$AccountMenu,
+
+    [switch]$PrologueImport,
+
+    [switch]$PrologueImportRecovery,
+
+    [string]$PrologueFixtureOutput
 )
 
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $browserImage = 'mcr.microsoft.com/playwright:v1.56.1-noble'
+if ($PrologueImportRecovery -and !$PrologueImport) {
+    throw '-PrologueImportRecovery requires -PrologueImport.'
+}
+if ($PrologueFixtureOutput) {
+    if (!$PrologueImport -or (Test-Path -LiteralPath $PrologueFixtureOutput)) {
+        throw 'Choose a new fixture output directory with -PrologueImport.'
+    }
+    $fixtureOutput = [IO.Directory]::CreateDirectory($PrologueFixtureOutput).FullName
+}
 
 function Invoke-Docker {
     & docker @args
@@ -98,21 +113,46 @@ try {
 
     $grants = @'
 CREATE USER 'causette_fixture'@'localhost' IDENTIFIED BY 'fixture-only-database-password';
-GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\_fixture`.* TO 'causette_fixture'@'localhost';
+GRANT CREATE, ALTER, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\_fixture`.* TO 'causette_fixture'@'localhost';
 '@
     Invoke-Docker exec $db mariadb --user root --execute $grants
     Invoke-Docker exec $db mariadb --user root --batch --skip-column-names --execute 'SELECT VERSION()'
+    if ($PrologueImport) {
+        $upstream = @(git -C (Split-Path -Parent $PSScriptRoot) show '49b16391364ae58802307abd7e008fa3a09047ff:public_html/app/config/example.config.php')
+        if ($LASTEXITCODE -ne 0) { throw 'The pinned Prologue SQL source is unavailable.' }
+        $start = [array]::IndexOf($upstream, '$CONFIG_DATABASE_SCHEMA_SQL = <<<''SQL''')
+        $end = [array]::IndexOf($upstream, 'SQL;')
+        if ($start -lt 0 -or $end -le $start -or $upstream[$start + 2] -ne 'USE prologue;') {
+            throw 'The pinned Prologue SQL heredoc has an unexpected layout.'
+        }
+        @('ALTER DATABASE causette_recovery_fixture CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;') + $upstream[($start + 3)..($end - 1)] |
+            docker exec -i $db mariadb --user root causette_recovery_fixture
+        if ($LASTEXITCODE -ne 0) { throw 'Could not load the isolated Prologue schema.' }
+    }
 
     $applicationArguments = @(
         'run', '--detach', '--pull', 'never', '--name', $app, '--network', 'none', '--mount', "$socketMount,readonly"
         '--mount', "type=bind,source=$($zip.FullName),target=/artifact.zip,readonly"
         '--mount', "type=bind,source=$PSScriptRoot/chat-banners-fixture.sh,target=/fixture.sh,readonly"
         '--mount', "type=bind,source=$PSScriptRoot/docker-push-delivery.php,target=/verify-push.php,readonly"
+        '--mount', "type=bind,source=$PSScriptRoot/prologue-import-fixture.php,target=/verify-import.php,readonly"
         '--entrypoint', 'sleep', $PhpImage, 'infinity'
     )
     Invoke-Docker @applicationArguments | Out-Null
     Invoke-Docker exec $app php -r 'echo PHP_VERSION, PHP_EOL;'
     Invoke-Docker exec $app sh -c 'tr -d "\015" </fixture.sh | sh -s -- package'
+    if ($PrologueImport) {
+        Invoke-Docker exec --user www-data $app php /verify-import.php seed
+        if ($PrologueFixtureOutput) {
+            $sql = Invoke-Docker exec $db mariadb-dump --user root --single-transaction --skip-add-drop-table causette_recovery_fixture
+            [IO.File]::WriteAllLines((Join-Path $fixtureOutput 'prologue-1.0.1-fixture.sql'), [string[]]$sql)
+            Invoke-Docker cp "${app}:/case/storage/attachments" (Join-Path $fixtureOutput 'attachments')
+            Compress-Archive -LiteralPath (Join-Path $fixtureOutput 'attachments') -DestinationPath (Join-Path $fixtureOutput 'prologue-1.0.1-files.zip')
+        }
+        if ($PrologueImportRecovery) {
+            Invoke-Docker exec --user www-data $app php /verify-import.php interrupt
+        }
+    }
     Invoke-Docker exec --detach $app apache2-foreground
 
     $ready = $false
@@ -128,6 +168,11 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
         throw 'The isolated HTTPS installer did not become ready.'
     }
 
+    if ($PrologueImport) {
+        Run-Browser '--prologue-import'
+        Invoke-Docker exec --user www-data $app php /verify-import.php verify
+        return
+    }
     Run-Browser '--install'
     Invoke-Docker exec $app sh -c 'tr -d "\015" </fixture.sh | sh -s -- seed'
     if ($PushDelivery) {

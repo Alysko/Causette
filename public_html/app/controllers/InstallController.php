@@ -3,12 +3,14 @@
 declare(strict_types=1);
 
 use Causette\Installation\InstallDatabase;
+use Causette\Installation\PrologueImport;
 use Causette\Installation\SetupConfiguration;
 use Causette\Installation\SetupFailure;
 use Causette\Localization\Locale;
 
 require_once __DIR__ . '/../install/SetupConfiguration.php';
 require_once __DIR__ . '/../install/InstallDatabase.php';
+require_once __DIR__ . '/../install/PrologueImport.php';
 
 class InstallController extends Controller
 {
@@ -20,7 +22,8 @@ class InstallController extends Controller
             return;
         }
 
-        $screen = $this->authorized($prepared['configuration']) ? 'administrator' : 'operator';
+        $configuration = $prepared['configuration'];
+        $screen = $this->authorized($configuration) ? $this->authorizedScreen($configuration) : 'operator';
         $this->renderSetup($screen);
     }
 
@@ -44,7 +47,8 @@ class InstallController extends Controller
             $this->authorizeOperator($configuration);
             return;
         }
-        if ($stage !== 'install' || !$this->authorized($configuration)) {
+        $import = isset($configuration['import']);
+        if ($stage !== ($import ? 'import' : 'install') || !$this->authorized($configuration)) {
             $this->renderSetup('operator', 403, 'install.token_required');
             return;
         }
@@ -52,6 +56,25 @@ class InstallController extends Controller
         $username = $_POST['username'] ?? null;
         $email = $_POST['email'] ?? null;
         $password = $_POST['password'] ?? null;
+        if ($import) {
+            if (($_POST['backup_confirmed'] ?? null) !== '1') {
+                $this->renderSetup('import', 422, 'install.import_backup');
+                return;
+            }
+            if (!is_string($username) || !preg_match('/\A[a-z][a-z0-9]{3,31}\z/D', $username)
+                || !is_string($password) || $password === '' || strlen($password) > 4096 || str_contains($password, "\0")) {
+                $this->renderSetup('import', 422, 'install.import_administrator');
+                return;
+            }
+            if (($_SESSION['import_admin_failures'] ?? 0) >= 5) {
+                unset($_SESSION['setup_authorization'], $_SESSION['setup_authorized_until']);
+                $this->renderSetup('operator', 429, 'install.rate_limit');
+                return;
+            }
+            $this->completeInstallation($prepared['storage'], $username, '', $password, true);
+            return;
+        }
+
         $fieldErrors = [];
         if (!is_string($username) || !preg_match('/\A[a-z][a-z0-9]{3,31}\z/D', $username)) {
             $fieldErrors['admin-username'] = 'install.username_invalid';
@@ -83,6 +106,9 @@ class InstallController extends Controller
         try {
             $configuration = SetupConfiguration::read($storage . '/' . SetupConfiguration::OPERATOR_FILE);
             SetupConfiguration::validateSite($configuration);
+            if (array_key_exists('import', $configuration)) {
+                PrologueImport::validateOptions($configuration['import']);
+            }
             $operatorToken = $configuration['bootstrap_token'] ?? null;
             if (!is_string($operatorToken) || !preg_match('/\A[A-Za-z0-9_-]{48,128}\z/D', $operatorToken)
                 || !SetupConfiguration::acceptsRequest($configuration['url'], $configuration['trusted_proxies'] ?? [])
@@ -99,6 +125,11 @@ class InstallController extends Controller
     private function authorizationFingerprint(array $configuration): string
     {
         return hash('sha256', serialize($configuration));
+    }
+
+    private function authorizedScreen(array $configuration): string
+    {
+        return isset($configuration['import']) ? 'import' : 'administrator';
     }
 
     private function authorized(array $configuration): bool
@@ -134,7 +165,7 @@ class InstallController extends Controller
             'setup_authorization' => $this->authorizationFingerprint($configuration),
             'setup_authorized_until' => time() + 600,
         ];
-        $this->renderSetup('administrator');
+        $this->renderSetup($this->authorizedScreen($configuration));
     }
 
     private function completeInstallation(
@@ -142,22 +173,24 @@ class InstallController extends Controller
         string $username,
         string $email,
         string $password,
+        bool $import = false,
     ): void {
+        $screen = $import ? 'import' : 'administrator';
         $required = ['pdo_mysql', 'mbstring', 'fileinfo', 'gd', 'openssl', 'ctype', 'session'];
         $missing = array_values(array_filter($required, static fn(string $extension): bool => !extension_loaded($extension)));
         if (PHP_VERSION_ID < 80500) {
-            $this->renderSetup('administrator', 503, 'install.php_version');
+            $this->renderSetup($screen, 503, 'install.php_version');
             return;
         }
         if ($missing !== []) {
-            $this->renderSetup('administrator', 503, 'install.extensions', parameters: ['extensions' => implode(', ', $missing)]);
+            $this->renderSetup($screen, 503, 'install.extensions', parameters: ['extensions' => implode(', ', $missing)]);
             return;
         }
 
         foreach (['', '/attachments', '/avatars', '/logs'] as $directory) {
             $path = $storage . $directory;
             if (is_link($path) || realpath($path) !== $path || !is_dir($path) || !is_writable($path)) {
-                $this->renderSetup('administrator', 503, 'install.storage_writable');
+                $this->renderSetup($screen, 503, 'install.storage_writable');
                 return;
             }
         }
@@ -165,13 +198,13 @@ class InstallController extends Controller
         $lockPath = $storage . '/install.lock';
         $lock = is_link($lockPath) ? false : @fopen($lockPath, 'c');
         if ($lock === false) {
-            $this->renderSetup('administrator', 503, 'install.lock_open');
+            $this->renderSetup($screen, 503, 'install.lock_open');
             return;
         }
 
         try {
             if (!flock($lock, LOCK_EX | LOCK_NB)) {
-                $this->renderSetup('administrator', 409, 'install.lock_busy');
+                $this->renderSetup($screen, 409, 'install.lock_busy');
                 return;
             }
 
@@ -182,16 +215,22 @@ class InstallController extends Controller
                 return;
             }
 
-            $databaseVersion = (new InstallDatabase($storage))->install($current['configuration'], $username, $email, $password);
+            $databaseVersion = $import
+                ? (new PrologueImport($storage))->import($current['configuration'], $username, $password)
+                : (new InstallDatabase($storage))->install($current['configuration'], $username, $email, $password);
             @unlink($storage . '/' . SetupConfiguration::OPERATOR_FILE);
             $_SESSION = [];
-            $this->renderSetup('success', databaseVersion: $databaseVersion);
+            $this->renderSetup($import ? 'imported' : 'success', databaseVersion: $databaseVersion);
         } catch (PDOException) {
-            $this->renderSetup('administrator', 503, 'install.database_error');
+            $this->renderSetup($screen, 503, 'install.database_error');
         } catch (SetupFailure $failure) {
-            $this->renderSetup('administrator', $failure->getCode() === 409 ? 409 : 503, $failure->translationKey);
+            if ($import && $failure->translationKey === 'install.import_administrator') {
+                $_SESSION['import_admin_failures'] = ($_SESSION['import_admin_failures'] ?? 0) + 1;
+            }
+            $status = in_array($failure->getCode(), [403, 409], true) ? $failure->getCode() : 503;
+            $this->renderSetup($screen, $status, $failure->translationKey);
         } catch (Throwable) {
-            $this->renderSetup('administrator', 503, 'install.retry');
+            $this->renderSetup($screen, 503, 'install.retry');
         } finally {
             fclose($lock);
         }
@@ -208,7 +247,7 @@ class InstallController extends Controller
         http_response_code($status);
         $locale = Locale::current();
         header('Content-Language: ' . $locale->language());
-        $csrfToken = $screen === 'operator' || $screen === 'administrator' ? $this->csrfToken() : '';
+        $csrfToken = in_array($screen, ['operator', 'administrator', 'import'], true) ? $this->csrfToken() : '';
         $setupBasePath = defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '';
         require __DIR__ . '/../views/install.php';
     }

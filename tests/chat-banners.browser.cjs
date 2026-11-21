@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { createHmac } = require('node:crypto');
 const { chromium } = require('playwright');
 
 const origin = 'https://fixture.example.test:9443';
@@ -828,10 +829,77 @@ async function checkAccountMenu(browser, errors) {
     console.log('The account menu supports desktop keyboard and mobile touch, preserves profile access, and signs out only the current browser session.');
 }
 
+async function checkPrologueImport(browser, errors) {
+    const page = await newPage(browser, errors);
+    assert.equal((await page.goto(origin + '/install?lang=en')).status(), 200);
+    assert.equal(await page.locator('form:has(input[name=stage][value=import])').count(), 0);
+    const authorization = page.locator('form:has(input[name=stage][value=authorize])');
+    await authorization.locator('input[name=bootstrap_token]').fill('fixture-invalid-operator-token');
+    assert.equal(await submitForm(page, '/install', authorization.locator('button[type=submit]')), 403);
+    await authorization.locator('input[name=bootstrap_token]').fill(operatorToken);
+    assert.equal(await submitForm(page, '/install', authorization.locator('button[type=submit]')), 200);
+    const form = page.locator('form:has(input[name=stage][value=import])');
+    assert.equal(await form.count(), 1, 'A prepared Prologue backup must open the browser import form');
+    assert.equal(await page.locator('form:has(input[name=stage][value=install])').count(), 0);
+    await form.locator('input[name=username]').fill('fixtureadmin');
+    await form.locator('input[name=password]').fill(adminPassword);
+    await form.evaluate(element => { element.noValidate = true; });
+    assert.equal(await submitForm(page, '/install', form.locator('button[type=submit]')), 422);
+    await form.locator('input[name=username]').fill('fixturepeer');
+    await form.locator('input[name=password]').fill('fixture-only-peer-password');
+    await form.locator('input[name=backup_confirmed]').check();
+    assert.equal(await submitForm(page, '/install', form.locator('button[type=submit]')), 403);
+    await form.locator('input[name=username]').fill('fixtureadmin');
+    await form.locator('input[name=password]').fill(adminPassword);
+    await form.locator('input[name=backup_confirmed]').check();
+    assert.equal(await submitForm(page, '/install', form.locator('button[type=submit]')), 200);
+    await page.getByText('Prologue data is ready for the Causette update.', { exact: true }).waitFor();
+    assert.equal((await page.goto(origin + '/install')).status(), 404);
+    assert.equal((await page.goto(origin + '/update')).status(), 403);
+    assert.equal((await page.goto(origin + '/login')).status(), 200);
+    await page.locator('input[name=identifier]').fill('fixtureadmin');
+    await page.locator('input[name=password]').fill(adminPassword);
+    assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name=identifier]) button[type=submit]')), 302);
+    assert.equal((await page.goto(origin + '/update')).status(), 200);
+    assert.deepEqual(await page.locator('dl dd').allTextContents(), ['1.0.1', '1.0.3']);
+    const update = page.locator('form[action="/update"]');
+    await update.getByRole('checkbox').check();
+    assert.equal(await submitForm(page, '/update', update.getByRole('button', { name: 'Apply update' })), 302);
+
+    const member = await newPage(browser, errors);
+    await member.goto(origin + '/login');
+    await member.locator('input[name=identifier]').fill('fixturepeer');
+    await member.locator('input[name=password]').fill('fixture-only-peer-password');
+    assert.equal(await submitForm(member, '/login', member.locator('form:has(input[name=identifier]) button[type=submit]')), 302);
+    await member.waitForURL(origin + '/2fa');
+    const counter = Buffer.alloc(8);
+    counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+    const secret = Buffer.from('48656c6c6f21deadbeef'.repeat(2), 'hex');
+    const hmac = createHmac('sha1', secret).update(counter).digest();
+    const code = ((hmac.readUInt32BE(hmac[19] & 15) & 0x7fffffff) % 1000000).toString().padStart(6, '0');
+    await member.locator('input[name=code]').fill(code);
+    assert.equal(await submitForm(member, '/2fa', member.getByRole('button', { name: 'Verify', exact: true })), 302);
+    assert.equal((await member.goto(origin + firstChat)).status(), 200);
+    await waitForText(member, '#messages', 'Message from Prologue');
+    await waitForText(member, '#active-poll-question', 'Imported poll');
+    const attachment = await member.evaluate(async () => {
+        const response = await fetch('/a/1111222233334444/1122334455667788.png');
+        return { status: response.status, type: response.headers.get('content-type'), bytes: (await response.arrayBuffer()).byteLength };
+    });
+    assert.deepEqual(attachment, { status: 200, type: 'image/png', bytes: 68 });
+    console.log('Prologue import, administrator update, existing authenticator sign-in, chat, poll and attachment passed over HTTPS.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
     try {
+        if (process.argv.includes('--prologue-import')) {
+            console.log(`Chromium ${browser.version()}`);
+            await checkPrologueImport(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
         if (process.argv.includes('--install')) {
             console.log(`Chromium ${browser.version()}`);
             await installPackage(browser, errors);

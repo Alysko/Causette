@@ -48,4 +48,4 @@ Use the same site directory, package, setup file and database. Follow any error 
 
 If the setup reports a database or journal mismatch, stop and check the database selection and package in the hosting panel. Preserve any database and files you need to retain. Start a fresh attempt in a separate site directory with a new empty database if the original state cannot be restored.
 
-This procedure covers a fresh dedicated site. The [maintenance guide](maintenance.md) covers backups, code-only updates and restore rehearsals. Upstream data import and schema-changing upgrades require their own verified procedures.
+Use the [import guide](import.md) to move an existing upstream backup. The [maintenance guide](maintenance.md) covers backups, updates and restore rehearsals.

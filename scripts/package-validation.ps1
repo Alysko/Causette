@@ -43,7 +43,7 @@ function Test-PackagePath([string] $Path) {
         return $false
     }
     return $Path -cmatch (
-        '\A(?:LICENSE|README\.md|docs/(?:install|maintenance|branding|localization|frontend-assets)\.md' +
+        '\A(?:LICENSE|README\.md|docs/(?:install|import|maintenance|branding|localization|frontend-assets)\.md' +
         '|public_html/(?:\.htaccess|index\.php|version\.php|robots\.txt|service-worker\.js)' +
         '|public_html/app/config/private-runtime\.php|public_html/app/install/schema-v1\.sql' +
         '|public_html/app/(?:controllers|core|install|models|modules|views|locales)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.php' +
