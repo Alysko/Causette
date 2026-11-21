@@ -19,6 +19,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
+    <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/reactions.css') ?>">
 </head>
 <?php
     $currentUser = $pageViewer;
@@ -596,6 +597,8 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED = <?= $systemMessagesAutoCombineEnabled ? 'true' : 'false' ?>;
     window.CURRENT_USER_PRESENCE_STATUS = <?= \Causette\View\HtmlJson::encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
     window.CAUSETTE_REACTION_LABELS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::labels($locale)) ?>;
+    window.CAUSETTE_REACTION_GROUPS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::GROUPS) ?>;
+    window.CAUSETTE_REACTION_ASSET_BASE = <?= \Causette\View\HtmlJson::encode(base_url(\Causette\Chat\ReactionCatalog::IMAGE_DIRECTORY)) ?>;
     window.OPENMOJI_FILES = <?= \Causette\View\HtmlJson::encode($openMojiFileNames) ?>;
     window.OPENMOJI_METADATA = <?= \Causette\View\HtmlJson::encode($openMojiMetadata) ?>;
 </script>

@@ -132,7 +132,8 @@ expectImport(($argv[1] ?? '') === 'verify', 'Unexpected import fixture command.'
 $active = SetupConfiguration::read($runtime);
 define('CAUSETTE_TOTP_KEY', $active['totp_key']);
 expectImport(!file_exists($configuration) && $setting('causette_installation_id') === $active['installation_id'], 'Completion did not bind the private runtime to its database.');
-expectImport($setting('database_version') === '1.0.3', 'Browser update did not reach the application version.');
+$version = require '/case/public_html/version.php';
+expectImport($setting('database_version') === $version['app_version'], 'Browser update did not reach the application version.');
 expectImport($setting('mail_from_name') === 'Causette', 'Default mail branding was not migrated.');
 $mail = $setting('mail_pass');
 expectImport(is_string($mail) && $mail !== 'fixture-only-mail-value' && IntegrationKeyring::read($root . '/integration-keys.json')->open('mail_pass', $mail) === 'fixture-only-mail-value', 'SMTP secret was not protected.');

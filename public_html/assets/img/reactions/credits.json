@@ -1,0 +1,310 @@
+{
+  "name": "Fluent Emoji",
+  "style": "3D",
+  "source": "https://github.com/microsoft/fluentui-emoji/tree/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc",
+  "revision": "1ffb34c752ecf5d402f04cfb4b392c77f57c54bc",
+  "license": "MIT",
+  "notice": "    MIT License\n\n    Copyright (c) Microsoft Corporation.\n\n    Permission is hereby granted, free of charge, to any person obtaining a copy\n    of this software and associated documentation files (the \"Software\"), to deal\n    in the Software without restriction, including without limitation the rights\n    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n    copies of the Software, and to permit persons to whom the Software is\n    furnished to do so, subject to the following conditions:\n\n    The above copyright notice and this permission notice shall be included in all\n    copies or substantial portions of the Software.\n\n    THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n    SOFTWARE\n",
+  "sourceFiles": {
+    "1f44d.png": {
+      "path": "assets/Thumbs up/Default/3D/thumbs_up_3d_default.png",
+      "blob": "f179654f56b4b2bad5669cde934d7eaefe971105"
+    },
+    "1f44e.png": {
+      "path": "assets/Thumbs down/Default/3D/thumbs_down_3d_default.png",
+      "blob": "6345d92dbffa01c429e7f42986c0a1b6c08eaa2e"
+    },
+    "2665.png": {
+      "path": "assets/Heart suit/3D/heart_suit_3d.png",
+      "blob": "b0105f85829fcbe36c095034f13d04652e1e41f8"
+    },
+    "1f923.png": {
+      "path": "assets/Rolling on the floor laughing/3D/rolling_on_the_floor_laughing_3d.png",
+      "blob": "278f89788132c208a67b6b950311137d5baead45"
+    },
+    "1f622.png": {
+      "path": "assets/Crying face/3D/crying_face_3d.png",
+      "blob": "b693c45ca77c76bb4f7703795c4c263382384720"
+    },
+    "1f436.png": {
+      "path": "assets/Dog face/3D/dog_face_3d.png",
+      "blob": "2ecdd9549aa1419d4fcef2f3b016e1efda83271c"
+    },
+    "1f4a9.png": {
+      "path": "assets/Pile of poo/3D/pile_of_poo_3d.png",
+      "blob": "ffa178fc47fd2e01152903d2f3d415730e5980e4"
+    },
+    "1f389.png": {
+      "path": "assets/Party popper/3D/party_popper_3d.png",
+      "blob": "4ec55237a377b8e53b4190d3edb7b23d7e42fc9f"
+    },
+    "1f525.png": {
+      "path": "assets/Fire/3D/fire_3d.png",
+      "blob": "e713ad8c92a6b1c8c24322a0af27b3658ac09fbf"
+    },
+    "1f44f.png": {
+      "path": "assets/Clapping hands/Default/3D/clapping_hands_3d_default.png",
+      "blob": "88bc49a7635289b2934b59f004e72123a211423e"
+    },
+    "1f64c.png": {
+      "path": "assets/Raising hands/Default/3D/raising_hands_3d_default.png",
+      "blob": "cf9166a96cd3f1f925a35614bbb99b1aef964b0c"
+    },
+    "1f62e.png": {
+      "path": "assets/Face with open mouth/3D/face_with_open_mouth_3d.png",
+      "blob": "c523020f6287754f4d87a0a8bee4a83090cad462"
+    },
+    "1f914.png": {
+      "path": "assets/Thinking face/3D/thinking_face_3d.png",
+      "blob": "ff665868ee96d7ece0cfe761eb781641ac5dde2a"
+    },
+    "1f602.png": {
+      "path": "assets/Face with tears of joy/3D/face_with_tears_of_joy_3d.png",
+      "blob": "e5c7cd692add6e53602be7ad058a9784211ca22d"
+    },
+    "1f60d.png": {
+      "path": "assets/Smiling face with heart-eyes/3D/smiling_face_with_heart-eyes_3d.png",
+      "blob": "3cec230439ea8ed602e6eb6f097865b333820efa"
+    },
+    "1f929.png": {
+      "path": "assets/Star-struck/3D/star-struck_3d.png",
+      "blob": "2e54f60006782ce8c4f3ca7bc32ac7ceaefdcac7"
+    },
+    "1f60e.png": {
+      "path": "assets/Smiling face with sunglasses/3D/smiling_face_with_sunglasses_3d.png",
+      "blob": "c0f72254c27a60ab3e874159af746cff91cb3d5a"
+    },
+    "1f64f.png": {
+      "path": "assets/Folded hands/Default/3D/folded_hands_3d_default.png",
+      "blob": "71ef114a33ecda99f48f838ad8367358bd8afb08"
+    },
+    "1f680.png": {
+      "path": "assets/Rocket/3D/rocket_3d.png",
+      "blob": "57e14707e55ae4951ee5b0b73edae25af831ca21"
+    },
+    "1f4af.png": {
+      "path": "assets/Hundred points/3D/hundred_points_3d.png",
+      "blob": "bf9436317c97f4cd520f3e8c8a3adef0c55f40ac"
+    },
+    "2728.png": {
+      "path": "assets/Sparkles/3D/sparkles_3d.png",
+      "blob": "b07ae32c5a2326457d95fb269c65f84fcaea5fe9"
+    },
+    "1f600.png": {
+      "path": "assets/Grinning face/3D/grinning_face_3d.png",
+      "blob": "d91b62d9356f1703919137609ca4ca3e7b7c20ad"
+    },
+    "1f601.png": {
+      "path": "assets/Beaming face with smiling eyes/3D/beaming_face_with_smiling_eyes_3d.png",
+      "blob": "c68193d07a8a6f4a572a91adbeaafb3473a7bac8"
+    },
+    "1f605.png": {
+      "path": "assets/Grinning face with sweat/3D/grinning_face_with_sweat_3d.png",
+      "blob": "22166c590500ac493c9ff95931ec54078e7ee395"
+    },
+    "1f642.png": {
+      "path": "assets/Slightly smiling face/3D/slightly_smiling_face_3d.png",
+      "blob": "9f8462dfc49ca4e62b675cf1651c2a9732594af8"
+    },
+    "1f609.png": {
+      "path": "assets/Winking face/3D/winking_face_3d.png",
+      "blob": "4369b44957c748f3c22e63fcb0c96fc50fb7604f"
+    },
+    "1f970.png": {
+      "path": "assets/Smiling face with hearts/3D/smiling_face_with_hearts_3d.png",
+      "blob": "416ef0410ad0f801a8f69b9aeb2cd8fda4af6ed8"
+    },
+    "1f618.png": {
+      "path": "assets/Face blowing a kiss/3D/face_blowing_a_kiss_3d.png",
+      "blob": "062fd9d92cb9aea4b7decacd9833d7de66cf1fa4"
+    },
+    "1f917.png": {
+      "path": "assets/Hugging face/3D/hugging_face_3d.png",
+      "blob": "98ae6dd1998a5aa43d346fbb55283748ab8234a0"
+    },
+    "1f60f.png": {
+      "path": "assets/Smirking face/3D/smirking_face_3d.png",
+      "blob": "7b745b1b3963242502652de84291ebf8516538dc"
+    },
+    "1fae0.png": {
+      "path": "assets/Melting face/3D/melting_face_3d.png",
+      "blob": "8bf26947b2396a49239a056db794acb9a7cb8de8"
+    },
+    "1fae1.png": {
+      "path": "assets/Saluting face/3D/saluting_face_3d.png",
+      "blob": "2852fd1a3f208a83d34247c9da5364823601d7ef"
+    },
+    "1f644.png": {
+      "path": "assets/Face with rolling eyes/3D/face_with_rolling_eyes_3d.png",
+      "blob": "1d4c1eaa22a69a9f0b53d388f0aee304df896cd2"
+    },
+    "1f610.png": {
+      "path": "assets/Neutral face/3D/neutral_face_3d.png",
+      "blob": "18ae666e5bb936a7ab4adb128a8731021ae13590"
+    },
+    "1f615.png": {
+      "path": "assets/Confused face/3D/confused_face_3d.png",
+      "blob": "f6823c594df3c272c8bdf9cf6d34b54e025550f3"
+    },
+    "1f612.png": {
+      "path": "assets/Unamused face/3D/unamused_face_3d.png",
+      "blob": "833e909a6021af520e54f29a08f831db7f9ff579"
+    },
+    "1f629.png": {
+      "path": "assets/Weary face/3D/weary_face_3d.png",
+      "blob": "d8e28175a8d99c10fbd021292b8f30f38652012c"
+    },
+    "1f62d.png": {
+      "path": "assets/Loudly crying face/3D/loudly_crying_face_3d.png",
+      "blob": "29e0bf6180c057c14536f2eb5f21d8f5dd8f3d7f"
+    },
+    "1f631.png": {
+      "path": "assets/Face screaming in fear/3D/face_screaming_in_fear_3d.png",
+      "blob": "07d2eee2542135ae9ab73a1f143f0a1c6fab8d7d"
+    },
+    "1f621.png": {
+      "path": "assets/Pouting face/3D/pouting_face_3d.png",
+      "blob": "ca704a499cf6c7a12a5860847983e7c8658b348b"
+    },
+    "1f624.png": {
+      "path": "assets/Face with steam from nose/3D/face_with_steam_from_nose_3d.png",
+      "blob": "5fd81c09eafca73646f70446013eb2832fb0b380"
+    },
+    "1f973.png": {
+      "path": "assets/Partying face/3D/partying_face_3d.png",
+      "blob": "65260add29564fa533f36b9610467b51ba3e8ad4"
+    },
+    "1f92f.png": {
+      "path": "assets/Exploding head/3D/exploding_head_3d.png",
+      "blob": "e8ec5182c884b094fb5b4cda8b025b2326a370fd"
+    },
+    "1f97a.png": {
+      "path": "assets/Pleading face/3D/pleading_face_3d.png",
+      "blob": "42f58d411ca6a3b94a9d7fa341eab014ebe8c7e1"
+    },
+    "1f636.png": {
+      "path": "assets/Face without mouth/3D/face_without_mouth_3d.png",
+      "blob": "0176338c2ed2fa4b2a7522e8f619ee67eeeab3c7"
+    },
+    "1f44b.png": {
+      "path": "assets/Waving hand/Default/3D/waving_hand_3d_default.png",
+      "blob": "d20006e1b5c7f314fbfdc13353ef49f879be2ce5"
+    },
+    "1f44c.png": {
+      "path": "assets/Ok hand/Default/3D/ok_hand_3d_default.png",
+      "blob": "3c47cfb4dc5167e57fb613e6dd01c46140a8f992"
+    },
+    "270c.png": {
+      "path": "assets/Victory hand/Default/3D/victory_hand_3d_default.png",
+      "blob": "2e097548cffc2c0034587ed6d09161f086722a56"
+    },
+    "1f91d.png": {
+      "path": "assets/Handshake/3D/handshake_3d.png",
+      "blob": "0d0a0e193a60724c2a904a6e5fec805106060800"
+    },
+    "1f4aa.png": {
+      "path": "assets/Flexed biceps/Default/3D/flexed_biceps_3d_default.png",
+      "blob": "309d7374407c9a400595c97fbcbce5fb39fd320e"
+    },
+    "1f91e.png": {
+      "path": "assets/Crossed fingers/Default/3D/crossed_fingers_3d_default.png",
+      "blob": "443f37af05efcd51bffa78130cf7e0fde9ba3c77"
+    },
+    "1f44a.png": {
+      "path": "assets/Oncoming fist/Default/3D/oncoming_fist_3d_default.png",
+      "blob": "6e08fb25dd2da9d7394b567e03e2a588f9f5a36c"
+    },
+    "1f590.png": {
+      "path": "assets/Hand with fingers splayed/Default/3D/hand_with_fingers_splayed_3d_default.png",
+      "blob": "778646236a8778e7debc658a5e68597e42c1e6ef"
+    },
+    "1f918.png": {
+      "path": "assets/Sign of the horns/Default/3D/sign_of_the_horns_3d_default.png",
+      "blob": "76643231230b6f5f0ab5f09e738288659f8d3166"
+    },
+    "2764.png": {
+      "path": "assets/Red heart/3D/red_heart_3d.png",
+      "blob": "6389f0a6c7d4f7d13dbd5c4062d62051b7f76e7a"
+    },
+    "1f494.png": {
+      "path": "assets/Broken heart/3D/broken_heart_3d.png",
+      "blob": "c3e72b2d0ac4c6c3f0124f09b82cb4a0b28e554d"
+    },
+    "1f49b.png": {
+      "path": "assets/Yellow heart/3D/yellow_heart_3d.png",
+      "blob": "a0adad524ac0fa6123086e949b461d198b406306"
+    },
+    "1f49a.png": {
+      "path": "assets/Green heart/3D/green_heart_3d.png",
+      "blob": "6c53ba450fc06ef17b4720d65efcb746dbbda805"
+    },
+    "1f499.png": {
+      "path": "assets/Blue heart/3D/blue_heart_3d.png",
+      "blob": "de0aad1cf8b23311ccab15c53366e3fb66cded69"
+    },
+    "1f49c.png": {
+      "path": "assets/Purple heart/3D/purple_heart_3d.png",
+      "blob": "7142e07072c69f2e8688ef2125555943786fc737"
+    },
+    "1f90d.png": {
+      "path": "assets/White heart/3D/white_heart_3d.png",
+      "blob": "fea8b7761f6c55b5368054ed808ddc41d1f4bee8"
+    },
+    "1fa77.png": {
+      "path": "assets/Pink heart/3D/pink_heart_3d.png",
+      "blob": "177e9e04fb118698d2a1b8e4cd77cbd7ffb93024"
+    },
+    "1f495.png": {
+      "path": "assets/Two hearts/3D/two_hearts_3d.png",
+      "blob": "ee000f322c07841f8ce52f610bbeb385efacd888"
+    },
+    "1f440.png": {
+      "path": "assets/Eyes/3D/eyes_3d.png",
+      "blob": "f390e95d39bba4bca90f356f3b02f05271633d3f"
+    },
+    "1f3c6.png": {
+      "path": "assets/Trophy/3D/trophy_3d.png",
+      "blob": "a71fcf8219538bb374b2289f221949ab6b4bdc10"
+    },
+    "1f31f.png": {
+      "path": "assets/Glowing star/3D/glowing_star_3d.png",
+      "blob": "fee2547c3ffe9d239b2ff5c89efdf0f964b04c09"
+    },
+    "1f308.png": {
+      "path": "assets/Rainbow/3D/rainbow_3d.png",
+      "blob": "6b00b3bc53605aafded4a5d2dcf7f6de2a4cfcb4"
+    },
+    "1f382.png": {
+      "path": "assets/Birthday cake/3D/birthday_cake_3d.png",
+      "blob": "ce6cb5a6c4e95ebe8c3a192f1bd5cd710ad271c5"
+    },
+    "2615.png": {
+      "path": "assets/Hot beverage/3D/hot_beverage_3d.png",
+      "blob": "4317ed5f1ed6c36d486e49eb1da024c79ddd482c"
+    },
+    "1f431.png": {
+      "path": "assets/Cat face/3D/cat_face_3d.png",
+      "blob": "359506526233eef5e59be92cea4a0d4d8885e0e4"
+    },
+    "1f480.png": {
+      "path": "assets/Skull/3D/skull_3d.png",
+      "blob": "7b02e891f23879408f4ae02311555515f890a567"
+    },
+    "1f9e0.png": {
+      "path": "assets/Brain/3D/brain_3d.png",
+      "blob": "e8d91c7ab1e8dc92e32ef5609a90cb3b088dac18"
+    },
+    "1f33b.png": {
+      "path": "assets/Sunflower/3D/sunflower_3d.png",
+      "blob": "9316ed08d4f3f18715d1f40456fcaacb1dbae3d5"
+    },
+    "1f381.png": {
+      "path": "assets/Wrapped gift/3D/wrapped_gift_3d.png",
+      "blob": "50c984c3c9960a6a429b50be28c6f5a0373e3358"
+    },
+    "1f388.png": {
+      "path": "assets/Balloon/3D/balloon_3d.png",
+      "blob": "b625234104252f1708f2ff35ceba7e115ea05b0d"
+    }
+  }
+}

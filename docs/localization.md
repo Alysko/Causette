@@ -14,4 +14,4 @@ The catalogs are PHP arrays of plain UTF-8 strings. English and French ship toge
 
 Provide whole sentences with named placeholders when a translation needs to reorder words. Vote counts use the browser's plural categories and number formatting. Add the categories used by the language and keep the `other` form as a fallback. Add month abbreviations and date patterns to the `dates.php` catalog for PHP-rendered timestamps. Browsers use their native `Intl.DateTimeFormat` for language-specific dates.
 
-Run `php tests/localization.test.php` for English and French key and placeholder checks. The Docker package suite accepts `-Localization` for both languages and `-DisplayPreferences` for the site and account settings in Chromium.
+Run `php tests/localization.test.php` for English and French key and placeholder checks.

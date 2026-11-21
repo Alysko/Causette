@@ -5,7 +5,8 @@ The main and standalone layouts load a local Tailwind stylesheet. The main layou
 Run `npm ci --ignore-scripts` and `npm run build` from `frontend/` in a development environment after changing markup or utility classes. The lockfile pins the build dependencies. The build scans application views, models, controllers, core classes and browser JavaScript. Keep complete utility class names visible to Tailwind when generating styles in code.
 
 - Tailwind CSS 3.4.17 is distributed under the MIT license. The compiled stylesheet is `public_html/assets/css/causette.css` and the upstream notice is `tailwind-license.txt` in the same directory.
-- Font Awesome Free 6.7.2 is copied byte for byte from the official npm package into `public_html/assets/css/fontawesome.min.css` and `public_html/assets/webfonts/`. The upstream license file is `fontawesome-license.txt` in the CSS directory. It describes the licenses for icons, fonts and code.
+- The core, solid and regular Font Awesome Free 6.7.2 styles and fonts come from the official npm package and are included in `public_html/assets/css/fontawesome.min.css` and `public_html/assets/webfonts/`. The upstream license file is `fontawesome-license.txt` in the CSS directory. It describes the licenses for icons, fonts and code.
+- Message and post reactions use Microsoft's [Fluent Emoji 3D](https://github.com/microsoft/fluentui-emoji/tree/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc) PNGs. The MIT notice, source paths and Git blob IDs are recorded in `public_html/assets/img/reactions/credits.json`.
 
 The package browser checks block third-party requests on the login and dashboard. They also exercise the enforced policy, client-side navigation and both CAPTCHA integrations with fixture scripts and frames.
 

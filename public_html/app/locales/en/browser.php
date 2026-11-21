@@ -3,6 +3,13 @@
 declare(strict_types=1);
 
 return [
+    'reaction_categories' => 'Reaction categories',
+    'reaction_group_all' => 'All',
+    'reaction_group_common' => 'Common',
+    'reaction_group_faces' => 'Faces',
+    'reaction_group_hands' => 'Hands',
+    'reaction_group_hearts' => 'Hearts',
+    'reaction_group_extras' => 'Symbols',
     'add_user' => 'Add user',
     'adding' => 'Adding...',
     'are_you_sure_you_want_to_leave_this' => 'Are you sure you want to leave this group?',

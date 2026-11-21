@@ -44,11 +44,6 @@ if ($emojiDir === '' && count($emojiDirs) > 0) {
 $emojiFileNames = array_map(static fn($path) => basename($path), $emojiFiles);
 sort($emojiFileNames, SORT_STRING);
 
-$emojiFileKeys = [];
-foreach ($emojiFileNames as $emojiFileName) {
-    $emojiFileKeys[strtoupper((string)preg_replace('/\.svg$/i', '', $emojiFileName))] = true;
-}
-
 $attachmentAcceptedTypes = strtolower((string)(Setting::get('attachments_accepted_file_types') ?? 'png,jpg'));
 $attachmentMaxSizeMb = (int)round(Attachment::maxFileSizeBytes() / (1024 * 1024));
 $attachmentAcceptedExtensions = Attachment::acceptedExtensions();
@@ -136,39 +131,6 @@ if ($currentUserUsername === '') {
 }
 
 $reactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels($chatLocale);
-
-$resolveEmojiFilenameByCode = static function (string $reactionCode) use ($emojiFileKeys): string {
-    $key = strtoupper(trim($reactionCode));
-    if ($key === '') {
-        return '';
-    }
-
-    if (isset($emojiFileKeys[$key])) {
-        return $key . '.svg';
-    }
-    if (!str_contains($key, 'FE0F') && isset($emojiFileKeys[$key . '-FE0F'])) {
-        return $key . '-FE0F.svg';
-    }
-
-    $withoutFe0f = preg_replace('/(?:-)?FE0F/i', '', $key);
-    if ($withoutFe0f !== null && $withoutFe0f !== '' && isset($emojiFileKeys[$withoutFe0f])) {
-        return $withoutFe0f . '.svg';
-    }
-
-    return '';
-};
-
-$unicodeCharForCode = static function (string $reactionCode): string {
-    $hex = strtoupper(trim($reactionCode));
-    if ($hex === '' || !ctype_xdigit($hex)) {
-        return '';
-    }
-    $codepoint = hexdec($hex);
-    if ($codepoint <= 0) {
-        return '';
-    }
-    return mb_chr($codepoint, 'UTF-8');
-};
 
 $renderStoredMentionsToPlain = static function (string $content, $mentionMap): string {
     $map = [];
@@ -888,7 +850,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <?php endif; ?>
                             <?php $messageReactions = is_array($message->reactions ?? null) ? $message->reactions : []; ?>
                             <?php if (!empty($messageReactions)): ?>
-                                <div class="flex items-center gap-1.5">
+                                <div class="flex flex-wrap items-center gap-1.5">
                                     <?php foreach ($messageReactions as $reaction): ?>
                                         <?php
                                             $reactionCode = strtoupper((string)($reaction->reaction_code ?? ''));
@@ -897,16 +859,15 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                             $reactionTitlePrefix = $reactionCodeToLabel[$reactionCode] ?? 'Reaction';
                                             $reactionTitleUsers = !empty($reactionUsers) ? implode(', ', $reactionUsers) : 'No users';
                                             $reactionTitle = $reactionTitlePrefix . ': ' . $reactionTitleUsers;
-                                            $emojiFilename = $resolveEmojiFilenameByCode($reactionCode);
-                                            $emojiChar = $unicodeCharForCode($reactionCode);
+                                            $emojiPath = \Causette\Chat\ReactionCatalog::imagePath($reactionCode);
                                             $reactedByCurrentUser = !empty($reaction->reacted_by_current_user);
                                         ?>
                                         <?php if ($reactionCount > 0): ?>
                                             <button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[12px] js-reaction-badge <?= $reactedByCurrentUser ? 'bg-zinc-700 border-zinc-500 text-zinc-100' : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700' ?>" data-reaction-message-id="<?= (int)$message->id ?>" data-reaction-code="<?= htmlspecialchars($reactionCode, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($reactionTitle, ENT_QUOTES, 'UTF-8') ?>">
-                                                <?php if ($emojiFilename !== ''): ?>
-                                                    <img src="<?= htmlspecialchars(base_url('/emojis/' . $emojiFilename), ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($emojiChar !== '' ? $emojiChar : $reactionTitlePrefix, ENT_QUOTES, 'UTF-8') ?>" class="w-6 h-6" loading="lazy" decoding="async">
+                                                <?php if ($emojiPath !== ''): ?>
+                                                    <img src="<?= htmlspecialchars(base_url($emojiPath), ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($reactionTitlePrefix, ENT_QUOTES, 'UTF-8') ?>" class="w-6 h-6" loading="lazy" decoding="async">
                                                 <?php else: ?>
-                                                    <span><?= htmlspecialchars($emojiChar !== '' ? $emojiChar : $reactionTitlePrefix, ENT_QUOTES, 'UTF-8') ?></span>
+                                                    <span><?= htmlspecialchars($reactionTitlePrefix, ENT_QUOTES, 'UTF-8') ?></span>
                                                 <?php endif; ?>
                                                 <span><?= $reactionCount ?></span>
                                             </button>
