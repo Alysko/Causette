@@ -2,9 +2,13 @@
 require_once __DIR__ . '/../../../../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../../../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../../../vendor/phpmailer/src/Exception.php';
+require_once __DIR__ . '/../../../core/AccountMail.php';
 require_once __DIR__ . '/../../../core/AuthChallenge.php';
+require_once __DIR__ . '/../../../core/DisplayPreferences.php';
 require_once __DIR__ . '/../../../core/SecretSettings.php';
 
+use Causette\Localization\DisplayPreferences;
+use Causette\Mail\AccountMail;
 use Causette\Security\AuthChallenge;
 use Causette\Security\SecretSettings;
 use PHPMailer\PHPMailer\PHPMailer;
@@ -31,10 +35,11 @@ class EmailTwoFAProvider implements TwoFAProviderInterface {
             return false;
         }
 
+        $locale = DisplayPreferences::localeForRecipient($userId);
         return $this->sendEmail(
             $user->email,
-            'Your Causette 2FA Code',
-            "Your login code is <b>{$deliveryCode}</b> (valid 10 minutes)."
+            $locale->text('mail.login_code_subject'),
+            AccountMail::verificationCode($locale, 'mail.login_code_body', $deliveryCode),
         );
     }
 
@@ -42,7 +47,7 @@ class EmailTwoFAProvider implements TwoFAProviderInterface {
         return AuthChallenge::matchesCode($challenge, $code);
     }
 
-    private function sendEmail(string $to, string $subject, string $body): bool {
+    protected function sendEmail(string $to, string $subject, string $body): bool {
         $mailHost = (string)(Setting::get('mail_host') ?? '');
         $mailUser = (string)(Setting::get('mail_user') ?? '');
 
@@ -68,6 +73,8 @@ class EmailTwoFAProvider implements TwoFAProviderInterface {
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($to);
             $mail->isHTML(true);
+            $mail->CharSet = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
             $mail->Subject = $subject;
             $mail->Body = $body;
             $mail->send();

@@ -4,9 +4,12 @@ require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
 require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
+require_once __DIR__ . '/../core/AccountMail.php';
 require_once __DIR__ . '/../core/AccountPassword.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
 
+use Causette\Localization\DisplayPreferences;
+use Causette\Mail\AccountMail;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthBudget;
 use Causette\Security\AuthChallenge;
@@ -377,10 +380,11 @@ class HomeController extends Controller {
             $this->flash('error', 'email_change_limit');
             $this->redirect('/settings');
         }
+        $locale = DisplayPreferences::localeForRecipient((int) $user->id);
         if (!$this->sendEmail(
             $email,
-            'Confirm your new Causette email',
-            "Your email change verification code is <b>{$code}</b> (valid 10 minutes)."
+            $locale->text('mail.email_change_subject'),
+            AccountMail::verificationCode($locale, 'mail.email_change_body', $code),
         )) {
             AuthChallenge::cancel($user, AuthChallenge::CHANGE_EMAIL, $id);
             $this->flash('error', 'email_change_delivery_failed');
@@ -869,6 +873,8 @@ class HomeController extends Controller {
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($to);
             $mail->isHTML(true);
+            $mail->CharSet = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
             $mail->Subject = $subject;
             $mail->Body = $body;
             return $mail->send();

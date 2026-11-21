@@ -19,7 +19,7 @@ final class AuthChallenge
     public const CHANGE_EMAIL = 'email_change';
     public const ENROLL_TOTP = 'totp_setup';
     private const MAX_ATTEMPTS = 5;
-    private const LIFETIME = 600;
+    public const LIFETIME_SECONDS = 600;
     private const PURPOSES = [self::LOGIN, self::VERIFY_EMAIL, self::CHANGE_EMAIL, self::ENROLL_TOTP];
 
     public static function generateCode(): string
@@ -38,7 +38,7 @@ final class AuthChallenge
             $record = [
                 'id' => $id,
                 'binding' => Auth::passwordBinding($account),
-                'expires' => time() + self::LIFETIME,
+                'expires' => time() + self::LIFETIME_SECONDS,
                 'attempts' => 0,
                 'next_attempt' => 0,
                 'context' => $context,
