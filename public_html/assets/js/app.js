@@ -1217,6 +1217,7 @@ async function init() {
 
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
+        const attachmentError = document.getElementById('message-send-error');
         messageForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             const input = document.getElementById('message-input');
@@ -1236,6 +1237,10 @@ async function init() {
                 return;
             }
 
+            if (attachmentError) {
+                attachmentError.textContent = '';
+                attachmentError.classList.add('hidden');
+            }
             const result = await postForm('/api/messages', {
                 csrf_token: getCsrfToken(),
                 chat_id: String(currentChat.id),
@@ -1254,6 +1259,9 @@ async function init() {
                 sendTypingStatus(false).catch(() => {});
                 await pollMessages({ scrollMode: 'bottom' });
                 await loadSidebarChats();
+            } else if (attachmentError && ['attachment_upload_busy', 'attachment_unavailable'].includes(result.error)) {
+                attachmentError.textContent = uiText(result.error);
+                attachmentError.classList.remove('hidden');
             } else {
                 showToast(uiActionError(result.error, 'failed_to_send_message'), 'error');
             }

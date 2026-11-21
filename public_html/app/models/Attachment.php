@@ -126,7 +126,9 @@ class Attachment extends Model {
         return $rows;
     }
 
-    public static function createPendingFromUpload(int $chatId, $user, array $file, int $expirySeconds = 0): array {
+    public static function createPendingFromUpload(
+        int $chatId, $user, array $file, int $expirySeconds = 0, ?callable $authorize = null
+    ): array {
         $expirySeconds = self::normalizeExpirySeconds($expirySeconds);
         $expiresAt = self::expiryTimestampFromSeconds($expirySeconds);
         $attachmentLogging = Setting::get('attachment_logging') === '1';
@@ -144,6 +146,9 @@ class Attachment extends Model {
 
         $errorCode = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
         if ($errorCode !== UPLOAD_ERR_OK) {
+            if ($errorCode === UPLOAD_ERR_INI_SIZE || $errorCode === UPLOAD_ERR_FORM_SIZE) {
+                return ['error' => 'attachment_too_large'];
+            }
             $logFailure('attachment_upload_failed', 'php_upload_error:' . $errorCode);
             return ['error' => 'attachment_upload_failed'];
         }
@@ -223,8 +228,11 @@ class Attachment extends Model {
             $result = AttachmentBudget::locked(static function () use (
                 $chatId, $userId, $userNumber, $tmpPath, $size, $originalName, $nameExt,
                 $mime, $isImage, $width, $height, $fileHash, $expiresAt, $expirySeconds, $maxFileSize,
-                $attachmentLogging
+                $attachmentLogging, $authorize
             ): array {
+                if ($authorize !== null && ($denial = $authorize()) !== null) {
+                    return $denial;
+                }
                 $available = AttachmentBudget::availableBytes($userId, $chatId);
                 $dedup = self::findStoredDuplicate($fileHash, $nameExt);
                 // Re-encoding can change the size. Check the stored bytes before committing.
@@ -244,40 +252,42 @@ class Attachment extends Model {
                 }
 
                 $storedSize = $incomingSize;
-                $targetPath = null;
-                $keepFile = false;
+                $input = null;
+                $staged = null;
+                $id = null;
+                $published = false;
                 try {
                     if ($dedup === null) {
-                        $dir = self::directoryForUserNumber($userNumber);
-                        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+                        $input = $isImage ? fopen('php://memory', 'w+b') : @fopen($tmpPath, 'rb');
+                        if (!$input || ($isImage && !self::writeSanitizedImage($tmpPath, $mime, $input))) {
                             return ['error' => 'attachment_upload_failed'];
                         }
-
-                        $path = $dir . '/' . $fileBase . '.' . $nameExt;
-                        if (!self::isPathWithinAttachmentsRoot($path) || !($output = @fopen($path, 'xb'))) {
+                        $storedSize = (int)(fstat($input)['size'] ?? 0);
+                        if ($storedSize <= 0 || (!$isImage && $storedSize !== $size)) {
                             return ['error' => 'attachment_upload_failed'];
                         }
-                        $targetPath = $path;
-                        try {
-                            $success = $isImage ? self::writeSanitizedImage($tmpPath, $mime, $output)
-                                : self::copyUploadedBytes($tmpPath, $output, $size);
-                            $stats = $success && fflush($output) ? fstat($output) : false;
-                        } finally {
-                            fclose($output);
-                        }
-                        if (!$stats || $stats['size'] <= 0) {
-                            return ['error' => 'attachment_upload_failed'];
-                        }
-                        $storedSize = (int)$stats['size'];
                         if ($storedSize > $maxFileSize) {
                             return ['error' => 'attachment_too_large'];
                         }
                         if ($storedSize > $available) {
                             return ['error' => 'attachment_quota_exceeded'];
                         }
-                        self::safeChmodPath($targetPath, 0644);
+                        rewind($input);
+
+                        $dir = self::directoryForUserNumber($userNumber);
+                        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+                            return ['error' => 'attachment_upload_failed'];
+                        }
+                        $path = $dir . '/' . $fileBase . '.' . $nameExt;
+                        $staged = $path . '.upload';
+                        if (!self::isPathWithinAttachmentsRoot($path) || file_exists($path) || is_link($path)
+                            || file_exists($staged) || is_link($staged)
+                        ) {
+                            return ['error' => 'attachment_upload_failed'];
+                        }
                     }
 
+                    // Reserve the actual size before placing bytes in attachment storage.
                     Database::query(
                         "INSERT INTO attachments (chat_id, user_id, original_name, file_name, file_extension, mime_type,
                          file_size, width, height, file_hash, dedup_source_id, status, expires_at)
@@ -285,11 +295,21 @@ class Attachment extends Model {
                         [$chatId, $userId, $originalName, $fileBase, $nameExt, $mime, $storedSize,
                             $width, $height, $fileHash, $dedup === null ? null : (int)$dedup->id, $expiresAt]
                     );
-                    $keepFile = true;
                     $id = (int)Database::getInstance()->lastInsertId();
+                    if ($staged !== null && !self::publishUpload($input, $storedSize, $staged, $path)) {
+                        return ['error' => 'attachment_upload_failed'];
+                    }
+                    $published = true;
                 } finally {
-                    if (!$keepFile && $targetPath !== null && !self::safeUnlinkPath($targetPath)) {
-                        error_log('Could not remove an uncommitted attachment file.');
+                    if (is_resource($input)) {
+                        fclose($input);
+                    }
+                    if (!$published && $id !== null && $staged !== null) {
+                        if (self::safeUnlinkPath($staged)) {
+                            Database::query('DELETE FROM attachments WHERE id = ? AND status = ?', [$id, 'pending']);
+                        } else {
+                            error_log('Could not remove a staged attachment file. Its quota remains reserved.');
+                        }
                     }
                 }
 
@@ -350,17 +370,23 @@ class Attachment extends Model {
         return self::isPathWithinAttachmentsRoot($path) && !is_link($path) && is_file($path) ? $duplicate : null;
     }
 
-    /** @param resource $output */
-    private static function copyUploadedBytes(string $source, $output, int $size): bool {
-        $input = @fopen($source, 'rb');
-        if ($input === false) {
+    /** @param resource $input */
+    private static function publishUpload($input, int $size, string $staged, string $path): bool {
+        $output = @fopen($staged, 'xb');
+        if ($output === false) {
             return false;
         }
         try {
-            return stream_copy_to_stream($input, $output, $size + 1) === $size;
+            $complete = @stream_copy_to_stream($input, $output, $size) === $size
+                && @fflush($output) && (fstat($output)['size'] ?? null) === $size;
         } finally {
-            fclose($input);
+            fclose($output);
         }
+        if (!$complete || !self::safeRenameWithinAttachmentsRoot($staged, $path)) {
+            return false;
+        }
+        self::safeChmodPath($path, 0644);
+        return true;
     }
 
     public static function updatePendingExpiryForUser(int $attachmentId, int $userId, int $expirySeconds): bool {
@@ -388,8 +414,8 @@ class Attachment extends Model {
         )->fetch();
     }
 
-    public static function deletePendingByIdForUser(int $attachmentId, int $userId): bool {
-        return AttachmentBudget::locked(static fn() => self::deletePendingUnderLock($attachmentId, $userId), false);
+    public static function deletePendingByIdForUser(int $attachmentId, int $userId): ?bool {
+        return AttachmentBudget::locked(static fn() => self::deletePendingUnderLock($attachmentId, $userId), null);
     }
 
     private static function deletePendingUnderLock(int $attachmentId, int $userId): bool {
@@ -424,11 +450,17 @@ class Attachment extends Model {
         return true;
     }
 
-    public static function markPendingSubmitted(int $chatId, int $userId, int $messageId, array $attachmentIds): void {
+    public static function markPendingSubmitted(int $chatId, int $userId, int $messageId, array $attachmentIds): bool {
         if (count($attachmentIds) === 0) {
-            return;
+            return true;
         }
 
+        return AttachmentBudget::locked(static fn() => self::submitPendingUnderLock(
+            $chatId, $userId, $messageId, $attachmentIds
+        ), false);
+    }
+
+    private static function submitPendingUnderLock(int $chatId, int $userId, int $messageId, array $attachmentIds): bool {
         $safeIds = [];
         foreach ($attachmentIds as $id) {
             $number = (int)$id;
@@ -438,18 +470,37 @@ class Attachment extends Model {
         }
 
         if (count($safeIds) === 0) {
-            return;
+            return false;
         }
 
         $placeholders = implode(',', array_fill(0, count($safeIds), '?'));
-        $params = array_merge([$messageId], [$chatId, $userId], array_keys($safeIds));
+        $params = array_merge([$chatId, $userId], array_keys($safeIds));
+        $files = Database::query(
+            "SELECT COALESCE(source.file_name, pending.file_name) AS file_name,
+                    COALESCE(source.file_extension, pending.file_extension) AS file_extension, owner.user_number
+             FROM attachments pending
+             LEFT JOIN attachments source ON source.id = pending.dedup_source_id
+             JOIN users owner ON owner.id = COALESCE(source.user_id, pending.user_id)
+             WHERE pending.chat_id = ? AND pending.user_id = ? AND pending.status = 'pending' AND pending.id IN ($placeholders)",
+            $params
+        )->fetchAll();
+        if (count($files) !== count($safeIds)) {
+            return false;
+        }
+        foreach ($files as $file) {
+            $path = self::buildAttachmentPath((string)$file->user_number, (string)$file->file_name, (string)$file->file_extension);
+            if (!self::isPathWithinAttachmentsRoot($path) || is_link($path) || !is_file($path)) {
+                return false;
+            }
+        }
 
-        Database::query(
+        $changed = Database::query(
             "UPDATE attachments
              SET status = 'submitted', message_id = ?, submitted_at = NOW()
              WHERE chat_id = ? AND user_id = ? AND status = 'pending' AND id IN ($placeholders)",
-            $params
+            array_merge([$messageId], $params)
         );
+        return $changed->rowCount() === count($safeIds);
     }
 
     public static function attachSubmittedToMessages(array &$messages): void {
@@ -590,7 +641,13 @@ class Attachment extends Model {
     }
 
     public static function deleteSubmittedForMessage(int $messageId): bool {
-        return AttachmentBudget::locked(static fn() => self::releaseMessageFiles($messageId), false);
+        return AttachmentBudget::locked(static function () use ($messageId): bool {
+            if (!self::releaseMessageFiles($messageId)) {
+                return false;
+            }
+            Database::query('DELETE FROM messages WHERE id = ?', [$messageId]);
+            return true;
+        }, false);
     }
 
     private static function releaseMessageFiles(int $messageId): bool {
@@ -704,8 +761,9 @@ class Attachment extends Model {
         }
     }
 
-    public static function deleteFilesForChatId(int $chatId): bool {
-        return AttachmentBudget::locked(static fn() => self::releaseChatFiles($chatId), false);
+    public static function deleteChatWithFiles(int $chatId, callable $deleteChat, ?callable $mayDelete = null): bool {
+        return AttachmentBudget::locked(static fn() =>
+            ($mayDelete === null || $mayDelete()) && self::releaseChatFiles($chatId) && $deleteChat(), false);
     }
 
     private static function releaseChatFiles(int $chatId): bool {
@@ -796,6 +854,9 @@ class Attachment extends Model {
 
         $physicalPath = self::buildAttachmentPath($userNumber, $fileName, $ext);
         if ($physicalPath === '') {
+            return false;
+        }
+        if (!self::safeUnlinkPath($physicalPath . '.upload')) {
             return false;
         }
 

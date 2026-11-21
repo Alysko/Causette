@@ -2,7 +2,9 @@
 use Causette\Chat\PollDraft;
 use Causette\Http\ChatResponse;
 use Causette\Security\ConversationRead;
+use Causette\Storage\AttachmentBudget;
 
+require_once __DIR__ . '/../core/AttachmentBudget.php';
 require_once __DIR__ . '/../core/ChatResponse.php';
 require_once __DIR__ . '/../core/ConversationRead.php';
 require_once __DIR__ . '/../core/PollDraft.php';
@@ -1184,20 +1186,40 @@ class ChatController extends Controller {
             $quotedUsername = (string)($quotedMessage->username ?? '');
         }
 
-        Database::query(
-            "INSERT INTO messages (chat_id, user_id, content, quoted_message_id, quoted_user_id, quoted_content)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                $chatId,
-                $userId,
-                $content,
-                $quotedMessageId > 0 ? $quotedMessageId : null,
-                $quotedUserId > 0 ? $quotedUserId : null,
-                $quotedContent
-            ]
-        );
-        $messageId = (int)Database::getInstance()->lastInsertId();
-        Attachment::markPendingSubmitted($chatId, (int)$userId, $messageId, $attachmentIds);
+        $insert = static function () use ($chatId, $userId, $content, $quotedMessageId, $quotedUserId, $quotedContent): int {
+            Database::query(
+                "INSERT INTO messages (chat_id, user_id, content, quoted_message_id, quoted_user_id, quoted_content)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                [$chatId, $userId, $content, $quotedMessageId > 0 ? $quotedMessageId : null,
+                    $quotedUserId > 0 ? $quotedUserId : null, $quotedContent]
+            );
+            return (int)Database::getInstance()->lastInsertId();
+        };
+        if ($attachmentIds === []) {
+            $insert();
+        } else {
+            $failure = AttachmentBudget::locked(function () use ($chatId, $userId, $attachmentIds, $insert): ?array {
+                if (($denial = $this->attachmentUploadDenial($chatId, (int)$userId)) !== null) {
+                    return $denial;
+                }
+                $connection = Database::getInstance();
+                $connection->beginTransaction();
+                try {
+                    if (!Attachment::markPendingSubmitted($chatId, (int)$userId, $insert(), $attachmentIds)) {
+                        return ['error' => 'attachment_unavailable', 'status' => 409];
+                    }
+                    $connection->commit();
+                    return null;
+                } finally {
+                    if ($connection->inTransaction()) {
+                        $connection->rollBack();
+                    }
+                }
+            }, ['error' => 'attachment_upload_busy', 'status' => 503]);
+            if ($failure !== null) {
+                $this->json(['error' => $failure['error']], $failure['status']);
+            }
+        }
 
         // Notify other members
         $members = Database::query("SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?", [$chatId, $userId])->fetchAll();
@@ -1229,43 +1251,21 @@ class ChatController extends Controller {
             $this->json(['error' => 'Invalid payload'], 400);
         }
 
-        $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
-        if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+        $authorize = fn() => $this->attachmentUploadDenial($chatId, $userId);
+        if (($denial = $authorize()) !== null) {
+            $this->json(['error' => $denial['error']], $denial['status']);
         }
-
-        if ($this->supportsChatSoftDelete()) {
-            $chat = Database::query("SELECT id, type, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
-            if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                $this->json(['error' => 'Chat not found'], 404);
-            }
-        } else {
-            $chat = Database::query("SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
-        }
-
-        if ($chat && Chat::isGroupType($chat->type ?? null) && $this->isGroupMemberMuted($chatId, $userId)) {
-            $this->json(['error' => 'You are muted in this group'], 403);
-        }
-
-        $messageRestrictionReason = $this->getPersonalChatMessageRestrictionReason($chatId, $userId);
-        if ($messageRestrictionReason === 'banned_user') {
-            $this->json(['error' => "You can't send messages to a banned user"], 403);
-        }
-        if ($messageRestrictionReason === 'not_friends') {
-            $this->json(['error' => 'You can only message friends in personal chats'], 403);
-        }
-
         if (!isset($_FILES['attachment']) || !is_array($_FILES['attachment'])) {
             $this->json(['error' => 'No file uploaded'], 400);
         }
 
-        $result = Attachment::createPendingFromUpload($chatId, $user, $_FILES['attachment'], $expirySeconds);
+        $result = Attachment::createPendingFromUpload($chatId, $user, $_FILES['attachment'], $expirySeconds, $authorize);
         if (!empty($result['success'])) {
             $this->json($result);
         }
 
         $error = $result['error'] ?? 'attachment_upload_failed';
-        $status = match ($error) {
+        $status = $result['status'] ?? match ($error) {
             'attachment_quota_exceeded' => 409,
             'attachment_upload_busy' => 503,
             'attachment_image_too_large', 'attachment_too_large' => 413,
@@ -1274,11 +1274,42 @@ class ChatController extends Controller {
         $this->json(['error' => $error], $status);
     }
 
+    private function attachmentUploadDenial(int $chatId, int $userId): ?array {
+        $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
+        if (!$member) {
+            return ['error' => 'Access denied', 'status' => 403];
+        }
+
+        if ($this->supportsChatSoftDelete()) {
+            $chat = Database::query("SELECT id, type, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
+            if (!$chat || $this->chatIsSoftDeleted($chat)) {
+                return ['error' => 'Chat not found', 'status' => 404];
+            }
+        } else {
+            $chat = Database::query("SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
+        }
+
+        if ($chat && Chat::isGroupType($chat->type ?? null) && $this->isGroupMemberMuted($chatId, $userId)) {
+            return ['error' => 'You are muted in this group', 'status' => 403];
+        }
+
+        $messageRestrictionReason = $this->getPersonalChatMessageRestrictionReason($chatId, $userId);
+        if ($messageRestrictionReason === 'banned_user') {
+            return ['error' => "You can't send messages to a banned user", 'status' => 403];
+        }
+        if ($messageRestrictionReason === 'not_friends') {
+            return ['error' => 'You can only message friends in personal chats', 'status' => 403];
+        }
+
+        return null;
+    }
+
     public function deleteAttachment() {
         Auth::requireAuth();
         Auth::csrfValidate();
 
         $attachmentId = (int)($_POST['attachment_id'] ?? 0);
+        $pendingOnly = ($_POST['pending_only'] ?? null) === '1';
         $authUser = Auth::user();
         $userId = (int)$authUser->id;
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
@@ -1298,8 +1329,8 @@ class ChatController extends Controller {
             [$userId, $attachmentId]
         )->fetch();
 
-        if (!$attachment) {
-            $this->json(['error' => 'Attachment not found'], 404);
+        if (!$attachment || ($pendingOnly && $attachment->status !== 'pending')) {
+            $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : 'Attachment not found'], 404);
         }
 
         $isOwner = (int)$attachment->user_id === $userId;
@@ -1309,6 +1340,9 @@ class ChatController extends Controller {
             }
 
             $deleted = Attachment::deletePendingByIdForUser($attachmentId, $userId);
+            if ($deleted === null) {
+                $this->json(['error' => 'attachment_upload_busy'], 503);
+            }
             if (!$deleted) {
                 $this->json(['error' => 'Attachment not found'], 404);
             }
@@ -1739,7 +1773,7 @@ class ChatController extends Controller {
         }
         $remaining = (int)Database::query("SELECT COUNT(*) FROM chat_members WHERE chat_id = ?", [$chatId])->fetchColumn();
         if ($remaining <= 0) {
-            Database::query("DELETE FROM chats WHERE id = ?", [$chatId]);
+            $this->deleteEmptyChat($chatId);
         }
 
         $this->json(['success' => true]);
@@ -1832,7 +1866,7 @@ class ChatController extends Controller {
         }
 
         if ($remaining <= 0) {
-            Database::query("DELETE FROM chats WHERE id = ?", [$chatId]);
+            $this->deleteEmptyChat($chatId);
         }
 
         $this->json(['success' => true, 'redirect' => '/']);
@@ -2054,11 +2088,15 @@ class ChatController extends Controller {
             return;
         }
 
-        $attachmentsReleased = Attachment::deleteFilesForChatId($chatId);
-        if (!$attachmentsReleased) {
-            return;
-        }
+        Attachment::deleteChatWithFiles($chatId, static fn() => self::deleteChatRows($chatId));
+    }
 
+    private function deleteEmptyChat(int $chatId): void {
+        Attachment::deleteChatWithFiles($chatId, static fn() => self::deleteChatRows($chatId),
+            static fn() => (int)Database::query('SELECT COUNT(*) FROM chat_members WHERE chat_id = ?', [$chatId])->fetchColumn() === 0);
+    }
+
+    private static function deleteChatRows(int $chatId): bool {
         $pdo = Database::getInstance();
         try {
             $pdo->beginTransaction();
@@ -2083,10 +2121,12 @@ class ChatController extends Controller {
             Database::query("DELETE FROM chats WHERE id = ?", [$chatId]);
 
             $pdo->commit();
+            return true;
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            return false;
         }
     }
 
@@ -2840,8 +2880,6 @@ class ChatController extends Controller {
         if (!Attachment::deleteSubmittedForMessage($messageId)) {
             $this->json(['error' => 'Unable to delete attachments for this message'], 500);
         }
-
-        Database::query("DELETE FROM messages WHERE id = ?", [$messageId]);
 
         $this->json(['success' => true]);
     }

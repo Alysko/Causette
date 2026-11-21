@@ -13,6 +13,7 @@ return [
     'attachment_image_too_large' => 'L’image est trop grande pour être traitée. Réduisez ses dimensions et réessayez.',
     'attachment_quota_exceeded' => 'Le quota de pièces jointes est atteint. Supprimez une pièce jointe ou contactez un administrateur.',
     'attachment_upload_busy' => 'Le stockage des pièces jointes est occupé. Réessayez dans un instant.',
+    'attachment_unavailable' => 'Une pièce jointe est indisponible. Retirez-la du brouillon ou ajoutez-la à nouveau.',
     'call_in_progress' => 'Appel en cours',
     'call_muted' => 'Micro coupé',
     'call_started' => 'Appel lancé',

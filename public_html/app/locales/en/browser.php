@@ -13,6 +13,7 @@ return [
     'attachment_image_too_large' => 'The image is too large to process safely. Resize it and try again.',
     'attachment_quota_exceeded' => 'The attachment quota is full. Remove an attachment or contact an administrator.',
     'attachment_upload_busy' => 'Attachment storage is busy. Try again in a moment.',
+    'attachment_unavailable' => 'An attachment is no longer available. Remove it from the draft or attach it again.',
     'call_in_progress' => 'Call in progress',
     'call_muted' => 'Call muted',
     'call_started' => 'Call started',

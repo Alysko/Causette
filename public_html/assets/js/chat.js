@@ -1952,6 +1952,14 @@ function renderPendingAttachmentList() {
     }).join('');
 }
 
+function displayAttachmentUploadError(message) {
+    const notice = document.getElementById('attachment-upload-error');
+    if (notice) {
+        notice.textContent = message;
+        notice.classList.toggle('hidden', !message);
+    }
+}
+
 async function uploadAttachmentFile(file, expirySeconds = 0) {
     if (!currentChat) return;
     if (normalizeChatType(currentChat.type) === 'personal' && currentChat.can_send_messages === false) {
@@ -1975,19 +1983,19 @@ async function uploadAttachmentFile(file, expirySeconds = 0) {
     try {
         payload = JSON.parse(text);
     } catch {
-        payload = { success: response.ok, error: 'attachment_upload_failed' };
+        payload = { success: response.ok, error: response.status === 413 ? 'attachment_too_large' : 'attachment_upload_failed' };
     }
 
     if (!payload.success || !payload.attachment) {
         const error = String(payload.error || 'attachment_upload_failed');
         const label = uiText(error);
-        showToast(label === error ? uiText('attachment_upload_failed') : label, 'error');
+        displayAttachmentUploadError(label === error ? uiText('attachment_upload_failed') : label);
         return;
     }
 
     const normalized = normalizeAttachment(payload.attachment);
     if (!normalized) {
-        showToast(uiText('attachment_upload_failed'), 'error');
+        displayAttachmentUploadError(uiText('attachment_upload_failed'));
         return;
     }
 
@@ -2001,10 +2009,15 @@ async function deletePendingAttachment(attachmentId) {
 
     const result = await postForm('/api/attachments/delete', {
         csrf_token: getCsrfToken(),
-        attachment_id: String(id)
+        attachment_id: String(id),
+        pending_only: '1'
     });
 
-    if (!result.success) {
+    if (!result.success && result.error !== 'attachment_unavailable') {
+        if (result.error === 'attachment_upload_busy') {
+            displayAttachmentUploadError(uiText('attachment_upload_busy'));
+            return;
+        }
         showToast(uiActionError(result.error, 'unable_to_delete_attachment'), 'error');
         return;
     }
@@ -2074,6 +2087,7 @@ function bindAttachmentsDrawer() {
     input.addEventListener('change', async () => {
         const files = Array.from(input.files || []);
         if (files.length === 0) return;
+        displayAttachmentUploadError('');
 
         for (const file of files) {
             await uploadAttachmentFile(file, 0);

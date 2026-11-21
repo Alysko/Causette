@@ -41,7 +41,23 @@ if (PHP_SAPI === 'cli-server') {
             return;
         }
         $user = Database::query('SELECT id, user_number FROM users WHERE id = ?', [(int)$_POST['user']])->fetch();
-        $response = Attachment::createPendingFromUpload((int)$_POST['chat'], $user, $_FILES['attachment']);
+        if (($_POST['action'] ?? '') === 'submit') {
+            Attachment::markPendingSubmitted((int)$_POST['chat'], (int)$user->id, 1, [(int)$_POST['attachment_id']]);
+            $response = ['status' => Database::query('SELECT status FROM attachments WHERE id = ?',
+                [(int)$_POST['attachment_id']])->fetchColumn()];
+        } else {
+            $limited = ($_POST['action'] ?? '') === 'limit-write';
+            if ($limited && !posix_setrlimit(POSIX_RLIMIT_FSIZE, 4096, POSIX_RLIMIT_INFINITY)) {
+                throw new LogicException('Could not inject a short write.');
+            }
+            try {
+                $response = Attachment::createPendingFromUpload((int)$_POST['chat'], $user, $_FILES['attachment']);
+            } finally {
+                if ($limited) {
+                    posix_setrlimit(POSIX_RLIMIT_FSIZE, POSIX_RLIMIT_INFINITY, POSIX_RLIMIT_INFINITY);
+                }
+            }
+        }
     } catch (PDOException) {
         $response = ['error' => 'fixture_database_failure'];
     }
@@ -49,11 +65,15 @@ if (PHP_SAPI === 'cli-server') {
     return;
 }
 
-function uploadFixture(string $address, string $bytes, string $filename, int $user = 1, int $chat = 1): array
+function uploadFixture(
+    string $address, string $bytes, string $filename, int $user = 1, int $chat = 1, string $action = '', int $id = 0
+): array
 {
     $boundary = 'fixture-multipart-' . bin2hex(random_bytes(8));
     $body = "--{$boundary}\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\n{$user}\r\n"
         . "--{$boundary}\r\nContent-Disposition: form-data; name=\"chat\"\r\n\r\n{$chat}\r\n"
+        . "--{$boundary}\r\nContent-Disposition: form-data; name=\"action\"\r\n\r\n{$action}\r\n"
+        . "--{$boundary}\r\nContent-Disposition: form-data; name=\"attachment_id\"\r\n\r\n{$id}\r\n"
         . "--{$boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"{$filename}\"\r\n"
         . "Content-Type: application/octet-stream\r\n\r\n{$bytes}\r\n--{$boundary}--\r\n";
     $response = file_get_contents("http://{$address}/", false, stream_context_create(['http' => [
@@ -63,13 +83,17 @@ function uploadFixture(string $address, string $bytes, string $filename, int $us
     return json_decode($response, true, 8, JSON_THROW_ON_ERROR);
 }
 
-function fixturePng(int $width, int $height): string
+function fixturePng(int $width, int $height, bool $varied = false): string
 {
     $chunk = static fn(string $type, string $data): string =>
         pack('N', strlen($data)) . $type . $data . pack('N', crc32($type . $data));
+    $pixels = '';
+    for ($row = 0; $row < $height; $row++) {
+        $pixels .= "\0" . ($varied ? random_bytes(3 * $width) : str_repeat("\0", 3 * $width));
+    }
     return "\x89PNG\r\n\x1a\n"
         . $chunk('IHDR', pack('NNCCCCC', $width, $height, 8, 2, 0, 0, 0))
-        . $chunk('IDAT', gzcompress(str_repeat(str_repeat("\0", 1 + 3 * $width), $height)))
+        . $chunk('IDAT', gzcompress($pixels))
         . $chunk('IEND', '');
 }
 
@@ -86,6 +110,7 @@ $db->exec("INSERT INTO users (id, username, email, password, user_number)
     VALUES (2, 'fixturepeer', 'peer@example.test', 'fixture-disabled-password', '1234123412341234')");
 $db->exec("INSERT INTO chats (id, chat_number, type, created_by) VALUES
     (1, '1234123412341111', 'group', 1), (2, '1234123412342222', 'group', 1)");
+$db->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (1, 1, 1, 'Fixture message')");
 Setting::set('attachments_accepted_file_types', 'pdf,png');
 putenv('CAUSETTE_UPLOAD_FIXTURE_STORAGE=' . $storage);
 
@@ -94,6 +119,7 @@ expectUpload(is_resource($socket), 'Cannot allocate a loopback fixture port.');
 $address = stream_socket_get_name($socket, false);
 fclose($socket);
 $server = proc_open([
+    'sh', '-c', 'trap "" XFSZ; exec "$@"', 'fixture-server',
     PHP_BINARY, '-d', 'pdo_mysql.default_socket=/run/mysqld/mysqld.sock',
     '-d', 'memory_limit=12M', '-d', 'display_errors=0', '-S', $address, __FILE__,
 ], [['file', '/dev/null', 'r'], ['file', '/dev/null', 'w'], ['file', $storage . '/server.log', 'w']], $pipes);
@@ -159,6 +185,8 @@ try {
             $small = uploadFixture($address, fixturePng(16, 16), 'small.png');
             expectUpload(($small['success'] ?? false) && $small['attachment']['width'] === 16 && count($files()) === 1,
                 'A small PNG must still be re-encoded and stored.');
+        } else {
+            echo "small PNG re-encode: skipped (GD unavailable)\n";
         }
     });
 
@@ -186,6 +214,23 @@ try {
         }
         expectUpload((uploadFixture($address, $pdf, 'reserved.pdf')['success'] ?? false) === true,
             'The authorized upload must succeed after the reservation is released.');
+    });
+
+    $test('submission while deletion owns the lock', static function () use ($address, $pdf): void {
+        $upload = uploadFixture($address, $pdf, 'pending.pdf');
+        expectUpload($upload['success'] ?? false, 'The fixture upload must succeed.');
+        $id = $upload['attachment']['id'];
+        $name = AttachmentBudget::lockName();
+        expectUpload((string)Database::query('SELECT GET_LOCK(?, 0)', [$name])->fetchColumn() === '1',
+            'The independent connection must hold the deletion lock.');
+        try {
+            expectUpload(uploadFixture($address, $pdf, 'unused.pdf', 1, 1, 'submit', $id)['status'] === 'pending',
+                'Submitting must not change a pending attachment while deletion holds the storage lock.');
+        } finally {
+            Database::query('SELECT RELEASE_LOCK(?)', [$name]);
+        }
+        expectUpload(uploadFixture($address, $pdf, 'unused.pdf', 1, 1, 'submit', $id)['status'] === 'submitted',
+            'The authorized submission must succeed when the lock is available.');
     });
 
     $test('deduplicated quota and owner deletion', static function () use ($address, $pdf, $files, $db): void {
@@ -235,6 +280,19 @@ try {
             $db->exec('DROP TRIGGER fixture_refuse_attachment');
         }
     });
+
+    if (extension_loaded('gd') && function_exists('posix_setrlimit')) {
+        $test('short image write', static function () use ($address, $files, $db): void {
+            $png = fixturePng(128, 128, true);
+            expectUpload(strlen($png) > 4096, 'The fixture must be larger than the injected file limit.');
+            $failed = uploadFixture($address, $png, 'short.png', 1, 1, 'limit-write');
+            expectUpload(($failed['error'] ?? null) === 'attachment_upload_failed' && $files() === []
+                && (int)$db->query('SELECT COUNT(*) FROM attachments')->fetchColumn() === 0,
+                'A short write must retain neither a file nor a row.');
+        });
+    } else {
+        echo "short image write: skipped (requires GD and POSIX limits)\n";
+    }
 } finally {
     proc_terminate($server);
     proc_close($server);
