@@ -4,7 +4,7 @@ set -eu
 run_php_checks() {
     for name in chat-bootstrap mfa-delivery installer-authorization installer-keys \
         update-authorization message-response reaction-catalog attachment-access \
-        request-origin web-push-delivery push-subscription-policy; do
+        request-origin web-push-delivery push-subscription-policy localization notification-localization; do
         php -d session.save_path=/tmp "/tmp/project/tests/$name.test.php"
     done
 }

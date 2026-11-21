@@ -47,6 +47,12 @@ final class DisplayPreferences
         return self::$effective;
     }
 
+    public static function localeForRecipient(int $userId): Locale
+    {
+        // A notification may be generated while the recipient is offline.
+        return Locale::resolve(self::read($userId)['language'], self::read()['language']);
+    }
+
     public static function timezone(): string
     {
         return self::$timezone;
