@@ -769,6 +769,10 @@ async function checkAccountMenu(browser, errors) {
     await profile.click();
     await desktop.waitForURL(new URL(profileUrl, origin).href);
     assert.equal(await signOut.isHidden(), true);
+    await trigger.press('Enter');
+    await profile.press('Enter');
+    assert.equal(await signOut.isHidden(), true, 'Selecting the active profile must close the menu');
+    assert.equal(await trigger.evaluate(button => button === document.activeElement), true);
     await trigger.click();
     await signOut.waitFor();
     await desktop.locator('#app-main-content').click({ position: { x: 10, y: 10 } });
@@ -786,11 +790,21 @@ async function checkAccountMenu(browser, errors) {
     const sidebarToggle = mobile.locator('#sidebar-toggle-mobile');
     const mobileTrigger = mobile.getByLabel('Menu du compte de fixtureadmin', { exact: true });
     const mobileSignOut = mobile.getByRole('button', { name: 'Se déconnecter', exact: true });
+    const mobileProfile = mobile.getByRole('link', { name: 'Voir le profil', exact: true });
     assert.equal(await mobileTrigger.isHidden(), true);
     await sidebarToggle.tap();
     await mobileTrigger.tap();
     await mobileSignOut.waitFor();
     await mobile.locator('#mobile-overlay-backdrop').tap({ position: { x: 370, y: 300 } });
+    await sidebarToggle.tap();
+    assert.equal(await mobileSignOut.isHidden(), true);
+    await mobileTrigger.tap();
+    await mobileProfile.tap();
+    await mobile.waitForURL(new URL(profileUrl, origin).href);
+    await sidebarToggle.tap();
+    await mobileTrigger.tap();
+    await mobileProfile.tap();
+    assert.equal(await sidebarToggle.evaluate(button => button === document.activeElement), true);
     await sidebarToggle.tap();
     assert.equal(await mobileSignOut.isHidden(), true);
 

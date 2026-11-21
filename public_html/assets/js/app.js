@@ -1772,10 +1772,17 @@ function bindAccountMenu() {
     if (!menu) return;
 
     const trigger = menu.querySelector('summary');
+    const mobileSidebarToggle = document.getElementById('sidebar-toggle-mobile');
     const closeMenu = () => { menu.open = false; };
 
     document.addEventListener('click', (event) => {
         if (menu.open && !menu.contains(event.target)) closeMenu();
+    });
+    menu.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('a[href]')) return;
+        closeMenu();
+        const focusTarget = mobileSidebarToggle?.getClientRects().length ? mobileSidebarToggle : trigger;
+        focusTarget.focus({ preventScroll: true });
     });
     menu.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape' || !menu.open) return;
