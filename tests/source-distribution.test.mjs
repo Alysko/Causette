@@ -7,6 +7,13 @@ import { runInNewContext } from 'node:vm';
 
 const root = new URL('../', import.meta.url);
 
+function trackedPaths() {
+    return execFileSync('git', ['ls-files', '-z'], {
+        cwd: fileURLToPath(root),
+        encoding: 'utf8',
+    }).split('\0').filter(Boolean);
+}
+
 test('the source retains the public entry point, private storage layout and licenses', () => {
     for (const requiredFile of [
         'LICENSE',
@@ -20,6 +27,16 @@ test('the source retains the public entry point, private storage layout and lice
         assert.ok(statSync(new URL(requiredFile, root)).isFile(), requiredFile);
     }
     assert.ok(!readdirSync(new URL('public_html/', root)).some(name => name.toLowerCase() === 'storage'));
+});
+
+test('the tracked source root matches the shared-hosting layout', () => {
+    const allowed = new Set([
+        '.gitattributes', '.github', '.gitignore', '.gitleaksignore',
+        'LICENSE', 'README.md', 'docs', 'frontend', 'public_html', 'scripts', 'storage', 'tests',
+    ]);
+    const entries = new Set(trackedPaths().map(path => path.split('/', 1)[0]));
+    const unexpected = [...entries].filter(entry => !allowed.has(entry));
+    assert.deepEqual(unexpected, [], 'Review new root entries against the shared-hosting contract');
 });
 
 test('the icon distribution includes only regular and solid fonts', () => {
@@ -65,12 +82,8 @@ test('the shared-hosting package inherits the PHP handler from the host', () => 
 });
 
 test('private project documents are absent from the Git index', () => {
-    const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
-        cwd: fileURLToPath(root),
-        encoding: 'utf8',
-    });
     const privateDocument = /^(?:.*\/)?(?:AGENTS|REQUIREMENTS|SECURITY-AUDIT|SECURITY-FINDINGS|PROJECT-STATE)\.md$/i;
-    assert.ok(trackedFiles.split('\0').every(file => !privateDocument.test(file)));
+    assert.ok(trackedPaths().every(file => !privateDocument.test(file)));
 });
 
 test('internal application code and the installation schema are denied as direct files', () => {
