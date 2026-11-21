@@ -1223,7 +1223,15 @@ async function init() {
             const input = document.getElementById('message-input');
             const quotedMessageInput = document.getElementById('quoted-message-id');
             const content = input?.value?.trim();
-            if (!content || !currentChat) return;
+            const chat = currentChat;
+            if (!content || !chat) return;
+            if (!isCurrentChatView(chat, messageForm)) {
+                if (attachmentError) {
+                    attachmentError.textContent = uiText('chat_context_changed');
+                    attachmentError.classList.remove('hidden');
+                }
+                return;
+            }
             if (content.length > 16384) {
                 showToast(uiText('message_exceeds_the_maximum_length_of_16_384'), 'error');
                 return;
@@ -1243,11 +1251,12 @@ async function init() {
             }
             const result = await postForm('/api/messages', {
                 csrf_token: getCsrfToken(),
-                chat_id: String(currentChat.id),
+                chat_id: String(chat.id),
                 content,
                 quoted_message_id: String(quotedMessageInput?.value || ''),
                 attachment_ids: pendingAttachments.map((attachment) => attachment.id).join(',')
             });
+            if (!isCurrentChatView(chat, messageForm)) return;
 
             if (result.success) {
                 input.value = '';

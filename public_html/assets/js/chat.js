@@ -1960,8 +1960,13 @@ function displayAttachmentUploadError(message) {
     }
 }
 
-async function uploadAttachmentFile(file, chat) {
-    if (!chat || chat !== currentChat) return;
+function isCurrentChatView(chat, control) {
+    return chat === currentChat && chat != null && control.isConnected
+        && control.closest('#chat-view')?.dataset.chatId === String(chat.id);
+}
+
+async function uploadAttachmentFile(file, chat, sourceInput) {
+    if (!isCurrentChatView(chat, sourceInput)) return;
     if (normalizeChatType(chat.type) === 'personal' && chat.can_send_messages === false) {
         displayAttachmentUploadError(getPersonalChatMessageRestrictionToast(chat.message_restriction_reason));
         return;
@@ -1979,7 +1984,7 @@ async function uploadAttachmentFile(file, chat) {
     });
 
     const text = await response.text();
-    if (chat !== currentChat) return;
+    if (!isCurrentChatView(chat, sourceInput)) return;
     let payload = { success: response.ok };
     try {
         payload = JSON.parse(text);
@@ -2089,14 +2094,17 @@ function bindAttachmentsDrawer() {
         const chat = currentChat;
         const files = Array.from(input.files || []);
         if (files.length === 0) return;
+        input.value = '';
+        if (!isCurrentChatView(chat, input)) {
+            displayAttachmentUploadError(uiText('chat_context_changed'));
+            return;
+        }
         displayAttachmentUploadError('');
 
         for (const file of files) {
-            if (chat !== currentChat) break;
-            await uploadAttachmentFile(file, chat);
+            if (!isCurrentChatView(chat, input)) break;
+            await uploadAttachmentFile(file, chat, input);
         }
-
-        input.value = '';
     });
 
     list.addEventListener('click', (event) => {

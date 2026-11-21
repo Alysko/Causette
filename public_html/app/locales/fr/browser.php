@@ -15,6 +15,7 @@ return [
     'attachment_upload_busy' => 'Le stockage des pièces jointes est occupé. Réessayez dans un instant.',
     'attachment_unavailable' => 'Une pièce jointe est indisponible. Retirez-la du brouillon ou ajoutez-la à nouveau.',
     'attachment_batch_too_large' => 'Le brouillon contient trop de pièces jointes. Retirez-en puis réessayez.',
+    'chat_context_changed' => 'La conversation active a changé. Rouvrez cette conversation et réessayez.',
     'call_in_progress' => 'Appel en cours',
     'call_muted' => 'Micro coupé',
     'call_started' => 'Appel lancé',
