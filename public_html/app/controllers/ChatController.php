@@ -1264,7 +1264,14 @@ class ChatController extends Controller {
             $this->json($result);
         }
 
-        $this->json(['error' => $result['error'] ?? 'attachment_upload_failed'], 400);
+        $error = $result['error'] ?? 'attachment_upload_failed';
+        $status = match ($error) {
+            'attachment_quota_exceeded' => 409,
+            'attachment_upload_busy' => 503,
+            'attachment_image_too_large', 'attachment_too_large' => 413,
+            default => 400,
+        };
+        $this->json(['error' => $error], $status);
     }
 
     public function deleteAttachment() {

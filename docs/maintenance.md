@@ -64,6 +64,12 @@ Use the same backup point for the database, files and private configuration when
 
 On the disposable site, download a private group's attachment as a member. Remove the test account from the group and verify that the same URL no longer grants access. A signed-in non-member can still read attachments linked to messages in a public group. Causette sends `Cache-Control: private, no-store` with attachment responses. Copies previously saved or cached on a device may remain accessible on that device.
 
+Attachment storage defaults to 256 MiB per account, 512 MiB per conversation and 1 GiB per site. Each account can have 12 pending uploads. Each attachment uses at least 4 KiB of its quotas, including attachments that share a file. Files awaiting expiry cleanup still count. A busy storage operation returns a retry message.
+
+On a site with a different storage allowance, set positive integers in the `settings` table using the database manager. The keys are `attachments_user_quota_bytes`, `attachments_chat_quota_bytes`, `attachments_site_quota_bytes` and `attachments_pending_limit`. Choose limits within the host's disk allowance and leave room for backups and uploads in progress. Lower quotas leave existing attachments accessible and pause further uploads until space is available.
+
+Images have an eight-megapixel ceiling. Causette also checks the estimated decoder workload against a fixed cap and the PHP process's remaining memory before opening the image with GD. The actual encoded size counts toward the normal file and storage limits.
+
 To check a voluntary password change, sign in to a synthetic account in two browser profiles. In one profile, change the password in **Settings** by entering the current password. That profile should stay signed in with a renewed session. The other profile should be signed out. Previous **Remember me** cookies are invalidated on all devices, including the browser used for the change. Existing API keys stay valid.
 
 To check password recovery, sign in again in both profiles and enable **Remember me** in one. Complete the reset from a third profile. Both previous sessions and the persistent sign-in cookie should be rejected. Sign in again with the new password. Password changes and resets also clear recorded trusted locations and invalidate outstanding recovery and login challenges for that account.

@@ -54,7 +54,7 @@ jobs:
               php -n /project/tests/web-push-delivery.test.php
               php -n /project/tests/push-subscription-policy.test.php
             '
-      - name: Verify account changes against MariaDB
+      - name: Verify account changes and attachment uploads against MariaDB
         env:
           PHP_IMAGE: ${{ matrix.image }}
           MARIADB_IMAGE: docker.io/library/mariadb@sha256:ec79aa7a81a7667885cb69b6dc0415e032f22520bd5aca77927faffca4329924
@@ -105,6 +105,7 @@ jobs:
           run_account_fixture mfa-lifecycle.test.php email
           run_account_fixture mfa-lifecycle.test.php invitation
           run_account_fixture password-recovery.test.php change
+          run_account_fixture attachment-upload.test.php upload
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'
         run: |

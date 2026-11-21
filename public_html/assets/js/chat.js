@@ -1980,14 +1980,8 @@ async function uploadAttachmentFile(file, expirySeconds = 0) {
 
     if (!payload.success || !payload.attachment) {
         const error = String(payload.error || 'attachment_upload_failed');
-        const label = error === 'attachment_invalid_name'
-            ? 'Attachment name must have one dot and a valid extension'
-            : error === 'attachment_invalid_type'
-                ? 'File type not allowed or unsupported'
-                : error === 'attachment_too_large'
-                    ? 'Attachment exceeds the maximum file size'
-                    : 'Attachment upload failed';
-        showToast(label, 'error');
+        const label = uiText(error);
+        showToast(label === error ? uiText('attachment_upload_failed') : label, 'error');
         return;
     }
 
