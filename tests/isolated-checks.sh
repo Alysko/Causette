@@ -4,7 +4,8 @@ set -eu
 run_php_checks() {
     for name in chat-bootstrap mfa-delivery installer-authorization installer-keys \
         update-authorization message-response reaction-catalog attachment-access \
-        request-origin web-push-delivery push-subscription-policy localization notification-localization; do
+        request-origin web-push-delivery push-subscription-policy localization notification-localization \
+        smtp-test-localization; do
         php -d session.save_path=/tmp "/tmp/project/tests/$name.test.php"
     done
 }
@@ -34,7 +35,7 @@ CREATE USER 'causette_fixture'@'localhost' IDENTIFIED BY 'fixture-only-database-
 GRANT ALL PRIVILEGES ON causette_recovery_fixture.* TO 'causette_fixture'@'localhost';
 SQL
     export CAUSETTE_RECOVERY_FIXTURE=1
-    for entry in mfa-lifecycle:email mfa-lifecycle:invitation password-recovery:change \
+    for entry in mfa-lifecycle:email mfa-lifecycle:invitation mfa-lifecycle:registration-mail password-recovery:change \
         reaction-upgrade:reactions attachment-upload:upload; do
         mariadb --no-defaults --socket="$socket" -u root <<'SQL'
 DROP DATABASE IF EXISTS causette_recovery_fixture;

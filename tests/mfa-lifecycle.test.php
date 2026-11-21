@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Causette\Installation\InstallDatabase;
+use Causette\Localization\DisplayPreferences;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthChallenge;
 
@@ -45,6 +46,7 @@ final class MfaFixtureRedirect extends RuntimeException {}
 final class MfaFixtureController extends AuthController
 {
     public array $messages = [];
+    public array $outgoingMail = [];
 
     protected function redirect($url): never
     {
@@ -53,6 +55,7 @@ final class MfaFixtureController extends AuthController
 
     protected function sendEmail($to, $subject, $body): bool
     {
+        $this->outgoingMail[] = [$to, $subject, $body];
         preg_match('/<b>([0-9]{6})<\/b>/', $body, $matches);
         $this->messages[] = $matches[1] ?? '';
         return true;
@@ -212,6 +215,48 @@ if ($mode === 'email') {
         'An exhausted login budget must follow the account across its identifier and network');
     session_write_close();
     echo "Email verification, bounded resends, proof storage and email MFA passed with a synthetic transport\n";
+    exit;
+}
+
+if ($mode === 'registration-mail') {
+    session_start();
+    $_SERVER['REMOTE_ADDR'] = '192.0.2.12';
+    $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'en-US';
+    $_COOKIE = [];
+    Database::query("UPDATE users SET role = 'admin' WHERE id = 2");
+    Database::query("INSERT INTO invite_codes (code, creator_id) VALUES ('1000-2000', 1)");
+    Setting::set('new_user_notification', '1');
+    DisplayPreferences::save(['language' => 'fr', 'date_format' => 'locale', 'time_format' => '24h']);
+    DisplayPreferences::save(['language' => 'en', 'date_format' => '', 'time_format' => ''], 1);
+    $controller = new MfaFixtureController();
+    foreach ([['1000-2000', 'invitedpeer', 'invited&team@example.test'], ['', 'publicpeer', 'public@example.test']]
+        as [$invite, $username, $email]) {
+        Setting::set('invite_code_required', $invite !== '' ? '1' : '0');
+        $_SESSION = ['csrf_token' => 'fixture-csrf'];
+        $_POST = ['csrf_token' => 'fixture-csrf', 'invite_code' => $invite,
+            'username' => $username, 'email' => $email, 'password' => FIXTURE_PASSWORD];
+        $controller->outgoingMail = [];
+        expectMfa(mfaFixtureAction($controller->register(...)) === '/verify-email', 'Registration must reach email verification');
+        $byRecipient = array_column($controller->outgoingMail, null, 0);
+        expectMfa(count($controller->outgoingMail) === 3
+            && isset($byRecipient['admin@example.test'], $byRecipient['peer@example.test'], $byRecipient[$email]),
+            'Both administrators and the registrant must each receive one email');
+        [, $englishSubject, $englishBody] = $byRecipient['admin@example.test'];
+        [, $frenchSubject, $frenchBody] = $byRecipient['peer@example.test'];
+        expectMfa($englishSubject === 'New user registered' && $frenchSubject === 'Nouvelle inscription sur Causette',
+            'Each administrator must receive the subject in their own language');
+        expectMfa(str_contains($englishBody, '<b>Username:</b> ' . $username)
+            && str_contains($frenchBody, '<b>Nom d’utilisateur :</b> ' . $username)
+            && str_contains($frenchBody, '<b>Courriel :</b> ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8'))
+            && str_contains($frenchBody, '<b>Adresse IP :</b> 192.0.2.12'),
+            'The translated alert must include the correct registration details');
+        $referrer = $invite !== '' ? 'fixtureadmin' : 'Aucun';
+        expectMfa(str_contains($frenchBody, '<b>Parrain :</b> ' . $referrer)
+            && str_contains($englishBody, '<b>Referred by:</b> ' . ($invite !== '' ? $referrer : 'None')),
+            'The alert must identify the referrer or use the localized empty label');
+    }
+    session_write_close();
+    echo "Registration alerts passed in French and English with and without a referral.\n";
     exit;
 }
 

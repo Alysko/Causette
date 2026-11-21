@@ -539,6 +539,8 @@ class AuthController extends Controller {
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($to);
             $mail->isHTML(true);
+            $mail->CharSet = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
             $mail->Subject = $subject;
             $mail->Body = $body;
             return $mail->send();
@@ -548,20 +550,27 @@ class AuthController extends Controller {
     }
 
     private function sendNewUserNotification(string $username, string $email, string $ip, ?string $referredBy) {
-        $admins = Database::query("SELECT email FROM users WHERE role = 'admin'")->fetchAll();
+        $admins = Database::query("SELECT id, email FROM users WHERE role = 'admin'")->fetchAll();
+        DisplayPreferences::preloadRecipients(array_column($admins, 'id'));
 
-        $referralLine = $referredBy !== null
-            ? '<b>Referred by:</b> ' . htmlspecialchars($referredBy, ENT_QUOTES, 'UTF-8')
-            : '<b>Referred by:</b> None';
-
-        $body = 'A new user has registered on Causette.<br><br>'
-            . '<b>Username:</b> ' . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '<br>'
-            . '<b>Email:</b> ' . htmlspecialchars($email, ENT_QUOTES, 'UTF-8') . '<br>'
-            . '<b>IP address:</b> ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8') . '<br>'
-            . $referralLine;
+        $details = [
+            'mail.registration_username' => $username,
+            'mail.registration_email' => $email,
+            'mail.registration_ip' => $ip,
+        ];
 
         foreach ($admins as $admin) {
-            $this->sendEmail($admin->email, 'New user registered', $body);
+            $locale = DisplayPreferences::localeForRecipient((int) $admin->id);
+            $body = $locale->html('mail.registration_intro') . '<br><br>';
+            foreach ($details as $label => $value) {
+                $body .= '<b>' . $locale->html($label) . '</b> '
+                    . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '<br>';
+            }
+            $referrer = $referredBy === null
+                ? $locale->html('mail.registration_no_referrer')
+                : htmlspecialchars($referredBy, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $body .= '<b>' . $locale->html('mail.registration_referrer') . '</b> ' . $referrer;
+            $this->sendEmail($admin->email, $locale->text('mail.registration_subject'), $body);
         }
     }
 
