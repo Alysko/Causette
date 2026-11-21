@@ -3,6 +3,13 @@
 declare(strict_types=1);
 
 return [
+    'reaction_categories' => 'Catégories de réactions',
+    'reaction_group_all' => 'Tout',
+    'reaction_group_common' => 'Courantes',
+    'reaction_group_faces' => 'Visages',
+    'reaction_group_hands' => 'Mains',
+    'reaction_group_hearts' => 'Cœurs',
+    'reaction_group_extras' => 'Symboles',
     'add_user' => 'Ajouter un utilisateur',
     'adding' => 'Ajout en cours…',
     'are_you_sure_you_want_to_leave_this' => 'Voulez-vous vraiment quitter ce groupe ?',

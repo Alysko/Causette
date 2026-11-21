@@ -5,19 +5,7 @@ $currentUser = Auth::user();
 $isCurrentUserAdmin = strtolower((string)($currentUser->role ?? '')) === 'admin';
 $postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels(\Causette\Localization\Locale::current());
 
-$unicodeCharForPostReaction = static function (string $reactionCode): string {
-    $hex = strtoupper(trim($reactionCode));
-    if ($hex === '' || !ctype_xdigit($hex)) {
-        return '';
-    }
-    $codepoint = hexdec($hex);
-    if ($codepoint <= 0) {
-        return '';
-    }
-    return mb_chr($codepoint, 'UTF-8');
-};
-
-$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel, $unicodeCharForPostReaction): string {
+$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel): string {
     if (count($reactions) === 0) {
         return '';
     }
@@ -60,10 +48,9 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
             : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700';
 
-        $emojiChar = $unicodeCharForPostReaction($code);
-        $emojiMarkup = $emojiChar !== ''
-            ? '<span class="text-lg leading-none">' . htmlspecialchars($emojiChar, ENT_QUOTES, 'UTF-8') . '</span>'
-            : '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
+        $emojiPath = \Causette\Chat\ReactionCatalog::imagePath($code);
+        $emojiMarkup = '<img src="' . htmlspecialchars(base_url($emojiPath), ENT_QUOTES, 'UTF-8')
+            . '" alt="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '" class="w-6 h-6" loading="lazy" decoding="async">';
 
         $badges .= '<button type="button" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[12px] js-profile-post-reaction-badge ' . $badgeClass . '" data-post-id="' . (int)$postId . '" data-reaction-code="' . htmlspecialchars($code, ENT_QUOTES, 'UTF-8') . '" title="' . htmlspecialchars($tooltip, ENT_QUOTES, 'UTF-8') . '">'
             . $emojiMarkup

@@ -1,0 +1,64 @@
+.reaction-palette {
+    box-sizing: border-box;
+    inline-size: min(26rem, 100%);
+    padding: .5rem;
+    border: 1px solid #3f3f46;
+    border-radius: .75rem;
+    background: #18181b;
+    box-shadow: 0 8px 20px #0005;
+}
+
+.reaction-palette__filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    margin-block-end: .5rem;
+}
+
+.reaction-palette__filter {
+    padding: .3rem .55rem;
+    color: #d4d4d8;
+    border-radius: .5rem;
+    font-size: .75rem;
+    line-height: 1.25rem;
+}
+
+.reaction-palette__filter[aria-pressed="true"] {
+    color: #d1fae5;
+    background: #064e3b;
+}
+
+.reaction-palette__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(2.6rem, 1fr));
+    gap: .2rem;
+    max-block-size: 12rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.reaction-palette__option {
+    display: grid;
+    place-items: center;
+    min-block-size: 2.6rem;
+    border-radius: .5rem;
+}
+
+.reaction-palette__option[hidden] {
+    display: none;
+}
+
+.reaction-palette__option img {
+    inline-size: 2rem;
+    block-size: 2rem;
+}
+
+.reaction-palette__option:hover,
+.reaction-palette__filter:hover {
+    background: #3f3f46;
+}
+
+.reaction-palette button:focus-visible {
+    outline: 2px solid #6ee7b7;
+    outline-offset: -2px;
+}
