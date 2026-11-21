@@ -119,6 +119,62 @@ test('a bot message is labeled even next to messages by its owner', () => {
     assert.equal((markup.match(/href="\/u\//g) || []).length, 2);
 });
 
+test('an attachment response from a previous conversation leaves the current draft alone', async () => {
+    const { context } = fixture();
+    const originatingChat = context.currentChat;
+    context.FormData = FormData;
+    context.getCsrfToken = () => 'fixture-csrf';
+    context.pendingAttachments = [];
+    context.normalizeAttachment = (attachment) => attachment;
+    context.renderPendingAttachmentList = () => {};
+    let resolveUpload;
+    context.fetch = () => new Promise((resolve) => { resolveUpload = resolve; });
+
+    const sourceInput = { isConnected: true, closest: () => ({ dataset: { chatId: '1' } }) };
+    const upload = context.uploadAttachmentFile(new Blob(['fixture']), originatingChat, sourceInput);
+    context.currentChat = { id: 8, type: 'group', is_group_member: true };
+    resolveUpload({ ok: true, text: async () => JSON.stringify({ success: true, attachment: { id: 13 } }) });
+    await upload;
+
+    assert.deepEqual(context.pendingAttachments, []);
+});
+
+test('leaving the conversation view ignores the pending attachment response', async () => {
+    const { context } = fixture();
+    const sourceInput = { isConnected: true, closest: () => ({ dataset: { chatId: '1' } }) };
+    context.FormData = FormData;
+    context.getCsrfToken = () => 'fixture-csrf';
+    context.pendingAttachments = [];
+    context.normalizeAttachment = (attachment) => attachment;
+    context.renderPendingAttachmentList = () => {};
+    let resolveUpload;
+    context.fetch = () => new Promise((resolve) => { resolveUpload = resolve; });
+
+    const upload = context.uploadAttachmentFile(new Blob(['fixture']), context.currentChat, sourceInput);
+    sourceInput.isConnected = false;
+    resolveUpload({ ok: true, text: async () => JSON.stringify({ success: true, attachment: { id: 13 } }) });
+    await upload;
+
+    assert.deepEqual(context.pendingAttachments, []);
+});
+
+test('an active call in another conversation cannot redirect an attachment', async () => {
+    const { context } = fixture();
+    context.FormData = FormData;
+    context.getCsrfToken = () => 'fixture-csrf';
+    context.pendingAttachments = [];
+    context.normalizeAttachment = (attachment) => attachment;
+    context.renderPendingAttachmentList = () => {};
+    const sourceInput = { isConnected: true, closest: () => ({ dataset: { chatId: '8' } }) };
+    let requests = 0;
+    context.fetch = async () => {
+        requests++;
+        return { ok: true, text: async () => JSON.stringify({ success: true, attachment: { id: 13 } }) };
+    };
+    await context.uploadAttachmentFile(new Blob(['fixture']), context.currentChat, sourceInput);
+    assert.equal(requests, 0);
+});
+
 test('poll labels and tooltips are literal and malformed values cannot enable actions', () => {
     const { context, element } = fixture();
     const labels = ['<mark>Thé</mark>', 'Café & lait'];

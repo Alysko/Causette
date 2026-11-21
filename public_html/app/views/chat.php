@@ -911,6 +911,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <button type="submit" class="order-2 sm:order-4 w-[calc((100%-1.5rem)/3)] sm:w-auto bg-emerald-600 px-10 rounded-3xl min-h-12"><?= $tr('ui.send') ?></button>
         </div>
         <div id="message-disabled-notice" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-amber-300 <?= $canSendMessages ? 'hidden' : '' ?>"><?= htmlspecialchars($messageDisabledNoticeText, ENT_QUOTES, 'UTF-8') ?></div>
+        <p id="message-send-error" role="alert" class="hidden w-full text-sm text-red-300"></p>
         <div id="emoji-drawer" class="hidden sm:absolute sm:left-6 sm:bottom-[calc(100%+0.75rem)] sm:w-[32rem] sm:max-w-[calc(100%-3rem)] sm:rounded-2xl sm:shadow-2xl fixed inset-0 sm:inset-auto z-50 sm:z-30 bg-zinc-900 sm:border sm:border-zinc-700 p-4 flex flex-col">
             <div class="flex items-center justify-between mb-3 sm:hidden">
                 <h3 class="text-sm font-medium text-zinc-300"><?= $tr('ui.emoji') ?></h3>
@@ -938,6 +939,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             </div>
             <div id="attachments-empty" class="text-sm text-zinc-400 border border-dashed border-zinc-700 rounded-xl px-4 py-6 text-center"><?= $tr('ui.no_attachments_yet_click_select_files') ?></div>
             <div id="attachments-list" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+            <p id="attachment-upload-error" role="alert" class="hidden mt-2 text-sm text-red-300"></p>
         </div>
         <?php endif; ?>
     </form>

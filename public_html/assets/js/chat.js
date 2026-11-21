@@ -1966,18 +1966,31 @@ function renderPendingAttachmentList() {
     }).join('');
 }
 
-async function uploadAttachmentFile(file, expirySeconds = 0) {
-    if (!currentChat) return;
-    if (normalizeChatType(currentChat.type) === 'personal' && currentChat.can_send_messages === false) {
-        showToast(getPersonalChatMessageRestrictionToast(currentChat.message_restriction_reason), 'error');
+function displayAttachmentUploadError(message) {
+    const notice = document.getElementById('attachment-upload-error');
+    if (notice) {
+        notice.textContent = message;
+        notice.classList.toggle('hidden', !message);
+    }
+}
+
+function isCurrentChatView(chat, control) {
+    return chat === currentChat && chat != null && control.isConnected
+        && control.closest('#chat-view')?.dataset.chatId === String(chat.id);
+}
+
+async function uploadAttachmentFile(file, chat, sourceInput) {
+    if (!isCurrentChatView(chat, sourceInput)) return;
+    if (normalizeChatType(chat.type) === 'personal' && chat.can_send_messages === false) {
+        displayAttachmentUploadError(getPersonalChatMessageRestrictionToast(chat.message_restriction_reason));
         return;
     }
 
     const formData = new FormData();
     formData.append('csrf_token', getCsrfToken());
-    formData.append('chat_id', String(currentChat.id));
+    formData.append('chat_id', String(chat.id));
     formData.append('attachment', file);
-    formData.append('expiry_seconds', String(Number(expirySeconds || 0)));
+    formData.append('expiry_seconds', '0');
 
     const response = await fetch('/api/attachments/upload', {
         method: 'POST',
@@ -1985,29 +1998,24 @@ async function uploadAttachmentFile(file, expirySeconds = 0) {
     });
 
     const text = await response.text();
+    if (!isCurrentChatView(chat, sourceInput)) return;
     let payload = { success: response.ok };
     try {
         payload = JSON.parse(text);
     } catch {
-        payload = { success: response.ok, error: 'attachment_upload_failed' };
+        payload = { success: response.ok, error: response.status === 413 ? 'attachment_too_large' : 'attachment_upload_failed' };
     }
 
     if (!payload.success || !payload.attachment) {
         const error = String(payload.error || 'attachment_upload_failed');
-        const label = error === 'attachment_invalid_name'
-            ? 'Attachment name must have one dot and a valid extension'
-            : error === 'attachment_invalid_type'
-                ? 'File type not allowed or unsupported'
-                : error === 'attachment_too_large'
-                    ? 'Attachment exceeds the maximum file size'
-                    : 'Attachment upload failed';
-        showToast(label, 'error');
+        const label = uiText(error);
+        displayAttachmentUploadError(label === error ? uiText('attachment_upload_failed') : label);
         return;
     }
 
     const normalized = normalizeAttachment(payload.attachment);
     if (!normalized) {
-        showToast(uiText('attachment_upload_failed'), 'error');
+        displayAttachmentUploadError(uiText('attachment_upload_failed'));
         return;
     }
 
@@ -2021,10 +2029,15 @@ async function deletePendingAttachment(attachmentId) {
 
     const result = await postForm('/api/attachments/delete', {
         csrf_token: getCsrfToken(),
-        attachment_id: String(id)
+        attachment_id: String(id),
+        pending_only: '1'
     });
 
-    if (!result.success) {
+    if (!result.success && result.error !== 'attachment_unavailable') {
+        if (result.error === 'attachment_upload_busy') {
+            displayAttachmentUploadError(uiText('attachment_upload_busy'));
+            return;
+        }
         showToast(uiActionError(result.error, 'unable_to_delete_attachment'), 'error');
         return;
     }
@@ -2092,14 +2105,20 @@ function bindAttachmentsDrawer() {
     });
 
     input.addEventListener('change', async () => {
+        const chat = currentChat;
         const files = Array.from(input.files || []);
         if (files.length === 0) return;
+        input.value = '';
+        if (!isCurrentChatView(chat, input)) {
+            displayAttachmentUploadError(uiText('chat_context_changed'));
+            return;
+        }
+        displayAttachmentUploadError('');
 
         for (const file of files) {
-            await uploadAttachmentFile(file, 0);
+            if (!isCurrentChatView(chat, input)) break;
+            await uploadAttachmentFile(file, chat, input);
         }
-
-        input.value = '';
     });
 
     list.addEventListener('click', (event) => {

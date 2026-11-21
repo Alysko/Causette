@@ -186,11 +186,18 @@ class TrashController extends Controller {
             $this->redirect('/trash?error=chat_not_found');
         }
 
-        $attachmentsReleased = Attachment::deleteFilesForChatId($chatId);
-        if (!$attachmentsReleased) {
+        $deleted = Attachment::deleteChatWithFiles($chatId, static fn() => self::deleteChatRows($chatId),
+            static fn() => (bool)Database::query(
+                "SELECT id FROM chats WHERE id = ? AND type = 'group' AND deleted_at IS NOT NULL", [$chatId]
+            )->fetchColumn());
+        if (!$deleted) {
             $this->redirect('/trash?error=chat_delete_failed');
         }
 
+        $this->redirect('/trash?success=chat_permanently_deleted');
+    }
+
+    private static function deleteChatRows(int $chatId): bool {
         $pdo = Database::getInstance();
         try {
             $pdo->beginTransaction();
@@ -209,13 +216,12 @@ class TrashController extends Controller {
             Database::query("DELETE FROM chats WHERE id = ?", [$chatId]);
 
             $pdo->commit();
+            return true;
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            $this->redirect('/trash?error=chat_delete_failed');
+            return false;
         }
-
-        $this->redirect('/trash?success=chat_permanently_deleted');
     }
 }

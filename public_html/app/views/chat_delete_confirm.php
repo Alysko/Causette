@@ -2,6 +2,9 @@
 <div class="p-8 overflow-auto">
     <div class="max-w-lg mx-auto bg-zinc-900 border border-zinc-700 rounded-2xl p-6">
         <h1 class="text-2xl font-semibold text-zinc-100"><?= $tr('ui.delete_personal_chat') ?></h1>
+        <?php if ($deleteFailed ?? false): ?>
+            <p role="alert" class="mt-3 text-sm text-red-300"><?= $tr('ui.personal_chat_delete_failed') ?></p>
+        <?php endif; ?>
         <p class="mt-3 text-sm text-zinc-400"><?= $tr('ui.are_you_sure_you_want_to_4') ?></p>
 
         <div class="mt-4 rounded-xl border border-zinc-700 bg-zinc-800/70 px-4 py-3">
