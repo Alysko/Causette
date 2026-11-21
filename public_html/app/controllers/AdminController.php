@@ -221,7 +221,7 @@ class AdminController extends Controller {
         $mailFrom = (string)(Setting::get('mail_from') ?? '');
         $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
 
-        $mail = new PHPMailer(true);
+        $mail = $this->createTestMailer();
         try {
             $mail->isSMTP();
             $mail->Host = $mailHost;
@@ -234,8 +234,11 @@ class AdminController extends Controller {
             $mail->setFrom($mailFrom, $mailFromName);
             $mail->addAddress($user->email);
             $mail->isHTML(false);
-            $mail->Subject = 'Causette mail test';
-            $mail->Body = 'This is a test email from your Causette installation. If you received this, mail is configured correctly.';
+            $mail->CharSet = PHPMailer::CHARSET_UTF8;
+            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
+            $locale = DisplayPreferences::localeForRecipient((int) $user->id);
+            $mail->Subject = $locale->text('mail.smtp_test_subject');
+            $mail->Body = $locale->text('mail.smtp_test_body');
             $mail->send();
 
             $this->flash('success', 'mail_test_sent');
@@ -244,6 +247,10 @@ class AdminController extends Controller {
         }
 
         $this->redirect('/settings');
+    }
+
+    protected function createTestMailer(): PHPMailer {
+        return new PHPMailer(true);
     }
 
         public function recalculateStorageStats() {

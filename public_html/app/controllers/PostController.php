@@ -1,6 +1,6 @@
 <?php
 use Causette\Chat\ReactionCatalog;
-use Causette\Localization\Locale;
+use Causette\Localization\DisplayPreferences;
 
 class PostController extends Controller {
     public function create() {
@@ -72,14 +72,15 @@ class PostController extends Controller {
         }
 
         if ($action === 'set' && $postOwnerId > 0 && $postOwnerId !== $userId) {
-            $actorUsername = User::normalizeUsername(Auth::user()->username ?? '') ?: 'Someone';
+            $locale = DisplayPreferences::localeForRecipient($postOwnerId);
+            $actorUsername = User::normalizeUsername(Auth::user()->username ?? '') ?: $locale->text('notifications.someone');
             $reactionDisplay = mb_chr(hexdec($reactionCode), 'UTF-8') . ' '
-                . ReactionCatalog::label($reactionCode, Locale::resolve('en'));
+                . ReactionCatalog::label($reactionCode, $locale);
             Notification::create(
                 $postOwnerId,
                 'report',
-                'Post Reaction',
-                $actorUsername . ' reacted with ' . $reactionDisplay . ' to your post',
+                $locale->text('notifications.post_reaction_title'),
+                $locale->text('notifications.post_reaction_message', ['username' => $actorUsername, 'reaction' => $reactionDisplay]),
                 '/posts'
             );
         }

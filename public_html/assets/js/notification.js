@@ -646,20 +646,11 @@ function bindNotificationSettingsToggles() {
 }
 
 function getNotificationSoundBucket(notificationOrType) {
-    const notification = notificationOrType && typeof notificationOrType === 'object'
-        ? notificationOrType
-        : null;
-    const normalizedType = String(notification?.type || notificationOrType || '').trim().toLowerCase();
-    const normalizedTitle = String(notification?.title || '').trim().toLowerCase();
-
-    if (normalizedType === 'call' && normalizedTitle === 'call declined') {
-        return 'other';
-    }
-
-    if (normalizedType === 'friend_request') return 'other';
+    const normalizedType = String(notificationOrType?.type || notificationOrType || '').trim().toLowerCase();
     if (normalizedType === 'poke') return 'poke';
     if (normalizedType === 'message') return 'new_message';
-    if (normalizedType === 'call') return 'call';
+
+    // Stored call notifications are refusals. Incoming calls ring through call.js.
     return 'other';
 }
 

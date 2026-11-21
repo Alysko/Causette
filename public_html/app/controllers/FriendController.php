@@ -1,9 +1,13 @@
 <?php
+
+use Causette\Localization\DisplayPreferences;
+
 class FriendController extends Controller {
     public function sendRequest() {
         Auth::requireAuth();
         Auth::csrfValidate();
-        $userId = Auth::user()->id;
+        $user = Auth::user();
+        $userId = $user->id;
         $targetNumber = str_replace('-', '', $_POST['user_number']);
         $target = User::findByUserNumber($targetNumber);
         if (!$target) {
@@ -20,14 +24,22 @@ class FriendController extends Controller {
         }
 
         Database::query("INSERT IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, 'pending')", [$userId, $target->id]);
-        Notification::create($target->id, 'friend_request', 'Friend Request', Auth::user()->username . ' sent you a friend request', '/?tab=requests&requests=incoming');
+        $locale = DisplayPreferences::localeForRecipient((int) $target->id);
+        Notification::create(
+            $target->id,
+            'friend_request',
+            $locale->text('notifications.friend_request_title'),
+            $locale->text('notifications.friend_request_message', ['username' => $user->username]),
+            '/?tab=requests&requests=incoming',
+        );
         $this->json(['success' => true]);
     }
 
     public function acceptRequest() {
         Auth::requireAuth();
         Auth::csrfValidate();
-        $userId = Auth::user()->id;
+        $user = Auth::user();
+        $userId = $user->id;
         $requesterId = (int)($_POST['requester_id'] ?? 0);
 
         if ($requesterId <= 0) {
@@ -42,7 +54,14 @@ class FriendController extends Controller {
         }
 
         $chat = Chat::getOrCreatePersonalChat($userId, $userId, $requesterId);
-        Notification::create($requesterId, 'friend_request_accepted', 'Friend Request Accepted', Auth::user()->username . ' accepted your request', '/u/' . User::formatUserNumber(Auth::user()->user_number));
+        $locale = DisplayPreferences::localeForRecipient($requesterId);
+        Notification::create(
+            $requesterId,
+            'friend_request_accepted',
+            $locale->text('notifications.friend_request_accepted_title'),
+            $locale->text('notifications.friend_request_accepted_message', ['username' => $user->username]),
+            '/u/' . User::formatUserNumber($user->user_number),
+        );
 
         $this->json(['success' => true, 'chat_number' => $chat->chat_number]);
     }

@@ -1,4 +1,7 @@
 <?php
+
+use Causette\Localization\DisplayPreferences;
+
 class ReportController extends Controller {
     private function requireAdminUser() {
         Auth::requireAuth();
@@ -159,8 +162,16 @@ class ReportController extends Controller {
             [$userId, $type, $targetId, $reason]);
 
         $admins = Database::query("SELECT id FROM users WHERE role = 'admin'")->fetchAll();
+        DisplayPreferences::preloadRecipients(array_column($admins, 'id'));
         foreach ($admins as $admin) {
-            Notification::create($admin->id, 'report', 'New Report', 'A new report was submitted and is pending review.', '/reports');
+            $locale = DisplayPreferences::localeForRecipient((int) $admin->id);
+            Notification::create(
+                $admin->id,
+                'report',
+                $locale->text('notifications.report_title'),
+                $locale->text('notifications.report_message'),
+                '/reports',
+            );
         }
 
         $this->json(['success' => true]);

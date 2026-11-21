@@ -139,20 +139,23 @@ async function waitForText(page, selector, expected) {
         { selector, expected });
 }
 
-async function checkDisplayPreferences(browser, errors) {
-    const admin = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
-    const save = (page, path, fields = {}, withCsrf = true) => page.evaluate(async ({ path, fields, withCsrf }) => {
+function saveDisplaySettings(page, path, fields = {}, withCsrf = true) {
+    return page.evaluate(async ({ path, fields, withCsrf }) => {
         const token = document.querySelector('meta[name="csrf-token"]')?.content
             ?? document.querySelector('input[name="csrf_token"]')?.value;
         if (withCsrf) fields.csrf_token = token;
         return (await fetch(path, { method: 'POST', body: new URLSearchParams(fields) })).status;
     }, { path, fields, withCsrf });
+}
+
+async function checkDisplayPreferences(browser, errors) {
+    const admin = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
     const sitePath = '/admin/display-defaults';
     const personalPath = '/settings/display-preferences';
     const siteChoices = { language: 'fr', date_format: 'dmy', time_format: '24h' };
-    assert.equal(await save(admin, sitePath, siteChoices), 200, 'administrator can save site defaults');
-    assert.equal(await save(admin, sitePath, { ...siteChoices, language: 'en', time_format: 'invalid' }), 400);
-    assert.equal(await save(admin, sitePath, { ...siteChoices, language: 'en' }, false), 403);
+    assert.equal(await saveDisplaySettings(admin, sitePath, siteChoices), 200, 'administrator can save site defaults');
+    assert.equal(await saveDisplaySettings(admin, sitePath, { ...siteChoices, language: 'en', time_format: 'invalid' }), 400);
+    assert.equal(await saveDisplaySettings(admin, sitePath, { ...siteChoices, language: 'en' }, false), 403);
 
     const timestamp = (page) => page.locator('[data-message-id="50"] [data-utc]').first();
     const adminChat = await admin.goto(origin + firstChat + '?lang=en');
@@ -164,10 +167,10 @@ async function checkDisplayPreferences(browser, errors) {
     await waitForText(admin, '[data-message-id="50"] [data-utc]', '19/11/2025 15:05');
 
     const member = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'fr');
-    assert.equal(await save(member, sitePath, siteChoices), 403);
+    assert.equal(await saveDisplaySettings(member, sitePath, siteChoices), 403);
     assert.equal(await timestamp(member).textContent(), '19/11/2025 15:05');
-    assert.equal(await save(member, personalPath, { ...siteChoices, 'language[]': 'en' }), 400);
-    assert.equal(await save(member, '/settings/timezone', { timezone: 'UTC+5:30' }), 200);
+    assert.equal(await saveDisplaySettings(member, personalPath, { ...siteChoices, 'language[]': 'en' }), 400);
+    assert.equal(await saveDisplaySettings(member, '/settings/timezone', { timezone: 'UTC+5:30' }), 200);
     await member.goto(origin + '/settings');
     assert.equal(await member.locator('[data-modal-open="cp-display-defaults-modal"]').count(), 0);
     await member.locator('[data-modal-open="cp-preferences-modal"]').click();
@@ -205,21 +208,21 @@ async function checkDisplayPreferences(browser, errors) {
     assert.equal(await notification.locator('[data-utc]').textContent(), '19/11/2025 08:35 PM');
     await member.clock.setFixedTime(new Date());
 
-    assert.equal(await save(member, '/logout'), 200);
+    assert.equal(await saveDisplaySettings(member, '/logout'), 200);
     await signIn(member, 'fixtureadmin', adminPassword, 'en');
     assert.equal(await member.locator('html').getAttribute('lang'), 'fr');
     assert.equal(await timestamp(member).textContent(), '19/11/2025 15:05');
-    assert.equal(await save(member, '/logout'), 200);
+    assert.equal(await saveDisplaySettings(member, '/logout'), 200);
     await signIn(member, 'fixturepeer', 'fixture-only-peer-password', 'fr');
     assert.equal(await member.locator('html').getAttribute('lang'), 'en');
     assert.equal(await timestamp(member).textContent(), '19/11/2025 08:35 PM');
 
-    assert.equal(await save(member, personalPath, { language: '', date_format: 'ymd', time_format: '' }), 200);
+    assert.equal(await saveDisplaySettings(member, personalPath, { language: '', date_format: 'ymd', time_format: '' }), 200);
     await member.reload();
     assert.equal(await member.locator('html').getAttribute('lang'), 'fr');
     assert.equal(await timestamp(member).textContent(), '2025-11-19 20:35');
-    assert.equal(await save(member, personalPath, { language: '', date_format: '', time_format: '' }), 200);
-    assert.equal(await save(member, '/settings/timezone', { timezone: 'UTC+0' }), 200);
+    assert.equal(await saveDisplaySettings(member, personalPath, { language: '', date_format: '', time_format: '' }), 200);
+    assert.equal(await saveDisplaySettings(member, '/settings/timezone', { timezone: 'UTC+0' }), 200);
     await admin.goto(origin + '/settings');
     await admin.getByRole('button', { name: 'Affichage par défaut du site' }).click();
     const defaultsForm = admin.locator('form[action$="/admin/display-defaults"]');
@@ -397,18 +400,26 @@ async function checkReactions(browser, errors) {
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 390);
     await phone.getByRole('button', { name: 'Symboles', exact: true }).tap();
     assert.equal(await phone.locator('.js-profile-post-reaction-option[data-post-id="50"]:visible').count(), 12);
-    await post(phone, '/api/posts/react', () => postOptions.and(phone.locator('[data-reaction-code="1F388"]')).tap());
+    const recipient = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const personalPath = '/settings/display-preferences';
+    const inherited = { language: '', date_format: '', time_format: '' };
+    assert.equal(await saveDisplaySettings(recipient, personalPath, { ...inherited, language: 'fr' }), 200);
+    try {
+        await post(phone, '/api/posts/react', () => postOptions.and(phone.locator('[data-reaction-code="1F388"]')).tap());
+        const notifications = await recipient.evaluate(async () => {
+            const response = await fetch('/notifications', { headers: { Accept: 'application/json' } });
+            return (await response.json()).notifications;
+        });
+        assert.ok(notifications.some(item => item.title === 'Réaction à votre publication'
+            && item.message === 'fixtureadmin a réagi à votre publication avec 🎈 Ballon'));
+    } finally {
+        assert.equal(await saveDisplaySettings(recipient, personalPath, inherited), 200);
+    }
     await postBadge('1F388').waitFor();
     await phone.goto(origin + '/u/0111-2222-3333-4444');
     await postBadge('1F388').locator('img[src$="/assets/img/reactions/1f388.png"]').waitFor();
     await postBadge('2665').waitFor();
-    const recipient = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
-    const notifications = await recipient.evaluate(async () => {
-        const response = await fetch('/notifications', { headers: { Accept: 'application/json' } });
-        return (await response.json()).notifications;
-    });
-    assert.ok(notifications.some(item => item.message.includes('🎈 Balloon')));
-    console.log('Desktop chat and mobile posts offer 75 local reactions. Existing reactions survive voting and reload.');
+    console.log('Desktop chat and mobile posts offer 75 local reactions. The post owner received the notification in French.');
 }
 
 async function checkPostSearch(browser, errors) {
@@ -735,6 +746,7 @@ async function checkNotificationHistory(browser, errors) {
     await peer.locator('#message-input').fill('Inbox fixture');
     await post(peer, '/api/messages', () => peer.locator('#message-input').press('Enter'));
     await waitForText(owner, '#notification-history-list', 'Inbox fixture');
+    await waitForText(owner, '#notification-history-list', 'New message from fixturepeer');
     await post(owner, '/api/notifications/clear', () => owner.locator('#notification-clear-all-btn').click());
     await list.getByText(empty).waitFor();
     assert.equal(await desktop.getAttribute('aria-expanded'), 'true');

@@ -1,4 +1,7 @@
 <?php
+
+use Causette\Localization\DisplayPreferences;
+
 class CallController extends Controller {
     private const CALL_USER_LIMIT = 99;
     private const USER_LIMIT_REACHED_MESSAGE = 'User limit reached. Please try again later.';
@@ -498,11 +501,12 @@ class CallController extends Controller {
 
         $notifiedCaller = false;
         if ((int)$call->started_by > 0 && (int)$call->started_by !== $userId && (string)($call->status ?? '') === 'active') {
+            $locale = DisplayPreferences::localeForRecipient((int) $call->started_by);
             Notification::create(
                 (int)$call->started_by,
                 'call',
-                'Call Declined',
-                (string)$user->username . ' declined your call',
+                $locale->text('notifications.call_declined_title'),
+                $locale->text('notifications.call_declined_message', ['username' => (string) $user->username]),
                 '/c/' . User::formatUserNumber((int)$call->chat_number)
             );
             $notifiedCaller = true;
@@ -705,16 +709,17 @@ class CallController extends Controller {
             $this->json(['error' => 'User is already in the call'], 409);
         }
 
-        $senderUsername = trim((string)($user->username ?? 'Someone'));
+        $locale = DisplayPreferences::localeForRecipient($targetUserId);
+        $senderUsername = trim((string) ($user->username ?? ''));
         if ($senderUsername === '') {
-            $senderUsername = 'Someone';
+            $senderUsername = $locale->text('notifications.someone');
         }
 
         Notification::create(
             $targetUserId,
             'poke',
-            'Call Poke',
-            $senderUsername . ' poked you to join the call',
+            $locale->text('notifications.call_poke_title'),
+            $locale->text('notifications.call_poke_message', ['username' => $senderUsername]),
             '/c/' . User::formatUserNumber((int)$chat->chat_number) . '?join_call=1&join_source=poke&call_id=' . $callId
         );
 

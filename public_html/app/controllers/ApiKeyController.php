@@ -1,5 +1,7 @@
 <?php
 
+use Causette\Localization\DisplayPreferences;
+
 class ApiKeyController extends Controller {
 
     public function index() {
@@ -339,11 +341,13 @@ class ApiKeyController extends Controller {
             "SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?",
             [$chatId, (int)$keyRecord->user_id]
         )->fetchAll();
+        DisplayPreferences::preloadRecipients(array_column($members, 'user_id'));
         foreach ($members as $m) {
+            $locale = DisplayPreferences::localeForRecipient((int) $m->user_id);
             Notification::create(
                 $m->user_id,
                 'message',
-                'New Message',
+                $locale->text('notifications.new_message_title'),
                 mb_substr($text, 0, 50),
                 '/c/' . User::formatUserNumber($chat->chat_number)
             );
