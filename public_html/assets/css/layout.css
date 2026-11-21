@@ -34,6 +34,9 @@ body.app-font-large { font-size: 1.125rem; }
 }
 .causette-accent { color: #34d399; }
 .sidebar { background: #111827; }
+#account-menu > summary { list-style: none; }
+#account-menu > summary::-webkit-details-marker { display: none; }
+#account-menu :focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
 body.h-screen {
     height: 100dvh;
     height: var(--app-vh, 100dvh);

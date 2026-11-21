@@ -1767,6 +1767,28 @@ function bindDashboardPostNavigation() {
     });
 }
 
+function bindAccountMenu() {
+    const menu = document.getElementById('account-menu');
+    if (!menu) return;
+
+    const trigger = menu.querySelector('summary');
+    const closeMenu = () => { menu.open = false; };
+
+    document.addEventListener('click', (event) => {
+        if (menu.open && !menu.contains(event.target)) closeMenu();
+    });
+    menu.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !menu.open) return;
+        event.preventDefault();
+        closeMenu();
+        trigger.focus();
+    });
+    registerRouteLifecycleHook('before', closeMenu);
+    window.addEventListener('pageshow', (event) => {
+        if (event.persisted) closeMenu();
+    });
+}
+
 function syncMobileOverlayBackdrop() {
     const backdrop = document.getElementById('mobile-overlay-backdrop');
     const openOverlay = document.querySelector('#app-sidebar.mobile-open, #notification-history-panel.mobile-open');
@@ -1951,6 +1973,7 @@ function startAppInitOnce() {
     bindAppActions();
     bindNotificationHistory();
     bindSidebarToggle();
+    bindAccountMenu();
     init().catch(() => {});
 }
 
