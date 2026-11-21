@@ -1,35 +1,32 @@
 # Causette
 
-Causette is a self-hosted web application for direct and group messaging. It includes message attachments, reactions, mentions, polls, posts and browser-based voice calls, video calls and screen sharing.
+Causette is a self-hosted chat app with direct and group messages, file sharing, mentions, reactions, posts and polls. Voice and video calls support screen sharing in the browser.
 
 ## Development status
 
-This repository contains development sources. Wait for a validated release archive and its installation instructions before deploying a live instance.
+Causette is still in development. Wait for a tested release ZIP before deploying a live instance.
 
-## Hosting layout
+## Hosting
 
-Causette targets ordinary Apache/PHP hosting with MySQL. An operator uses the hosting control panel, a database manager, file transfer and a browser for installation, updates and recovery.
+Causette targets shared hosting with Apache, PHP and MySQL. Install, update and restore it with a browser, the hosting panel, a database manager and file transfer.
 
-- Point the site's document root at `public_html/`.
-- Keep `storage/` beside `public_html/`, outside the document root. The public attachment, avatar and emoji routes are handled by the application. Never publish the storage directory through an Apache alias.
-- Plan for HTTPS and a dedicated database user scoped to the application database.
+Serve `public_html/` over HTTPS. Keep `storage/` next to it, outside the document root, without an Apache alias. The app serves attachments, avatars and emoji. Use a database account scoped to Causette's database.
 
-PHP 8.5 is the target minimum for the first release. The verification matrix includes PHP 8.5 and 8.6. Use the latest security patch available from the hosting provider. The release archive will specify tested versions, extensions and server settings.
+The first release targets PHP 8.5 or later. CI checks PHP 8.5 and 8.6. Use your host's latest PHP security patch. The release ZIP will list the tested versions, extensions and server settings.
 
-See the [shared-hosting installation procedure](docs/install.md) for the fresh installation and recovery workflow.
-See [backup, update and restore](docs/maintenance.md) for hosting-panel maintenance and a disposable restore rehearsal.
+[Installation and setup recovery](docs/install.md) · [Backup, update and restore](docs/maintenance.md)
 
 ## Development checks
 
-Run the following in a Git checkout with PHP and Node.js installed.
+Run these source checks in a Git checkout with PHP and Node.js installed.
 
 ```sh
 node scripts/check-syntax.mjs
 node --test tests/source-distribution.test.mjs
 ```
 
-Set `CAUSETTE_PHP` to the PHP executable path if `php` is unavailable on PATH. These checks parse source and verify the source layout. Installation, upgrades and application workflows require separate integration tests.
+If `php` is missing from `PATH`, set `CAUSETTE_PHP` to the PHP executable. Use separate integration tests for installation, upgrades and browser workflows.
 
 ## License and upstream
 
-Causette is derived from [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms, the source notices for component attribution and the [branding record](docs/branding.md) for the remaining compatibility references.
+Causette is based on [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms, the source notices for component credits and the [branding record](docs/branding.md) for compatibility references.
