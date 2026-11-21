@@ -10,11 +10,12 @@ const savedQuestion = 'Sondage sauvegardé <mark>Thé</mark> ?';
 const adminPassword = 'fixture-only-password';
 const operatorToken = 'fixture-only-operator-token-2026-fixture-only-operator-token';
 
-async function newPage(browser, errors, externalRequests = null, locale = 'en-US') {
+async function newPage(browser, errors, externalRequests = null, locale = 'en-US', device = {}) {
     const context = await browser.newContext({
         ignoreHTTPSErrors: true,
         locale,
         serviceWorkers: 'block',
+        ...device,
     });
     // The test server is reachable over loopback even when Chromium sees no network interface.
     await context.addInitScript(() => Object.defineProperty(navigator, 'onLine', { get: () => true }));
@@ -125,8 +126,8 @@ async function signIn(page, username, password, language) {
     await page.locator('#chat-view[data-chat-id="8"]').waitFor();
 }
 
-async function login(browser, username, password, errors, language) {
-    const page = await newPage(browser, errors, null, language === 'fr' ? 'fr-FR' : 'en-US');
+async function login(browser, username, password, errors, language, device) {
+    const page = await newPage(browser, errors, null, language === 'fr' ? 'fr-FR' : 'en-US', device);
     await signIn(page, username, password, language);
     assert.equal(await page.locator('html').getAttribute('lang'), language);
     return page;
@@ -746,6 +747,87 @@ async function checkNotificationHistory(browser, errors) {
     console.log('Empty notification history remains accessible after toast expiry, polling, clearing and navigation on desktop and mobile.');
 }
 
+async function checkAccountMenu(browser, errors) {
+    const desktop = await login(browser, 'fixtureadmin', adminPassword, errors, 'en');
+    const trigger = desktop.getByLabel('Account menu for fixtureadmin', { exact: true });
+    const signOut = desktop.getByRole('button', { name: 'Sign out', exact: true });
+    const profile = desktop.getByRole('link', { name: 'View profile', exact: true });
+    assert.equal(await trigger.count(), 1, 'The account avatar must open an account menu');
+    assert.equal(await signOut.isHidden(), true);
+
+    await trigger.press('Enter');
+    await signOut.waitFor();
+    await desktop.keyboard.press('Tab');
+    assert.equal(await profile.evaluate(link => link === document.activeElement), true);
+    await desktop.keyboard.press('Escape');
+    assert.equal(await signOut.isHidden(), true);
+    assert.equal(await trigger.evaluate(button => button === document.activeElement), true);
+    await trigger.press('Space');
+    await signOut.waitFor();
+    const profileUrl = await profile.getAttribute('href');
+    assert.match(new URL(profileUrl, origin).pathname, /^\/u\/\d{4}(?:-\d{4}){3}$/);
+    await profile.click();
+    await desktop.waitForURL(new URL(profileUrl, origin).href);
+    assert.equal(await signOut.isHidden(), true);
+    await trigger.press('Enter');
+    await profile.press('Enter');
+    assert.equal(await signOut.isHidden(), true, 'Selecting the active profile must close the menu');
+    assert.equal(await trigger.evaluate(button => button === document.activeElement), true);
+    await trigger.click();
+    await signOut.waitFor();
+    await desktop.locator('#app-main-content').click({ position: { x: 10, y: 10 } });
+    assert.equal(await signOut.isHidden(), true);
+
+    const status = (page, path, method = 'GET') => page.evaluate(async ({ path, method }) => {
+        return (await fetch(path, { method, redirect: 'manual' })).status;
+    }, { path, method });
+    assert.equal(await status(desktop, '/logout', 'POST'), 403, 'Sign-out POST without a CSRF token must fail');
+    assert.equal(await status(desktop, firstChat), 200);
+
+    const mobile = await login(browser, 'fixtureadmin', adminPassword, errors, 'fr', {
+        viewport: { width: 390, height: 700 }, isMobile: true, hasTouch: true,
+    });
+    const sidebarToggle = mobile.locator('#sidebar-toggle-mobile');
+    const mobileTrigger = mobile.getByLabel('Menu du compte de fixtureadmin', { exact: true });
+    const mobileSignOut = mobile.getByRole('button', { name: 'Se déconnecter', exact: true });
+    const mobileProfile = mobile.getByRole('link', { name: 'Voir le profil', exact: true });
+    assert.equal(await mobileTrigger.isHidden(), true);
+    await sidebarToggle.tap();
+    await mobileTrigger.tap();
+    await mobileSignOut.waitFor();
+    await mobile.locator('#mobile-overlay-backdrop').tap({ position: { x: 370, y: 300 } });
+    await sidebarToggle.tap();
+    assert.equal(await mobileSignOut.isHidden(), true);
+    await mobileTrigger.tap();
+    await mobileProfile.tap();
+    await mobile.waitForURL(new URL(profileUrl, origin).href);
+    await sidebarToggle.tap();
+    await mobileTrigger.tap();
+    await mobileProfile.tap();
+    assert.equal(await sidebarToggle.evaluate(button => button === document.activeElement), true);
+    await sidebarToggle.tap();
+    assert.equal(await mobileSignOut.isHidden(), true);
+
+    await trigger.click();
+    assert.equal(await submitForm(desktop, '/logout', signOut), 302);
+    await desktop.waitForURL(url => url.pathname === '/login');
+    await desktop.goto(origin + firstChat);
+    await desktop.waitForURL(url => url.pathname === '/login');
+    assert.equal(await status(mobile, firstChat), 200,
+        'Signing out must leave the other browser session active');
+
+    await mobileTrigger.tap();
+    const [response] = await Promise.all([
+        mobile.waitForResponse(result => new URL(result.url()).pathname === '/logout' && result.request().method() === 'POST'),
+        mobileSignOut.tap(),
+    ]);
+    assert.equal(response.status(), 302);
+    await mobile.waitForURL(url => url.pathname === '/login');
+    await mobile.goto(origin + firstChat);
+    await mobile.waitForURL(url => url.pathname === '/login');
+    console.log('The account menu supports desktop keyboard and mobile touch, preserves profile access, and signs out only the current browser session.');
+}
+
 async function run() {
     const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
     const errors = [];
@@ -798,6 +880,11 @@ async function run() {
         }
         if (process.argv.includes('--display-preferences')) {
             await checkDisplayPreferences(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--account-menu')) {
+            await checkAccountMenu(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

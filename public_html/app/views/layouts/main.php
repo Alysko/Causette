@@ -241,19 +241,35 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             </div>
             <div class="p-4 border-t border-zinc-700 text-sm text-zinc-400">
                 <?php $currentUserAvatarUrl = User::avatarUrl($currentUser); ?>
-                <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($currentUser->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="flex items-center gap-3 mb-2 hover:bg-zinc-800/40 rounded-xl p-2 -m-2 transition">
-                    <?php if ($currentUserAvatarUrl): ?>
-                        <img src="<?= htmlspecialchars($currentUserAvatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.your_avatar') ?>" class="w-10 h-10 rounded-full object-cover border border-zinc-700">
-                    <?php else: ?>
-                        <div class="w-10 h-10 rounded-full border border-zinc-700 flex items-center justify-center font-semibold <?= htmlspecialchars(User::avatarColorClasses($currentUser->user_number), ENT_QUOTES, 'UTF-8') ?>">
-                            <?= htmlspecialchars(User::avatarInitial($currentUser->username), ENT_QUOTES, 'UTF-8') ?>
-                        </div>
-                    <?php endif; ?>
-                    <div>
-                        <div class="font-medium text-zinc-200"><?= htmlspecialchars($currentUser->username, ENT_QUOTES, 'UTF-8') ?></div>
-                        <div><?= htmlspecialchars(User::formatUserNumber($currentUser->user_number), ENT_QUOTES, 'UTF-8') ?></div>
+                <details id="account-menu" class="relative">
+                    <summary class="flex items-center gap-3 cursor-pointer hover:bg-zinc-800/40 rounded-xl p-2 transition"
+                             aria-label="<?= $tr('ui.account_menu', ['username' => $currentUser->username]) ?>">
+                        <?php if ($currentUserAvatarUrl): ?>
+                            <img src="<?= htmlspecialchars($currentUserAvatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="" class="w-10 h-10 shrink-0 rounded-full object-cover border border-zinc-700">
+                        <?php else: ?>
+                            <span aria-hidden="true" class="w-10 h-10 shrink-0 rounded-full border border-zinc-700 flex items-center justify-center font-semibold <?= htmlspecialchars(User::avatarColorClasses($currentUser->user_number), ENT_QUOTES, 'UTF-8') ?>">
+                                <?= htmlspecialchars(User::avatarInitial($currentUser->username), ENT_QUOTES, 'UTF-8') ?>
+                            </span>
+                        <?php endif; ?>
+                        <span class="flex-1 min-w-0">
+                            <span class="block truncate font-medium text-zinc-200"><?= htmlspecialchars($currentUser->username, ENT_QUOTES, 'UTF-8') ?></span>
+                            <span class="block"><?= htmlspecialchars(User::formatUserNumber($currentUser->user_number), ENT_QUOTES, 'UTF-8') ?></span>
+                        </span>
+                        <i class="fa fa-chevron-up text-xs" aria-hidden="true"></i>
+                    </summary>
+                    <div class="absolute bottom-full left-0 right-0 z-40 mb-2 p-2 rounded-xl border border-zinc-700 bg-zinc-900 shadow-lg">
+                        <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($currentUser->user_number)), ENT_QUOTES, 'UTF-8') ?>"
+                           class="flex items-center gap-2 px-3 py-3 rounded-lg text-zinc-100 hover:bg-zinc-800">
+                            <i class="fa-regular fa-user" aria-hidden="true"></i> <?= $tr('ui.view_profile') ?>
+                        </a>
+                        <form method="post" action="<?= htmlspecialchars(base_path('/logout'), ENT_QUOTES, 'UTF-8') ?>">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                            <button type="submit" class="w-full flex items-center gap-2 px-3 py-3 rounded-lg text-red-300 hover:bg-zinc-800">
+                                <i class="fa fa-right-from-bracket" aria-hidden="true"></i> <?= $tr('ui.sign_out') ?>
+                            </button>
+                        </form>
                     </div>
-                </a>
+                </details>
                 <div class="mt-3 flex items-center gap-4">
                     <div class="relative">
                         <button type="button" id="status-menu-toggle" class="text-zinc-300 hover:text-zinc-100 inline-flex items-center gap-2">
@@ -279,10 +295,6 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                         </div>
                     </div>
                     <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-300 hover:text-zinc-100"><i class="fa fa-cog"></i> <?= $tr('ui.settings') ?></a>
-                    <form method="post" action="<?= htmlspecialchars(base_path('/logout'), ENT_QUOTES, 'UTF-8') ?>">
-                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-                        <button type="submit" class="text-red-400 hover:text-red-300"><i class="fa fa-right-from-bracket"></i> <?= $tr('ui.exit') ?></button>
-                    </form>
                 </div>
             </div>
         </aside>

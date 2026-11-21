@@ -23,7 +23,9 @@ param(
 
     [switch]$NotificationHistory,
 
-    [switch]$DisplayPreferences
+    [switch]$DisplayPreferences,
+
+    [switch]$AccountMenu
 )
 
 $ErrorActionPreference = 'Stop'
@@ -156,6 +158,9 @@ GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\
     }
     if ($DisplayPreferences) {
         Run-Browser '--display-preferences'
+    }
+    if ($AccountMenu) {
+        Run-Browser '--account-menu'
     }
     Run-Browser '--french-member'
 }

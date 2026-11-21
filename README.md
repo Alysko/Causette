@@ -29,4 +29,4 @@ If `php` is missing from `PATH`, set `CAUSETTE_PHP` to the PHP executable. Use s
 
 ## License and upstream
 
-Causette is based on [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. See [LICENSE](LICENSE) for the GPL terms, the source notices for component credits and the [branding record](docs/branding.md) for compatibility references.
+Causette is a hardened fork of [Prologue v1.0.1](https://github.com/michaelstaake/Prologue) by Michael Staake and contributors. It adds protected web setup and updates and checks who can download attachments. See [LICENSE](LICENSE) for the GPL terms, the source notices for component credits and the [branding record](docs/branding.md) for compatibility references.
