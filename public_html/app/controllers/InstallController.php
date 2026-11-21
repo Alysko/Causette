@@ -68,7 +68,7 @@ class InstallController extends Controller
             }
             if (($_SESSION['import_admin_failures'] ?? 0) >= 5) {
                 unset($_SESSION['setup_authorization'], $_SESSION['setup_authorized_until']);
-                $this->renderSetup('operator', 429, 'install.rate_limit');
+                $this->renderSetup('operator', 429, 'install.import_reauthorize');
                 return;
             }
             $this->completeInstallation($prepared['storage'], $username, '', $password, true);

@@ -113,11 +113,13 @@ try {
 
     $grants = @'
 CREATE USER 'causette_fixture'@'localhost' IDENTIFIED BY 'fixture-only-database-password';
-GRANT CREATE, ALTER, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\_fixture`.* TO 'causette_fixture'@'localhost';
+GRANT CREATE, REFERENCES, SELECT, INSERT, UPDATE, DELETE ON `causette\_recovery\_fixture`.* TO 'causette_fixture'@'localhost';
 '@
     Invoke-Docker exec $db mariadb --user root --execute $grants
     Invoke-Docker exec $db mariadb --user root --batch --skip-column-names --execute 'SELECT VERSION()'
     if ($PrologueImport) {
+        $alter = 'GRANT ALTER ON `causette\_recovery\_fixture`.* TO ''causette_fixture''@''localhost'';'
+        Invoke-Docker exec $db mariadb --user root --execute $alter
         $upstream = @(git -C (Split-Path -Parent $PSScriptRoot) show '49b16391364ae58802307abd7e008fa3a09047ff:public_html/app/config/example.config.php')
         if ($LASTEXITCODE -ne 0) { throw 'The pinned Prologue SQL source is unavailable.' }
         $start = [array]::IndexOf($upstream, '$CONFIG_DATABASE_SCHEMA_SQL = <<<''SQL''')

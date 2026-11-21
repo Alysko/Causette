@@ -44,7 +44,7 @@ if (($argv[1] ?? '') === 'seed') {
     $user->execute([2, 'fixturepeer', 'peer@example.test', password_hash('fixture-only-peer-password', PASSWORD_DEFAULT), '0111222233334444', 'user']);
     $db->exec("INSERT INTO chats (id, chat_number, title, type, non_member_visibility, created_by) VALUES (8, '1010202030304040', 'Imported group', 'group', 'none', 1)");
     $db->exec("INSERT INTO chat_members (chat_id, user_id, role) VALUES (8, 1, 'moderator'), (8, 2, 'member')");
-    $db->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (50, 8, 1, 'Message from Prologue')");
+    $db->exec("INSERT INTO messages (id, chat_id, user_id, content) VALUES (50, 8, 1, 'Message from Prologue : café')");
     $db->exec("INSERT INTO message_reactions (message_id, user_id, reaction_code) VALUES (50, 2, '1F44D')");
     $db->exec("INSERT INTO posts (id, user_id, content) VALUES (50, 2, 'Post from Prologue')");
     $db->exec("INSERT INTO post_reactions (post_id, user_id, reaction_code) VALUES (50, 2, '2665')");
@@ -86,6 +86,13 @@ if (($argv[1] ?? '') === 'interrupt') {
     } finally {
         $db->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);
     }
+    $db->exec('ALTER TABLE messages CONVERT TO CHARACTER SET latin1 COLLATE latin1_swedish_ci');
+    try {
+        $refuses($config, 'install.import_charset');
+    } finally {
+        $db->exec('ALTER TABLE messages CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+    }
+    expectImport($db->query('SELECT content FROM messages WHERE id = 50')->fetchColumn() === 'Message from Prologue : café', 'The sample text changed during collation conversion.');
     $wrong = $config;
     $wrong['import']['legacy_totp_secret'] = 'fixture-only-wrong-key';
     $refuses($wrong, 'install.import_totp');
@@ -100,7 +107,24 @@ if (($argv[1] ?? '') === 'interrupt') {
         rmdir($runtime);
     }
     expectImport($setting('causette_installation_id') !== false && !file_exists($runtime), 'The interruption did not occur after the database commit.');
-    echo "Competing lock, wrong-key rollback and post-commit interruption verified.\n";
+    foreach (['integration-keys.json' => 'active', 'prologue-import-state.json' => 'totp_key'] as $file => $field) {
+        $path = $root . '/' . $file;
+        $original = SetupConfiguration::read($path);
+        $mismatched = $original;
+        if ($field === 'active') {
+            $mismatched['keys'][$mismatched['active']] = bin2hex(random_bytes(32));
+        } else {
+            $mismatched[$field] = bin2hex(random_bytes(32));
+        }
+        SetupConfiguration::write($path, $mismatched);
+        try {
+            $refuses($config, 'install.import_keys');
+            expectImport(!file_exists($runtime), 'The import published a runtime with mismatched keys.');
+        } finally {
+            SetupConfiguration::write($path, $original);
+        }
+    }
+    echo "Competing lock, wrong-key rollback, post-commit interruption, and mismatched resume keys verified.\n";
     exit;
 }
 

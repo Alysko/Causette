@@ -72,7 +72,11 @@ final class PrologueImport
         } elseif ($installation !== $runtime['installation_id']) {
             throw new SetupFailure('install.database_identity');
         } else {
-            IntegrationKeyring::read($this->storage . '/' . IntegrationKeyring::FILE);
+            $keys = IntegrationKeyring::read($this->storage . '/' . IntegrationKeyring::FILE);
+            $committed = $this->setting($connection, 'causette_import_key_binding');
+            if (!is_string($committed) || !hash_equals($committed, $this->keyBinding($runtime, $keys))) {
+                throw new SetupFailure('install.import_keys');
+            }
         }
 
         // The transaction marker and the private journal survive a failed runtime write.
@@ -98,9 +102,16 @@ final class PrologueImport
             throw new SetupFailure('install.import_schema');
         }
         foreach ($existing as $table) {
-            if ($table['ENGINE'] !== 'InnoDB' || !str_starts_with((string)$table['TABLE_COLLATION'], 'utf8mb4_')) {
+            if ($table['ENGINE'] !== 'InnoDB') {
                 throw new SetupFailure('install.import_schema');
             }
+            if (!str_starts_with((string)$table['TABLE_COLLATION'], 'utf8mb4_')) {
+                throw new SetupFailure('install.import_charset');
+            }
+        }
+        if ($connection->query("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+            AND CHARACTER_SET_NAME IS NOT NULL AND CHARACTER_SET_NAME <> 'utf8mb4' LIMIT 1")->fetchColumn() !== false) {
+            throw new SetupFailure('install.import_charset');
         }
         if ($this->setting($connection, 'database_version') !== self::DATABASE_VERSION) {
             throw new SetupFailure('install.import_version');
@@ -185,8 +196,9 @@ final class PrologueImport
             $branding = $connection->prepare('UPDATE settings SET `value` = ? WHERE `key` = ? AND BINARY `value` = ?');
             $branding->execute(['Causette', 'mail_from_name', 'Prologue']);
             $branding->execute([str_replace('Prologue', 'Causette', self::ORIGINAL_ANNOUNCEMENT), 'announcement_message', self::ORIGINAL_ANNOUNCEMENT]);
-            $marker = $connection->prepare("INSERT INTO settings (`key`, `value`) VALUES ('causette_installation_id', ?)");
-            $marker->execute([$runtime['installation_id']]);
+            $marker = $connection->prepare("INSERT INTO settings (`key`, `value`)
+                VALUES ('causette_installation_id', ?), ('causette_import_key_binding', ?)");
+            $marker->execute([$runtime['installation_id'], $this->keyBinding($runtime, $keys)]);
             $connection->commit();
         } catch (Throwable $failure) {
             if ($connection->inTransaction()) {
@@ -194,6 +206,11 @@ final class PrologueImport
             }
             throw $failure;
         }
+    }
+
+    private function keyBinding(array $runtime, IntegrationKeyring $keys): string
+    {
+        return hash('sha256', $runtime['csrf_secret'] . $runtime['totp_key'] . $keys->fingerprint());
     }
 
     private function convertAuthenticatorSecrets(PDO $connection, ?string $legacySecret, string $newKey): void

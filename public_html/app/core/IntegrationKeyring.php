@@ -66,6 +66,13 @@ final class IntegrationKeyring
         return $this->active;
     }
 
+    public function fingerprint(): string
+    {
+        $keys = $this->keys;
+        ksort($keys);
+        return hash('sha256', serialize([$this->active, $keys]));
+    }
+
     public function seal(string $name, string $secret): string
     {
         if ($secret === '' || strlen($secret) > self::MAX_SECRET) {

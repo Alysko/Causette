@@ -880,7 +880,7 @@ async function checkPrologueImport(browser, errors) {
     await member.locator('input[name=code]').fill(code);
     assert.equal(await submitForm(member, '/2fa', member.getByRole('button', { name: 'Verify', exact: true })), 302);
     assert.equal((await member.goto(origin + firstChat)).status(), 200);
-    await waitForText(member, '#messages', 'Message from Prologue');
+    await waitForText(member, '#messages', 'Message from Prologue : café');
     await waitForText(member, '#active-poll-question', 'Imported poll');
     const attachment = await member.evaluate(async () => {
         const response = await fetch('/a/1111222233334444/1122334455667788.png');
