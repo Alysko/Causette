@@ -17,7 +17,7 @@ use PHPMailer\PHPMailer\Exception;
 
 class AuthController extends Controller {
     private const AUTH_ATTEMPT_LIMIT_PER_MINUTE = 5;
-    private const AUTH_ATTEMPT_LOGIN_FAILED = 'login_failed';
+    private const LOGIN_ACCOUNT_LIMIT = 8;
     private const AUTH_ATTEMPT_REGISTER_INVITE_FAILED = 'register_invite_failed';
 
     public function showLogin() {
@@ -36,33 +36,26 @@ class AuthController extends Controller {
         Auth::csrfValidate();
         $this->clearPendingTwoFactor();
         $this->verifyCaptchaOrFail('/login');
-        $identifier = trim($_POST['identifier'] ?? '');
+        $identifier = is_string($_POST['identifier'] ?? null) ? trim($_POST['identifier']) : '';
         $password = $_POST['password'] ?? '';
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 
-        if ($this->hasTooManyAuthAttempts($ip, self::AUTH_ATTEMPT_LOGIN_FAILED)) {
-            $this->flash('error', 'too_many_attempts');
-            $this->redirect('/login');
+        $user = null;
+        if ($identifier !== '' && is_string($password) && $password !== '') {
+            $user = str_contains($identifier, '@')
+                ? User::findByEmail($identifier)
+                : User::findByUsername($identifier);
         }
 
-        if ($identifier === '' || $password === '') {
-            $this->recordAuthAttempt($ip, self::AUTH_ATTEMPT_LOGIN_FAILED);
-            $this->flash('error', 'invalid');
-            $this->redirect('/login');
-        }
-
-        $user = str_contains($identifier, '@')
-            ? User::findByEmail($identifier)
-            : User::findByUsername($identifier);
-        if (!$user || !password_verify($password, $user->password)) {
-            $this->recordAuthAttempt($ip, self::AUTH_ATTEMPT_LOGIN_FAILED);
+        // Unknown names share a fixed bucket, and both identifiers for an account share its user ID.
+        if (!AuthBudget::allow('login', (int)($user->id ?? 0), $ip, self::LOGIN_ACCOUNT_LIMIT)
+            || !$user || !password_verify($password, $user->password)
+        ) {
             $this->flash('error', 'invalid');
             $this->redirect('/login');
         }
         $passwordCheckedAt = time();
         $passwordBinding = Auth::passwordBinding($user);
-
-        $this->clearAuthAttempts($ip, self::AUTH_ATTEMPT_LOGIN_FAILED);
 
         if (User::isBanned($user)) {
             $this->flash('error', 'banned');
@@ -226,9 +219,6 @@ class AuthController extends Controller {
             $this->redirect('/register');
         }
 
-        $password = password_hash($rawPassword, PASSWORD_DEFAULT);
-
-        $invite = null;
         if ($inviteCodeRequired) {
             if ($this->hasTooManyAuthAttempts($ip, self::AUTH_ATTEMPT_REGISTER_INVITE_FAILED)) {
                 $this->flash('error', 'too_many_attempts');
@@ -240,47 +230,27 @@ class AuthController extends Controller {
                 $this->flash('error', 'invalid_invite');
                 $this->redirect('/register');
             }
+        }
 
-            $invite = Database::query("SELECT * FROM invite_codes WHERE code = ? AND used_by IS NULL", [$inviteCode])->fetch();
-            if (!$invite) {
+        $password = password_hash($rawPassword, PASSWORD_DEFAULT);
+        $registration = $this->createRegistration(
+            $username, $email, $password, $emailVerificationRequired, $inviteCodeRequired ? $inviteCode : null
+        );
+        if (isset($registration['error'])) {
+            if ($registration['error'] === 'invalid_invite') {
                 $this->recordAuthAttempt($ip, self::AUTH_ATTEMPT_REGISTER_INVITE_FAILED);
-                $this->flash('error', 'invalid_invite');
-                $this->redirect('/register');
             }
-        }
-
-        if (!User::isUsernameAvailableForUser($username)) {
-            $this->flash('error', 'username_taken');
+            $this->flash('error', $registration['error']);
             $this->redirect('/register');
         }
 
-        $existingEmail = Database::query("SELECT id FROM users WHERE email = ?", [$email])->fetch();
-        if ($existingEmail) {
-            $this->flash('error', 'email_taken');
-            $this->redirect('/register');
-        }
-
-        $userNumber = $this->generateUserNumber();
-
-        if ($emailVerificationRequired) {
-            Database::query("INSERT INTO users (username, email, password, user_number) VALUES (?, ?, ?, ?)",
-                [$username, $email, $password, $userNumber]);
-        } else {
-            Database::query("INSERT INTO users (username, email, password, user_number, email_verified_at) VALUES (?, ?, ?, ?, NOW())",
-                [$username, $email, $password, $userNumber]);
-        }
-
-        $newUserId = (int)Database::getInstance()->lastInsertId();
-        User::recordUsernameHistory($newUserId, $username);
-
-        if ($inviteCodeRequired && $invite) {
-            Database::query("UPDATE invite_codes SET used_by = ?, used_at = NOW() WHERE id = ?", [$newUserId, $invite->id]);
-        }
+        $newUserId = $registration['userId'];
+        $referrerId = $registration['referrerId'];
 
         if ((string)(Setting::get('new_user_notification') ?? '0') === '1') {
             $referredBy = null;
-            if ($invite) {
-                $referrer = Database::query("SELECT username FROM users WHERE id = ?", [$invite->creator_id])->fetch();
+            if ($referrerId !== null) {
+                $referrer = Database::query("SELECT username FROM users WHERE id = ?", [$referrerId])->fetch();
                 $referredBy = $referrer ? (string)$referrer->username : null;
             }
             $this->sendNewUserNotification($username, $email, $ip, $referredBy);
@@ -305,6 +275,57 @@ class AuthController extends Controller {
         $_SESSION['last_activity_touch_at'] = time();
         $this->autoJoinNewUserToGroup($newUserId, $username);
         $this->redirect('/');
+    }
+
+    private function createRegistration(
+        string $username, string $email, string $password, bool $verifyEmail, ?string $inviteCode
+    ): array {
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            $invite = null;
+            if ($inviteCode !== null) {
+                $invite = Database::query(
+                    'SELECT id, creator_id FROM invite_codes WHERE code = ? AND used_by IS NULL AND used_at IS NULL FOR UPDATE',
+                    [$inviteCode]
+                )->fetch();
+                if (!$invite) {
+                    return ['error' => 'invalid_invite'];
+                }
+            }
+
+            if (!User::isUsernameAvailableForUser($username)) {
+                return ['error' => 'username_taken'];
+            }
+            if (User::findByEmail($email)) {
+                return ['error' => 'email_taken'];
+            }
+
+            Database::query(
+                'INSERT INTO users (username, email, password, user_number, email_verified_at) VALUES (?, ?, ?, ?, IF(?, NULL, NOW()))',
+                [$username, $email, $password, $this->generateUserNumber(), (int)$verifyEmail]
+            );
+            $userId = (int)$connection->lastInsertId();
+            User::recordUsernameHistory($userId, $username);
+
+            if ($invite !== null) {
+                // The timestamp survives deletion of the invited account.
+                $consumed = Database::query(
+                    'UPDATE invite_codes SET used_by = ?, used_at = NOW() WHERE id = ? AND used_by IS NULL AND used_at IS NULL',
+                    [$userId, $invite->id]
+                );
+                if ($consumed->rowCount() !== 1) {
+                    return ['error' => 'invalid_invite'];
+                }
+            }
+
+            $connection->commit();
+            return ['userId' => $userId, 'referrerId' => $invite === null ? null : (int)$invite->creator_id];
+        } finally {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
+        }
     }
 
     public function showVerifyEmail() {
@@ -670,13 +691,6 @@ class AuthController extends Controller {
 
         Database::query(
             "INSERT INTO auth_attempt_limits (ip_address, action_type) VALUES (?, ?)",
-            [(string)$ip, (string)$actionType]
-        );
-    }
-
-    private function clearAuthAttempts($ip, $actionType) {
-        Database::query(
-            "DELETE FROM auth_attempt_limits WHERE ip_address = ? AND action_type = ?",
             [(string)$ip, (string)$actionType]
         );
     }

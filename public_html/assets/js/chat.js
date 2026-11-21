@@ -519,8 +519,10 @@ function renderQuotedMessageBlock(msg) {
     const hasQuotedMessageTarget = Number.isFinite(quotedMessageId) && quotedMessageId > 0;
     const quotedMentionMap = normalizeMentionMap(msg?.quote_mention_map || {});
     const quotedUserNumber = String(msg?.quoted_user_number || '').replace(/\D/g, '').slice(0, 16);
-    const quotedUsername = String(msg?.quoted_username || 'Unknown user').trim() || 'Unknown user';
-    const quotedProfileUrl = quotedUserNumber ? getProfileUrlByUserNumber(quotedUserNumber) : '';
+    const quotedBotName = bannerText(msg?.quoted_bot_name);
+    const quotedUsername = quotedBotName ? uiText('bot_name', { name: quotedBotName })
+        : bannerText(msg?.quoted_username).trim() || chatLabel('unknown_user');
+    const quotedProfileUrl = quotedUserNumber && !quotedBotName ? getProfileUrlByUserNumber(quotedUserNumber) : '';
 
     const blockAttributes = hasQuotedMessageTarget
         ? ` class="js-quoted-message-link mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm hover:bg-zinc-800/70 transition-colors cursor-pointer" data-quoted-message-id="${quotedMessageId}" title="${escapeHtml(uiText('goto_quoted_message'))}"`
@@ -730,6 +732,7 @@ function normalizePinnedMessage(pinnedMessage) {
         chat_id: bannerInteger(pinnedMessage.chat_id),
         user_id: bannerInteger(pinnedMessage.user_id),
         username: bannerText(pinnedMessage.username).trim() || chatLabel('unknown_user'),
+        bot_name: bannerText(pinnedMessage.bot_name),
         user_number: bannerText(pinnedMessage.user_number),
         created_at: bannerText(pinnedMessage.created_at),
         content: bannerText(pinnedMessage.content),
@@ -775,7 +778,8 @@ function renderPinnedMessageBanner(pinnedMessage) {
     banner.classList.remove('hidden');
     banner.dataset.pinnedMessageId = String(safePinnedMessage.id);
     setPinnedBannerScrollVisibility(!pinnedBannerHiddenByScroll);
-    usernameNode.textContent = safePinnedMessage.username;
+    usernameNode.textContent = safePinnedMessage.bot_name
+        ? uiText('bot_name', { name: safePinnedMessage.bot_name }) : safePinnedMessage.username;
     timeNode.dataset.utc = safePinnedMessage.created_at;
     timeNode.title = safePinnedMessage.created_at;
     timeNode.textContent = formatCompactMessageTimestamp(safePinnedMessage.created_at);
@@ -2393,6 +2397,8 @@ function buildSidebarChatNode(chat, options = {}) {
     const rawMessage = decodeStoredMentionsToPlainText(chat.last_message || '');
     const secondaryLine = (() => {
         if (!rawMessage) return uiText('no_messages_yet');
+        const botName = bannerText(chat.last_message_bot_name);
+        if (botName) return `${uiText('bot_name', { name: botName })}: ${rawMessage}`;
         const senderId = Number(chat.last_message_user_id || 0);
         const prefix = senderId && senderId === Number(currentUserId || 0)
             ? 'You'
@@ -4507,7 +4513,7 @@ function renderMessages(messages, options = {}) {
     const clusterStarts = [];
     let prevClusterUserId = null;
     messages.forEach((msg) => {
-        if (msg.is_system_event) {
+        if (msg.is_system_event || bannerText(msg.bot_name)) {
             clusterStarts.push(false);
             prevClusterUserId = null;
             return;
@@ -4637,14 +4643,26 @@ function renderMessages(messages, options = {}) {
         const index = Number(entry?.originalIndex || 0);
 
         const messageUserId = Number(msg.user_id);
-        const isNewGroup = previousUserId === null || messageUserId !== previousUserId;
+        const botName = bannerText(msg.bot_name);
+        const isNewGroup = Boolean(botName) || previousUserId === null || messageUserId !== previousUserId;
         const showStatus = isNewGroup
+            && !botName
             && normalizeChatType(currentChat?.type) === 'group'
             && messageUserId !== Number(currentUserId)
             && latestClusterIndexByUser.get(messageUserId) === index;
         const fullTimestamp = String(msg.created_at || '');
         const compactTimestamp = formatCompactMessageTimestamp(fullTimestamp);
-        const profileUrl = getProfileUrlForUser(msg);
+        const profileUrl = botName ? '' : getProfileUrlForUser(msg);
+        const username = escapeHtml(bannerText(msg.username));
+        const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
+        const authorMarkup = botName
+            ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
+            : profileUrl
+                ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
+                : `<div class="text-sm font-semibold leading-5 inline-block causette-accent">${username}</div>`;
+        const avatarMarkup = botName
+            ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
+            : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>';
         const statusLabel = String(msg?.effective_status_label || 'Offline');
         const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
         const mentionMap = normalizeMentionMap(msg?.mention_map || {});
@@ -4671,7 +4689,7 @@ function renderMessages(messages, options = {}) {
         const interactionControlsMarkup = isGroupReadOnlyViewer
             ? ''
             : `<div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(String(msg.username || ''))}" data-quote-user-number="${escapeHtml(String(msg.user_number || ''))}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
+                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
                                 ${editButton}
                                 ${deleteButton}
                                 ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
@@ -4681,10 +4699,10 @@ function renderMessages(messages, options = {}) {
         chunks.push(`
             <div class="flex gap-3 ${isNewGroup ? 'mt-4' : 'mt-1'} group" data-message-id="${Number(msg.id)}" data-message-user-id="${messageUserId}" data-message-created-at="${escapeHtml(fullTimestamp)}" data-message-is-quoted="${isQuoted ? '1' : '0'}" data-message-has-attachments="${hasAttachments ? '1' : '0'}" data-message-edited-at="${escapeHtml(editedAt)}">
                 <div class="w-10 shrink-0">
-                    ${isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>'}
+                    ${avatarMarkup}
                 </div>
                 <div class="min-w-0 flex-1">
-                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${profileUrl ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${escapeHtml(msg.username)}</a>` : `<div class="text-sm font-semibold leading-5 inline-block causette-accent">${escapeHtml(msg.username)}</div>`}${showStatus ? `<span class="inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
+                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
                     ${renderQuotedMessageBlock(msg)}
                     <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
                     ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
@@ -4701,7 +4719,7 @@ function renderMessages(messages, options = {}) {
             </div>
         `);
 
-        previousUserId = messageUserId;
+        previousUserId = botName ? null : messageUserId;
         previousWasSystemEvent = false;
     });
 

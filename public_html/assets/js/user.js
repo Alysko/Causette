@@ -1678,7 +1678,8 @@ async function searchMessagesPage(query, page) {
             const chatUrl = `/c/${chatNumFormatted}?msg=${msgId}`;
             const rawContent = stripMessageMentions(String(msg.content || ''));
             const highlightedContent = highlightSearchTerm(rawContent, query);
-            const senderUsername = escapeHtml(String(msg.sender_username || ''));
+            const senderUsername = escapeHtml(msg.bot_name
+                ? uiText('bot_name', { name: msg.bot_name }) : String(msg.sender_username || ''));
             const createdAtRaw = String(msg.created_at || '');
             const timestamp = formatCompactMessageTimestamp(createdAtRaw);
 

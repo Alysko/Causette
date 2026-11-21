@@ -392,7 +392,10 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     <?php if (!$isRequestablePreview): ?>
     <?php
         $initialPinnedMessageId = (int)($pinnedMessage->id ?? 0);
-        $initialPinnedMessageUsername = (string)($pinnedMessage->username ?? $chatLocale->text('chat.unknown_user'));
+        $pinnedBotName = (string)($pinnedMessage->bot_name ?? '');
+        $initialPinnedMessageUsername = $pinnedBotName !== ''
+            ? $chatLocale->text('ui.bot_name', ['name' => $pinnedBotName])
+            : (string)($pinnedMessage->username ?? $chatLocale->text('chat.unknown_user'));
         $initialPinnedMessageContent = (string)($pinnedMessage->content ?? '');
         $initialPinnedMessageCreatedAt = (string)($pinnedMessage->created_at ?? '');
         $initialPinnedMessageMentionMap = json_encode((object)($pinnedMessage->mention_map ?? []), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
@@ -446,7 +449,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             $clusterStarts = [];
             $prevClusterUserId = null;
             foreach ($messages as $index => $messageForCluster) {
-                if ($messageForCluster->is_system_event ?? false) {
+                if (($messageForCluster->is_system_event ?? false) || (string)($messageForCluster->bot_name ?? '') !== '') {
                     $clusterStarts[$index] = false;
                     $prevClusterUserId = null;
                     continue;
@@ -677,16 +680,22 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php endif; ?>
             <?php $message = $entry['message']; $index = (int)($entry['message_index'] ?? -1); ?>
             <?php
-                $avatarUrl = $message->avatar_url ?? User::avatarUrl($message);
-                $isNewGroup = ($previousUserId === null) || ((int)$previousUserId !== (int)$message->user_id);
+                $botName = (string)($message->bot_name ?? '');
+                $isBot = $botName !== '';
+                $avatarUrl = $isBot ? null : ($message->avatar_url ?? User::avatarUrl($message));
+                $isNewGroup = $isBot || $previousUserId === null || $previousUserId !== (int)$message->user_id;
                 $showStatus = $isNewGroup
+                    && !$isBot
                     && $isGroupChat
                     && ((int)$message->user_id !== (int)$currentUserId)
                     && (($latestClusterIndexByUser[(int)$message->user_id] ?? -1) === $index);
                 $fullTimestamp = (string)($message->created_at ?? '');
                 $compactTimestamp = DisplayPreferences::formatTimestamp($fullTimestamp);
                 $quotedContent = (string)($message->quoted_content ?? '');
-                $quotedUsername = (string)($message->quoted_username ?? '');
+                $quotedBotName = (string)($message->quoted_bot_name ?? '');
+                $quotedUsername = $quotedBotName !== ''
+                    ? $chatLocale->text('ui.bot_name', ['name' => $quotedBotName])
+                    : (string)($message->quoted_username ?? '');
                 $quotedUserNumber = (string)($message->quoted_user_number ?? '');
                 $quotedMentionMap = $message->quote_mention_map ?? (object)[];
                 $quotedDisplayContent = $renderStoredMentionsToPlain($quotedContent, $quotedMentionMap);
@@ -694,7 +703,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <div class="flex gap-3 <?= $isNewGroup ? 'mt-4' : 'mt-1' ?> group" data-message-id="<?= (int)$message->id ?>" data-message-user-id="<?= (int)$message->user_id ?>" data-message-created-at="<?= htmlspecialchars((string)$message->created_at, ENT_QUOTES, 'UTF-8') ?>" data-message-is-quoted="<?= !empty($message->is_quoted) ? '1' : '0' ?>" data-message-has-attachments="<?= !empty($message->has_attachments) ? '1' : '0' ?>" data-message-edited-at="<?= htmlspecialchars((string)($message->edited_at ?? ''), ENT_QUOTES, 'UTF-8') ?>">
                 <div class="w-10 shrink-0">
                     <?php if ($isNewGroup): ?>
-                        <?php if ($avatarUrl): ?>
+                        <?php if ($isBot): ?>
+                            <div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>
+                        <?php elseif ($avatarUrl): ?>
                             <img src="<?= htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-10 h-10 rounded-full object-cover border border-zinc-700 mt-0.5">
                         <?php else: ?>
                             <div class="w-10 h-10 rounded-full border border-zinc-700 flex items-center justify-center font-semibold mt-0.5 <?= htmlspecialchars(User::avatarColorClasses($message->user_number), ENT_QUOTES, 'UTF-8') ?>">
@@ -708,7 +719,12 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <div class="min-w-0 flex-1">
                     <?php if ($isNewGroup): ?>
                         <div class="flex items-center gap-2 mb-0.5">
-                            <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($message->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2"><?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?></a>
+                            <?php if ($isBot): ?>
+                                <span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300"><?= $tr('ui.bot') ?></span>
+                                <bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent"><?= htmlspecialchars($botName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></bdi>
+                            <?php else: ?>
+                                <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($message->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2"><?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?></a>
+                            <?php endif; ?>
                             <?php if ($showStatus): ?>
                                 <span class="inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($message->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($message->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>"></span>
                             <?php endif; ?>
@@ -718,7 +734,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <?php if ($quotedContent !== ''): ?>
                         <div class="mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm">
                             <div class="text-zinc-400 text-xs mb-1">
-                                <?php if ($quotedUserNumber !== ''): ?>
+                                <?php if ($quotedBotName === '' && $quotedUserNumber !== ''): ?>
                                     <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($quotedUserNumber)), ENT_QUOTES, 'UTF-8') ?>" class="hover:underline underline-offset-2"><?= htmlspecialchars($quotedUsername !== '' ? $quotedUsername : 'Unknown user', ENT_QUOTES, 'UTF-8') ?></a>
                                 <?php else: ?>
                                     <?= htmlspecialchars($quotedUsername !== '' ? $quotedUsername : 'Unknown user', ENT_QUOTES, 'UTF-8') ?>
@@ -831,7 +847,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <?php endif; ?>
                             <?php if (!$isReadOnlyPublicViewer): ?>
                             <div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars((string)$message->username, ENT_QUOTES, 'UTF-8') ?>" data-quote-user-number="<?= htmlspecialchars((string)$message->user_number, ENT_QUOTES, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('ui.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
                                 <?php if (empty($message->is_quoted)): ?>
                                     <?php
                                         $canEditThis = false;
@@ -902,7 +918,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     </div>
                 </div>
             </div>
-            <?php $previousUserId = (int)$message->user_id; $previousWasSystemEvent = false; ?>
+            <?php $previousUserId = $isBot ? null : (int)$message->user_id; $previousWasSystemEvent = false; ?>
         <?php endforeach; ?>
     </div>
     <div id="typing-indicator" class="px-6 pb-2 text-sm text-zinc-400 min-h-6 hidden" aria-live="polite"></div>

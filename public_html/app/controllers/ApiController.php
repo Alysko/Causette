@@ -153,7 +153,7 @@ class ApiController extends Controller {
 
         try {
             $message = Database::query(
-                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.avatar_filename
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
@@ -167,7 +167,7 @@ class ApiController extends Controller {
             }
 
             $message = Database::query(
-                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at, m.bot_name,
                         u.username, u.email AS user_email, u.user_number
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
@@ -449,6 +449,7 @@ class ApiController extends Controller {
                     m.content,
                     m.created_at,
                     m.user_id AS sender_id,
+                    m.bot_name,
                     u.username AS sender_username,
                     u.email AS sender_email,
                     u.user_number AS sender_user_number,
@@ -589,11 +590,12 @@ class ApiController extends Controller {
                          c.type,
                  " . ($supportsChatTitle ? "c.title AS custom_title," : "NULL AS custom_title,") . "
                          c.created_at,
-                         (SELECT m.content FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
-                         (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at,
-                         (SELECT m.user_id FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_user_id,
-                 (SELECT u.username FROM messages m JOIN users u ON u.id = m.user_id WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_sender_username,
-                         (SELECT u.email FROM messages m JOIN users u ON u.id = m.user_id WHERE m.chat_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_sender_email,";
+                         (SELECT m.content FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message,
+                         (SELECT m.created_at FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_at,
+                         (SELECT m.user_id FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_user_id,
+                         (SELECT m.bot_name FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_bot_name,
+                         (SELECT u.username FROM messages m JOIN users u ON u.id = m.user_id WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_sender_username,
+                         (SELECT u.email FROM messages m JOIN users u ON u.id = m.user_id WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_sender_email,";
 
         if ($supportsLastSeen) {
             $query .= "
@@ -798,10 +800,11 @@ class ApiController extends Controller {
                 "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at, m.edited_at,
                         m.quoted_message_id, m.quoted_user_id, m.quoted_content, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.avatar_filename, u.presence_status, u.last_active_at,
-                        qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                        qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
                  LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                 LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                  WHERE m.chat_id = ?
                  ORDER BY m.created_at DESC, m.id DESC
                  LIMIT 200",
@@ -816,10 +819,11 @@ class ApiController extends Controller {
                 "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
                         m.quoted_message_id, m.quoted_user_id, m.quoted_content, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.presence_status, u.last_active_at,
-                        qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                        qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
                  LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                 LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                  WHERE m.chat_id = ?
                  ORDER BY m.created_at DESC, m.id DESC
                  LIMIT 200",

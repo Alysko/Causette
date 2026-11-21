@@ -53,6 +53,17 @@ final class Database
 {
     public static object $account;
     public static bool $crossedFixtureBoundary = false;
+    private bool $inTransaction = false;
+
+    public static function getInstance(): self
+    {
+        return new self();
+    }
+
+    public function beginTransaction(): void { $this->inTransaction = true; }
+    public function commit(): void { $this->inTransaction = false; }
+    public function rollBack(): void { $this->inTransaction = false; }
+    public function inTransaction(): bool { return $this->inTransaction; }
 
     public static function query(string $sql, array $parameters = []): FixtureQueryResult
     {
@@ -66,11 +77,19 @@ final class Database
                 ['twofa_frequency_2'] => 'always',
                 default => self::stop(),
             }),
-            'SELECT COUNT(*) FROM auth_attempt_limits WHERE ip_address = ? AND action_type = ? AND created_at >= (NOW() - INTERVAL 1 MINUTE)' => new FixtureQueryResult(0),
-            'DELETE FROM auth_attempt_limits WHERE created_at < (NOW() - INTERVAL 1 MINUTE)',
-            'DELETE FROM auth_attempt_limits WHERE ip_address = ? AND action_type = ?' => new FixtureQueryResult(),
+            "INSERT INTO settings (`key`, `value`) VALUES (?, '0:0') ON DUPLICATE KEY UPDATE `key` = `key`",
+            'INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)' =>
+                self::isLoginBudgetKey($parameters[0]) ? new FixtureQueryResult() : self::stop(),
+            'SELECT `value` FROM settings WHERE `key` = ? FOR UPDATE' =>
+                self::isLoginBudgetKey($parameters[0]) ? new FixtureQueryResult('0:0') : self::stop(),
             default => self::stop(),
         };
+    }
+
+    private static function isLoginBudgetKey(string $key): bool
+    {
+        return in_array($key, ['auth_limit_global', 'auth_limit_login_2'], true)
+            || preg_match('/^auth_limit_net_[a-f0-9]{2}$/D', $key) === 1;
     }
 
     private static function stop(): never

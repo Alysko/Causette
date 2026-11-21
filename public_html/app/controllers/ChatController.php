@@ -288,7 +288,7 @@ class ChatController extends Controller {
 
         try {
             $message = Database::query(
-                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.avatar_filename
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
@@ -302,7 +302,7 @@ class ChatController extends Controller {
             }
 
             $message = Database::query(
-                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
+                "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at, m.bot_name,
                         u.username, u.email AS user_email, u.user_number
                  FROM messages m
                  JOIN users u ON u.id = m.user_id
@@ -655,10 +655,11 @@ class ChatController extends Controller {
             try {
                 $messages = Database::query(
                     "SELECT m.*, u.username, u.email AS user_email, u.user_number, u.avatar_filename, u.presence_status, u.last_active_at,
-                            qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                            qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                      FROM messages m
                      JOIN users u ON m.user_id = u.id
                      LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                     LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                      WHERE m.chat_id = ?
                      ORDER BY m.created_at DESC, m.id DESC
                      LIMIT 100",
@@ -671,10 +672,11 @@ class ChatController extends Controller {
 
                 $messages = Database::query(
                     "SELECT m.*, u.username, u.email AS user_email, u.user_number, u.presence_status, u.last_active_at,
-                            qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                            qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                      FROM messages m
                      JOIN users u ON m.user_id = u.id
                      LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                     LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                      WHERE m.chat_id = ?
                      ORDER BY m.created_at DESC, m.id DESC
                      LIMIT 100",
@@ -1379,10 +1381,11 @@ class ChatController extends Controller {
                 "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
                         m.quoted_message_id, m.quoted_user_id, m.quoted_content, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.avatar_filename, u.presence_status, u.last_active_at,
-                        qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                        qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                  FROM messages m
                  JOIN users u ON m.user_id = u.id
                  LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                 LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                  WHERE m.chat_id = ?
                  ORDER BY m.created_at DESC, m.id DESC
                  LIMIT 200",
@@ -1397,10 +1400,11 @@ class ChatController extends Controller {
                 "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at,
                         m.quoted_message_id, m.quoted_user_id, m.quoted_content, m.bot_name,
                         u.username, u.email AS user_email, u.user_number, u.presence_status, u.last_active_at,
-                        qu.username AS quoted_username, qu.user_number AS quoted_user_number
+                        qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
                  FROM messages m
                  JOIN users u ON m.user_id = u.id
                  LEFT JOIN users qu ON qu.id = m.quoted_user_id
+                 LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
                  WHERE m.chat_id = ?
                  ORDER BY m.created_at DESC, m.id DESC
                  LIMIT 200",

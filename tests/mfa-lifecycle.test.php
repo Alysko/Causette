@@ -115,6 +115,19 @@ if ($mode === 'recovery-worker') {
     echo (new TOTPTwoFAProvider())->verifyCode(2, $code, []) ? "accepted\n" : "refused\n";
     exit;
 }
+if ($mode === 'invitation-worker') {
+    $_SERVER['REMOTE_ADDR'] = '198.51.100.29';
+    $_SESSION = ['csrf_token' => 'fixture-csrf'];
+    $_COOKIE = [];
+    $_POST = ['csrf_token' => 'fixture-csrf', 'invite_code' => '2000-3000',
+        'username' => 'lockcontender', 'email' => 'contender@example.test', 'password' => FIXTURE_PASSWORD];
+    echo "ready\n";
+    fflush(STDOUT);
+    $location = mfaFixtureAction((new MfaFixtureController())->register(...));
+    echo $location === '/register' && ($_SESSION['_flash']['error'] ?? null) === 'invalid_invite'
+        ? "unavailable\n" : "unexpected result\n";
+    exit;
+}
 
 $pdo = Database::getInstance();
 expectMfa($pdo->query('SHOW TABLES')->fetchAll() === [], 'MFA fixture requires an empty database');
@@ -157,6 +170,8 @@ if ($mode === 'email') {
     $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'fixturepeer', 'password' => FIXTURE_PASSWORD];
     expectMfa(mfaFixtureAction($controller->login(...)) === '/verify-email' && count($controller->messages) === 1,
         'An unverified user must receive an address verification code');
+    expectMfa(str_ends_with((string)Setting::get('auth_limit_login_2'), ':1'),
+        'A password check must spend the account login budget before email verification');
     $staleSession = $_SESSION;
     $_POST = ['csrf_token' => 'fixture-csrf'];
     for ($send = 0; $send < 3; $send++) {
@@ -176,6 +191,8 @@ if ($mode === 'email') {
     $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'fixturepeer', 'password' => FIXTURE_PASSWORD];
     expectMfa(mfaFixtureAction($controller->login(...)) === '/2fa' && is_string($mail->deliveredCode),
         'Verified address must proceed through the email second factor');
+    expectMfa(str_ends_with((string)Setting::get('auth_limit_login_2'), ':2'),
+        'A valid password must spend the same account budget and leave previous attempts counted');
     $challenge = json_decode(Setting::get('auth_challenge_mfa_2'), true);
     expectMfa(is_string($challenge['proof']) && strlen($challenge['proof']) === 64
         && $challenge['proof'] !== $mail->deliveredCode, 'The durable state must hold a keyed proof of the delivered code');
@@ -184,8 +201,96 @@ if ($mode === 'email') {
     expectMfa(mfaFixtureAction($controller->verify2FA(...)) === '/' && (int)Auth::user()?->id === 2,
         'An authorized browser must be able to finish email MFA after its network changes');
     expectMfa(Setting::get('auth_challenge_mfa_2') === null, 'Completing the email factor must consume the challenge');
+
+    Setting::set('auth_limit_login_2', intdiv(time(), 600) . ':8');
+    $_SESSION = ['csrf_token' => 'fixture-csrf'];
+    $_COOKIE = [];
+    $_SERVER['REMOTE_ADDR'] = '198.51.100.27';
+    $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'peer@example.test', 'password' => FIXTURE_PASSWORD];
+    expectMfa(mfaFixtureAction($controller->login(...)) === '/login' && !isset($_SESSION['2fa_pending_user'])
+        && Setting::get('auth_challenge_mfa_2') === null,
+        'An exhausted login budget must follow the account across its identifier and network');
     session_write_close();
     echo "Email verification, bounded resends, proof storage and email MFA passed with a synthetic transport\n";
+    exit;
+}
+
+if ($mode === 'invitation') {
+    session_start();
+    $_SERVER['REMOTE_ADDR'] = '192.0.2.12';
+    $_SESSION = ['csrf_token' => 'fixture-csrf'];
+    $_COOKIE = [];
+    $_POST = ['csrf_token' => 'fixture-csrf', 'invite_code' => '1000-2000',
+        'username' => 'invitedpeer', 'email' => 'invited@example.test', 'password' => FIXTURE_PASSWORD];
+    Database::query("INSERT INTO invite_codes (code, creator_id) VALUES ('1000-2000', 1)");
+    $controller = new MfaFixtureController();
+    $pdo->exec("CREATE TRIGGER fixture_refuse_invitation_update BEFORE UPDATE ON invite_codes FOR EACH ROW
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'fixture blocked invitation update'");
+    try {
+        $controller->register();
+        throw new LogicException('Expected the configured invitation update failure');
+    } catch (PDOException $failure) {
+        expectMfa($failure->getCode() === '45000', 'Expected the simulated invitation storage failure');
+    } finally {
+        $pdo->exec('DROP TRIGGER fixture_refuse_invitation_update');
+    }
+    expectMfa(!User::findByEmail('invited@example.test'), 'A failed invitation write must roll back the new account');
+    expectMfa(!$pdo->inTransaction(), 'Registration must release its transaction on failure');
+    expectMfa(mfaFixtureAction($controller->register(...)) === '/verify-email',
+        'The invited member must be able to retry after a rolled-back write');
+    $invite = Database::query("SELECT used_by, used_at FROM invite_codes WHERE code = '1000-2000'")->fetch();
+    expectMfa((int)$invite->used_by === (int)User::findByEmail('invited@example.test')->id && $invite->used_at !== null,
+        'The committed invitation must link the account and record when it was used');
+    Database::query('DELETE FROM users WHERE id = ?', [$invite->used_by]);
+    $retained = Database::query("SELECT used_by, used_at FROM invite_codes WHERE code = '1000-2000'")->fetch();
+    expectMfa($retained->used_by === null && $retained->used_at === $invite->used_at,
+        'Deleting the invitee must preserve the consumption timestamp');
+    $_SESSION = ['csrf_token' => 'fixture-csrf'];
+    $_POST['username'] = 'anotherpeer';
+    $_POST['email'] = 'another@example.test';
+    expectMfa(mfaFixtureAction($controller->register(...)) === '/register'
+        && ($_SESSION['_flash']['error'] ?? null) === 'invalid_invite'
+        && !User::findByEmail('another@example.test'), 'An invitation with a consumption timestamp must stay unusable');
+
+    Database::query("INSERT INTO invite_codes (code, creator_id) VALUES ('2000-3000', 1)");
+    $pdo->beginTransaction();
+    $worker = null;
+    try {
+        Database::query("UPDATE invite_codes SET used_by = 2, used_at = NOW() WHERE code = '2000-3000'");
+        $worker = proc_open(
+            [PHP_BINARY, '-d', 'pdo_mysql.default_socket=/run/mysqld/mysqld.sock', __FILE__, 'invitation-worker'],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => STDERR],
+            $pipes
+        );
+        expectMfa(is_resource($worker), 'Could not start the independent registration connection');
+        stream_set_timeout($pipes[1], 10);
+        expectMfa(trim((string)fgets($pipes[1])) === 'ready', 'The registration connection must reach the barrier');
+        $deadline = microtime(true) + 5;
+        do {
+            $waiting = (int)Database::query(
+                "SELECT COUNT(*) FROM information_schema.PROCESSLIST
+                 WHERE ID <> CONNECTION_ID() AND DB = DATABASE() AND INFO LIKE '%invite_codes%'"
+            )->fetchColumn();
+            if ($waiting > 0) {
+                break;
+            }
+            usleep(20000);
+        } while (microtime(true) < $deadline);
+        expectMfa($waiting > 0, 'The other registration must reach the invitation while its row is locked');
+        $pdo->commit();
+        expectMfa(trim((string)fgets($pipes[1])) === 'unavailable', 'A registration must respect another connection’s committed claim');
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (is_resource($worker)) {
+            fclose($pipes[1]);
+            proc_close($worker);
+        }
+    }
+    expectMfa(!User::findByEmail('contender@example.test'), 'An unavailable invitation must not create an account');
+    session_write_close();
+    echo "Invitation rollback, authorized retry, durable consumption and competing claim passed\n";
     exit;
 }
 
