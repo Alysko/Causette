@@ -7,7 +7,7 @@ Run `npm ci --ignore-scripts` and `npm run build` from `frontend/` in a developm
 - Tailwind CSS 3.4.17 is distributed under the MIT license. The compiled stylesheet is `public_html/assets/css/causette.css` and the upstream notice is `tailwind-license.txt` in the same directory.
 - Font Awesome Free 6.7.2 is copied byte for byte from the official npm package into `public_html/assets/css/fontawesome.min.css` and `public_html/assets/webfonts/`. The upstream license file is `fontawesome-license.txt` in the CSS directory. It describes the licenses for icons, fonts and code.
 
-The Docker package browser check with `-LocalAssets` blocks all third-party requests and verifies the login and dashboard. `tests/docker-package-f01.ps1 -Archive <validation-zip> -ContentSecurity` also exercises the enforced policy, client-side navigation and both CAPTCHA integrations with fixture scripts and frames.
+The package browser checks block third-party requests on the login and dashboard. They also exercise the enforced policy, client-side navigation and both CAPTCHA integrations with fixture scripts and frames.
 
 Application HTML uses a fresh per-response nonce for trusted scripts and loads styles from local stylesheets. Serve these responses with their original CSP header and keep them out of shared caches. Use CSS classes for fixed styles and set individual CSS properties for dynamic values. Bind events in JavaScript. Page-specific inline scripts that must run during client-side navigation need the response nonce and the `data-page-script` marker. The navigation code checks the nonce against the fetched policy before running the script in the current document.
 

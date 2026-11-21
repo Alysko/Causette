@@ -17,6 +17,10 @@ storage/avatars/*
 **/.DS_Store
 .vscode/
 /frontend/node_modules/
+# Workstation scripts stay local.
+*.ps1
+*.psm1
+*.psd1
 # Database exports belong outside the source tree.
 /*.sql
 /*.sql.gz
