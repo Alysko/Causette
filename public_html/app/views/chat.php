@@ -394,7 +394,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
         $initialPinnedMessageId = (int)($pinnedMessage->id ?? 0);
         $pinnedBotName = (string)($pinnedMessage->bot_name ?? '');
         $initialPinnedMessageUsername = $pinnedBotName !== ''
-            ? $chatLocale->text('ui.bot_name', ['name' => $pinnedBotName])
+            ? $chatLocale->text('browser.bot_name', ['name' => $pinnedBotName])
             : (string)($pinnedMessage->username ?? $chatLocale->text('chat.unknown_user'));
         $initialPinnedMessageContent = (string)($pinnedMessage->content ?? '');
         $initialPinnedMessageCreatedAt = (string)($pinnedMessage->created_at ?? '');
@@ -694,7 +694,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 $quotedContent = (string)($message->quoted_content ?? '');
                 $quotedBotName = (string)($message->quoted_bot_name ?? '');
                 $quotedUsername = $quotedBotName !== ''
-                    ? $chatLocale->text('ui.bot_name', ['name' => $quotedBotName])
+                    ? $chatLocale->text('browser.bot_name', ['name' => $quotedBotName])
                     : (string)($message->quoted_username ?? '');
                 $quotedUserNumber = (string)($message->quoted_user_number ?? '');
                 $quotedMentionMap = $message->quote_mention_map ?? (object)[];
@@ -720,7 +720,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <?php if ($isNewGroup): ?>
                         <div class="flex items-center gap-2 mb-0.5">
                             <?php if ($isBot): ?>
-                                <span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300"><?= $tr('ui.bot') ?></span>
+                                <span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300"><?= $tr('browser.bot') ?></span>
                                 <bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent"><?= htmlspecialchars($botName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></bdi>
                             <?php else: ?>
                                 <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($message->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2"><?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?></a>
@@ -847,7 +847,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <?php endif; ?>
                             <?php if (!$isReadOnlyPublicViewer): ?>
                             <div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('ui.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('browser.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
                                 <?php if (empty($message->is_quoted)): ?>
                                     <?php
                                         $canEditThis = false;

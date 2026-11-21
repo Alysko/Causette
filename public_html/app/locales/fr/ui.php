@@ -359,8 +359,6 @@ return [
     'allowed_push_providers' => 'Fournisseurs de notifications push autorisés',
     'push_notifications_are_configured_and_active' => 'Les notifications push sont configurées et actives.',
     'quote' => 'Citer',
-    'bot' => 'Bot',
-    'bot_name' => 'Bot : {name}',
     'rate_limit_status_for_failed_authentication' => 'État de la limitation des tentatives d’authentification.',
     'react' => 'Réagir',
     'reason' => 'Motif :',

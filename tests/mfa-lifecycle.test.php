@@ -289,6 +289,13 @@ if ($mode === 'invitation') {
         }
     }
     expectMfa(!User::findByEmail('contender@example.test'), 'An unavailable invitation must not create an account');
+
+    Setting::set('invite_code_required', '0');
+    $_SESSION = ['csrf_token' => 'fixture-csrf'];
+    $_POST = ['csrf_token' => 'fixture-csrf',
+        'username' => 'publicmember', 'email' => 'publicmember@example.test', 'password' => FIXTURE_PASSWORD];
+    expectMfa(mfaFixtureAction($controller->register(...)) === '/verify-email' && User::findByEmail('publicmember@example.test'),
+        'An installation with open registration must still accept members without an invitation');
     session_write_close();
     echo "Invitation rollback, authorized retry, durable consumption and competing claim passed\n";
     exit;

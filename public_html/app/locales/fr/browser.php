@@ -149,6 +149,8 @@ return [
     'edit' => 'Modifier',
     'delete' => 'Supprimer',
     'quote' => 'Citer',
+    'bot' => 'Bot',
+    'bot_name' => 'Bot : {name}',
     'react' => 'Réagir',
     'video_calling' => 'Appel vidéo',
     'screen_sharing' => 'Partage d’écran',

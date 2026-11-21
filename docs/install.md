@@ -31,7 +31,9 @@ Use the full public HTTPS address in `url`, including a non-default port or moun
 
 Configure the public edge through the hosting panel to enforce HTTPS for the whole site, including static files. The approved proxy must replace every received `X-Forwarded-Proto` value with one `https` or `http` value based on the browser connection. Preserve the public `Host` and its configured port, and restrict direct access to the backend. Strip other client-supplied forwarding headers. Causette ignores forwarded hosts, ports and client addresses. Missing or ambiguous scheme reports from an approved proxy produce an error.
 
-Password checks at sign-in and in sensitive settings each have an eight-check budget per account per ten-minute window. Both also use shared per-minute network and site budgets. A successful sign-in does not reset either budget. Sign-in by username and by email draws from the same account budget.
+Password checks at sign-in and in sensitive settings each have an eight-check budget per account per ten-minute window. Sign-in by username and by email draws from the same account budget. Authentication operations share budgets of 48 per network bucket and 480 site-wide per minute. Successful sign-ins leave the counters in place until their windows expire.
+
+Once the sign-in budget for an account runs out, Causette refuses all password checks for that account until the next window, including attempts with the correct password.
 
 If PHP receives the proxy address in `REMOTE_ADDR`, visitors share a network budget. A hosting provider can configure [Apache `mod_remoteip`](https://httpd.apache.org/docs/2.4/mod/mod_remoteip.html) or its equivalent to supply the client address. Trust only the provider's actual proxy addresses and have the proxy overwrite the header it supplies. Once `REMOTE_ADDR` contains the client address, use HTTPS from the proxy to the backend so that PHP still sees a secure request. Check that the site and sign-in work over HTTPS through the proxy after the change.
 

@@ -359,8 +359,6 @@ return [
     'allowed_push_providers' => 'Allowed push providers',
     'push_notifications_are_configured_and_active' => 'Push notifications are configured and active.',
     'quote' => 'Quote',
-    'bot' => 'Bot',
-    'bot_name' => 'Bot: {name}',
     'rate_limit_status_for_failed_authentication' => 'Rate-limit status for failed authentication attempts.',
     'react' => 'React',
     'reason' => 'Reason:',
