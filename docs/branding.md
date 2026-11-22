@@ -2,6 +2,8 @@
 
 Use Causette for the product name in interface text, mail, notifications, the TOTP issuer and release materials. The README credits the upstream project. Preserve its attribution, license notices and the historical audit. User-authored content and existing records retain their original text.
 
+The Causette mark is a green C with a speech bubble tail. The sign-in page and desktop and mobile navigation display the local 128-pixel `public_html/assets/img/logo.png` next to the product name. Browser tabs and Web Push use the 64-pixel transparent `public_html/assets/img/favicon.png`. Both images were generated from the same original Causette artwork.
+
 The source distribution test allows the following technical references to the upstream name.
 
 | Location | Reason |

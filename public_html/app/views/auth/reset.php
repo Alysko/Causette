@@ -9,6 +9,7 @@ $flashError = flash_get('error');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $tr('ui.reset_your_causette_password') ?></title>
+    <link rel="icon" type="image/png" sizes="64x64" href="<?= $escape(base_path('/assets/img/favicon.png')) ?>">
     <link rel="stylesheet" href="<?= $escape(base_path('/assets/css/install.css')) ?>">
 </head>
 <body>

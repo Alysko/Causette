@@ -14,7 +14,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-    <link rel="icon" type="image/png" href="<?= htmlspecialchars(base_url('/assets/img/favicon.png'), ENT_QUOTES, 'UTF-8') ?>">
+    <link rel="icon" type="image/png" sizes="64x64" href="<?= \Causette\View\AssetUrl::html('/assets/img/favicon.png') ?>">
     <title>Causette</title>
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
@@ -200,7 +200,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
 
     <div id="mobile-top-bar" role="banner" class="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-4 bg-zinc-900/95 backdrop-blur border-b border-zinc-800">
         <button id="sidebar-toggle-mobile" class="flex items-center gap-3" aria-label="<?= $tr('ui.open_menu') ?>">
-            <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+            <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="32" height="32" alt="" class="shrink-0">
             <span class="text-2xl font-bold text-zinc-100">Causette</span>
         </button>
         <button type="button" id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
@@ -213,7 +213,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     <div id="app-layout" class="flex flex-1 min-h-0">
         <aside id="app-sidebar" role="complementary" class="w-72 sidebar border-r border-zinc-800 flex flex-col">
             <a href="<?= htmlspecialchars(base_url('/'), ENT_QUOTES, 'UTF-8') ?>" class="p-4 border-b border-zinc-700 flex items-center gap-3 hover:bg-zinc-800/40 transition">
-                <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+                <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="32" height="32" alt="" class="shrink-0">
                 <span class="text-2xl font-bold">Causette</span>
             </a>
             <div class="flex-1 min-h-0 p-4 flex flex-col gap-3">
@@ -507,7 +507,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         <div class="w-full max-w-md">
             <div class="text-center mb-6">
                 <div class="inline-flex items-center gap-2 text-2xl font-bold">
-                    <i class="fa-solid fa-comments causette-accent"></i>
+                    <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="40" height="40" alt="" class="shrink-0">
                     <span>Causette</span>
                 </div>
             </div>
