@@ -67,23 +67,7 @@ final class InstallDatabase
         string $email,
         string $password,
     ): void {
-        $schemaFile = file_get_contents(__DIR__ . '/schema-v1.sql');
-        if ($schemaFile === false) {
-            throw new SetupFailure('install.schema_missing');
-        }
-        $schema = str_replace("\r\n", "\n", $schemaFile);
-        $tables = [];
-        $defaults = [];
-        foreach (explode(";\n", $schema) as $statement) {
-            $statement = trim($statement);
-            if (preg_match('/\ACREATE TABLE IF NOT EXISTS ([a-z_]+) \(/', $statement, $match)) {
-                $tables[$match[1]] = $statement;
-            } elseif (str_starts_with($statement, 'INSERT INTO settings ')) {
-                $defaults[] = $statement;
-            } elseif ($statement !== '') {
-                throw new SetupFailure('install.schema_step');
-            }
-        }
+        [$tables, $defaults, $schemaHash] = self::schema();
         if (!isset($tables['settings'], $tables['users'], $tables['username_history'])) {
             throw new SetupFailure('install.schema_incomplete');
         }
@@ -91,7 +75,6 @@ final class InstallDatabase
         $journalPath = $this->storage . '/install-state.json';
         $database = $configuration['database'];
         $target = hash('sha256', $database['host'] . '/' . $database['name'] . '/' . $configuration['url']);
-        $schemaHash = hash('sha256', $schema);
         $knownTables = array_keys($tables);
         $existingTables = $this->tablesInDatabase($connection);
         if (SetupConfiguration::exists($journalPath)) {
@@ -132,7 +115,7 @@ final class InstallDatabase
             $this->createAdministrator($connection, $defaults, $journal['id'], $username, $email, $password);
         } else {
             if ($installId !== $journal['id']
-                || $connection->query("SELECT `value` FROM settings WHERE `key` = 'database_version'")->fetchColumn() !== $this->appVersion()
+                || $connection->query("SELECT `value` FROM settings WHERE `key` = 'database_version'")->fetchColumn() !== $this->databaseVersion()
             ) {
                 throw new SetupFailure('install.database_identity');
             }
@@ -158,6 +141,28 @@ final class InstallDatabase
             $runtime['trusted_proxies'] = $configuration['trusted_proxies'];
         }
         SetupConfiguration::write($this->storage . '/' . SetupConfiguration::RUNTIME_FILE, $runtime);
+    }
+
+    public static function schema(): array
+    {
+        $schemaFile = file_get_contents(__DIR__ . '/schema-v1.sql');
+        if ($schemaFile === false) {
+            throw new SetupFailure('install.schema_missing');
+        }
+        $schema = str_replace("\r\n", "\n", $schemaFile);
+        $tables = [];
+        $defaults = [];
+        foreach (explode(";\n", $schema) as $statement) {
+            $statement = trim($statement);
+            if (preg_match('/\ACREATE TABLE IF NOT EXISTS ([a-z_]+) \(/', $statement, $match)) {
+                $tables[$match[1]] = $statement;
+            } elseif (str_starts_with($statement, 'INSERT INTO settings ')) {
+                $defaults[] = $statement;
+            } elseif ($statement !== '') {
+                throw new SetupFailure('install.schema_step');
+            }
+        }
+        return [$tables, $defaults, hash('sha256', $schema)];
     }
 
     private function tablesInDatabase(PDO $connection): array
@@ -202,7 +207,7 @@ final class InstallDatabase
             $history = $connection->prepare('INSERT INTO username_history (user_id, username) VALUES (?, ?)');
             $history->execute([(int)$connection->lastInsertId(), $username]);
             $marker = $connection->prepare('INSERT INTO settings (`key`, `value`) VALUES (?, ?), (?, ?)');
-            $marker->execute(['database_version', $this->appVersion(), 'causette_installation_id', $installId]);
+            $marker->execute(['database_version', $this->databaseVersion(), 'causette_installation_id', $installId]);
             $connection->commit();
         } catch (Throwable $failure) {
             if ($connection->inTransaction()) {
@@ -212,9 +217,9 @@ final class InstallDatabase
         }
     }
 
-    private function appVersion(): string
+    private function databaseVersion(): string
     {
         $metadata = require dirname(__DIR__, 2) . '/version.php';
-        return $metadata['app_version'];
+        return $metadata['database_version'];
     }
 }

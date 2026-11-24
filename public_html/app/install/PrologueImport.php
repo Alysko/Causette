@@ -98,7 +98,8 @@ final class PrologueImport
         $existing = $connection->query('SELECT TABLE_NAME, ENGINE, TABLE_COLLATION FROM information_schema.TABLES
             WHERE TABLE_SCHEMA = DATABASE()')->fetchAll(PDO::FETCH_ASSOC);
         $names = array_column($existing, 'TABLE_NAME');
-        if (array_diff($tables[1], $names) || array_diff($names, [...$tables[1], 'api_rate_limits'])) {
+        $required = array_diff($tables[1], ['api_rate_limits']);
+        if (array_diff($required, $names) || array_diff($names, $tables[1])) {
             throw new SetupFailure('install.import_schema');
         }
         foreach ($existing as $table) {

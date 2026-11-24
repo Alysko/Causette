@@ -113,7 +113,7 @@ class NotificationController extends Controller {
         $id = (int)($_POST['id'] ?? 0);
 
         if ($id <= 0) {
-            $this->json(['error' => 'Invalid notification'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_notification')], 400);
         }
 
         Database::query("UPDATE notifications SET `read` = 1 WHERE id = ? AND user_id = ?", [$id, Auth::user()->id]);

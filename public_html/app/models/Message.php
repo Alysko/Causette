@@ -277,11 +277,7 @@ class Message extends Model {
             }
 
             $reactionRows = [];
-            foreach (self::REACTION_CODES as $code) {
-                if (!isset($aggregatedByMessage[$messageId][$code])) {
-                    continue;
-                }
-                $entry = $aggregatedByMessage[$messageId][$code];
+            foreach ($aggregatedByMessage[$messageId] as $entry) {
                 $reactionRows[] = (object)[
                     'reaction_code' => (string)$entry['reaction_code'],
                     'count' => (int)$entry['count'],

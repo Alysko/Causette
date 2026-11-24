@@ -220,11 +220,7 @@ class Post extends Model {
             }
 
             $reactionRows = [];
-            foreach (self::REACTION_CODES as $code) {
-                if (!isset($aggregatedByPost[$postId][$code])) {
-                    continue;
-                }
-                $entry = $aggregatedByPost[$postId][$code];
+            foreach ($aggregatedByPost[$postId] as $entry) {
                 $reactionRows[] = (object)[
                     'reaction_code' => (string)$entry['reaction_code'],
                     'count' => (int)$entry['count'],

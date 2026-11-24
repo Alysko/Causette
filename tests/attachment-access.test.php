@@ -98,15 +98,26 @@ $cases = [
     'administrator viewing group trash' => [4, ['chat_deleted_at' => '2026-01-01 00:00:00'], 200],
     'administrator outside a live private conversation' => [4, [], 404],
     'available deduplicated reference' => [2, ['viewer_member' => 2, 'physical_user_number' => '9999888877776666'], 200],
+    'member can access an XLS file' => [2, ['viewer_member' => 2], 200, 'xls'],
+    'member can access an XLSX file' => [2, ['viewer_member' => 2], 200, 'xlsx'],
+    'outsider cannot access an XLSX file' => [3, [], 404, 'xlsx'],
+    'private WebM range is denied to an outsider' => [3, [], 404, 'webm', 'bytes=0-15'],
+    'private WebM range reaches storage for a member' => [2, ['viewer_member' => 2], 200, 'webm', 'bytes=0-15'],
 ];
 
 $failures = 0;
-foreach ($cases as $label => [$viewer, $overrides, $expected]) {
+foreach ($cases as $label => $case) {
+    [$viewer, $overrides, $expected] = $case;
+    $extension = $case[3] ?? 'png';
+    unset($_SERVER['HTTP_RANGE']);
+    if (isset($case[4])) {
+        $_SERVER['HTTP_RANGE'] = $case[4];
+    }
     Auth::$viewer = $viewer === null ? null : (object) ['id' => $viewer, 'role' => $viewer === 4 ? 'admin' : 'user'];
-    Database::$attachment = (object) array_replace($attachment, $overrides);
+    Database::$attachment = (object) array_replace($attachment, ['original_name' => 'example.' . $extension], $overrides);
 
     try {
-        (new AttachmentController())->serve(['user_number' => '1111222233334444', 'filename' => '1234567890123456.png']);
+        (new AttachmentController())->serve(['user_number' => '1111222233334444', 'filename' => '1234567890123456.' . $extension]);
         throw new LogicException('Expected a response or a stop before file access');
     } catch (AttachmentResponse $response) {
         $actual = $response->getCode();
@@ -117,6 +128,23 @@ foreach ($cases as $label => [$viewer, $overrides, $expected]) {
     if ($actual !== $expected) {
         $failures++;
         fwrite(STDERR, $label . ': expected ' . $expected . ', received ' . $actual . "\n");
+    }
+}
+
+foreach ([
+    'bytes=0-31' => [0, 31],
+    'bytes=60-' => [60, 99],
+    'bytes=-12' => [88, 99],
+    'bytes=-101' => [0, 99],
+    'bytes=95-120' => [95, 99],
+    'bytes=100-' => null,
+    'bytes=32-31' => null,
+    'bytes=-0' => null,
+    'bytes=0-1,4-5' => null,
+] as $header => $expected) {
+    if (AttachmentController::parseVideoRange($header, 100) !== $expected) {
+        $failures++;
+        fwrite(STDERR, "Unexpected video range result for $header\n");
     }
 }
 

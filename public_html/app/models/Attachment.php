@@ -15,6 +15,8 @@ class Attachment extends Model {
         'odt'  => ['application/vnd.oasis.opendocument.text', 'application/zip'],
         'doc'  => ['application/msword', 'application/octet-stream'],
         'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+        'xls'  => ['application/vnd.ms-excel'],
+        'xlsx' => ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
         'zip'  => ['application/zip', 'application/x-zip-compressed'],
         '7z'   => ['application/x-7z-compressed'],
     ];
@@ -22,9 +24,10 @@ class Attachment extends Model {
     // Display category per extension
     private const EXT_CATEGORY = [
         'png' => 'image', 'jpg' => 'image', 'webp' => 'image',
+        'mp4' => 'video', 'webm' => 'video',
     ];
 
-    private const EXPIRY_OPTIONS = [0, 3600, 86400];
+    private const DEFAULT_EXPIRY_HOURS = '24,720';
 
     private const DELETE_REASONS = ['manual', 'expired', 'message_deleted'];
 
@@ -33,14 +36,38 @@ class Attachment extends Model {
     }
 
     public static function normalizeExpirySeconds($raw): int {
-        $seconds = (int)$raw;
-        return in_array($seconds, self::EXPIRY_OPTIONS, true) ? $seconds : 0;
+        $seconds = filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 31536000]]);
+        return $seconds && in_array($seconds, self::expiryOptions(), true) ? $seconds : 0;
+    }
+
+    public static function parseExpiryHours(mixed $input): ?array {
+        if (!is_string($input) || strlen($input) > 96) return null;
+        $parts = explode(',', $input);
+        if (count($parts) > 12) return null;
+        $hours = [];
+        foreach ($parts as $part) {
+            $value = filter_var(trim($part), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 8760]]);
+            if ($value === false) return null;
+            $hours[] = $value;
+        }
+        sort($hours, SORT_NUMERIC);
+        return array_values(array_unique($hours));
+    }
+
+    public static function expiryHoursSetting(): string {
+        return (string)(Setting::get('attachments_expiry_hours') ?? self::DEFAULT_EXPIRY_HOURS);
+    }
+
+    public static function expiryOptions(): array {
+        if (Setting::get('attachments_expiry_enabled') === '0') return [];
+        $hours = self::parseExpiryHours(self::expiryHoursSetting()) ?? self::parseExpiryHours(self::DEFAULT_EXPIRY_HOURS);
+        return array_map(static fn(int $value): int => $value * 3600, $hours);
     }
 
     public static function acceptedExtensions(): array {
         $raw = strtolower((string)(Setting::get('attachments_accepted_file_types') ?? 'png,jpg'));
         $parts = array_filter(array_map('trim', explode(',', $raw)));
-        $knownExtensions = array_keys(self::EXT_ALLOWED_MIMES);
+        $knownExtensions = self::supportedExtensions();
         $allowed = [];
 
         foreach ($parts as $part) {
@@ -57,6 +84,10 @@ class Attachment extends Model {
         }
 
         return array_keys($allowed);
+    }
+
+    public static function supportedExtensions(): array {
+        return array_keys(self::EXT_ALLOWED_MIMES);
     }
 
     public static function acceptedMimeTypes(): array {
@@ -1050,7 +1081,12 @@ class Attachment extends Model {
             return 0;
         }
 
-        return $remaining > 12 * 3600 ? 86400 : 3600;
+        $options = array_unique([3600, ...self::expiryOptions(), 86400, 2592000]);
+        sort($options, SORT_NUMERIC);
+        foreach ($options as $seconds) {
+            if ($remaining <= $seconds) return $seconds;
+        }
+        return $remaining;
     }
 
     private static function isExpiredTimestamp($expiresAt): bool {

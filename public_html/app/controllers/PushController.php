@@ -1,6 +1,8 @@
 <?php
+use Causette\Localization\Locale;
 use Causette\Push\PushEndpoint;
 
+require_once __DIR__ . '/../core/Locale.php';
 require_once __DIR__ . '/../core/PushEndpoint.php';
 
 class PushController extends Controller {
@@ -26,7 +28,7 @@ class PushController extends Controller {
         Auth::csrfValidate();
 
         if (!WebPushService::isConfigured()) {
-            $this->json(['error' => 'Web push is not configured on this server'], 503);
+            $this->json(['error' => Locale::current()->text('response.web_push_is_not_configured_on_this_server')], 503);
         }
 
         $userId = (int)Auth::user()->id;
@@ -41,13 +43,13 @@ class PushController extends Controller {
             || !preg_match('/\AB[A-Za-z0-9_-]{86}=?\z/D', $p256dh)
             || !preg_match('/\A[A-Za-z0-9_-]{22}(?:==)?\z/D', $auth)
         ) {
-            $this->json(['error' => 'Invalid subscription payload'], 400);
+            $this->json(['error' => Locale::current()->text('response.invalid_subscription_payload')], 400);
         }
 
         $saved = PushSubscription::upsertForUser($userId, $endpoint, $p256dh, $auth, $userAgent);
         if ($saved !== PushSubscription::SAVED) {
-            $message = $saved === PushSubscription::LIMIT ? 'Push subscription limit reached' : 'Push subscription is unavailable';
-            $this->json(['error' => $message], 409);
+            $key = $saved === PushSubscription::LIMIT ? 'push_subscription_limit' : 'push_subscription_unavailable';
+            $this->json(['error' => Locale::current()->text('response.' . $key)], 409);
         }
 
         Setting::set('web_push_notifications_' . $userId, '1');

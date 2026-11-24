@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace Causette\Http;
 
+use Causette\Calls\CallHistoryText;
+use Causette\Chat\GroupHistoryText;
+
+require_once __DIR__ . '/CallHistoryText.php';
+require_once __DIR__ . '/GroupHistoryText.php';
+
 final class ChatResponse
 {
     private const MESSAGE_FIELDS = [
@@ -33,7 +39,15 @@ final class ChatResponse
 
     public static function messages(array $messages): array
     {
-        return self::selectRows($messages, self::MESSAGE_FIELDS);
+        $rows = self::selectRows($messages, self::MESSAGE_FIELDS);
+        foreach ($rows as $row) {
+            if (!empty($row->is_system_event) && isset($row->event_type, $row->content)) {
+                $eventType = (string) $row->event_type;
+                $content = CallHistoryText::localize($eventType, (string) $row->content);
+                $row->content = GroupHistoryText::localize($eventType, $content);
+            }
+        }
+        return $rows;
     }
 
     public static function pinned(object $message): object

@@ -8,7 +8,7 @@ use Causette\Localization\Locale;
 
 final class ReactionCatalog
 {
-    public const IMAGE_DIRECTORY = '/assets/img/reactions/';
+    private const IMAGE_DIRECTORY = '/assets/img/emoji-3d/';
 
     public const CODES_V2 = [
         '1F44D', '1F44E', '2665', '1F923', '1F622', '1F436', '1F4A9',
@@ -46,7 +46,27 @@ final class ReactionCatalog
 
     public static function imagePath(string $code): string
     {
-        return in_array($code, self::CODES, true) ? self::IMAGE_DIRECTORY . strtolower($code) . '.png' : '';
+        $key = self::normalize($code);
+        if ($key === '') {
+            return '';
+        }
+        $artwork = self::artwork()[$key] ?? null;
+        return $artwork === null
+            ? '/emojis/' . $key . '.svg'
+            : self::IMAGE_DIRECTORY . $artwork . '.webp';
+    }
+
+    public static function artwork(): array
+    {
+        static $catalog;
+        if ($catalog === null) {
+            $path = dirname(__DIR__, 2) . self::IMAGE_DIRECTORY . 'catalog.json';
+            $decoded = is_readable($path) ? json_decode((string)file_get_contents($path), true) : null;
+            $catalog = is_array($decoded) ? array_filter($decoded, static fn(mixed $artwork): bool =>
+                is_string($artwork) && preg_match('/\A[0-9A-F]{4,6}(?:-[0-9A-F]{4,6})*\z/', $artwork) === 1
+            ) : [];
+        }
+        return $catalog;
     }
 
     public static function normalize(mixed $value): string
@@ -54,8 +74,13 @@ final class ReactionCatalog
         if (!is_string($value) && !is_int($value)) {
             return '';
         }
-        $code = preg_replace('/[^0-9A-F]/', '', strtoupper((string)$value));
-        return in_array($code, self::CODES, true) ? $code : '';
+        $code = strtoupper(trim((string)$value));
+        if (strlen($code) > 128 || !preg_match('/\A[A-F0-9]{2,6}(?:-[A-F0-9]{2,6})*\z/', $code)) {
+            return '';
+        }
+        $storage = defined('STORAGE_FILESYSTEM_ROOT') ? STORAGE_FILESYSTEM_ROOT : dirname(__DIR__, 3) . '/storage';
+        return is_file($storage . '/emojis/' . $code . '.svg')
+            || is_file(dirname(__DIR__, 3) . '/storage/emojis/' . $code . '.svg') ? $code : '';
     }
 
     public static function labels(Locale $locale): array
@@ -69,6 +94,8 @@ final class ReactionCatalog
 
     public static function label(string $code, Locale $locale): string
     {
-        return $locale->text('reactions.' . strtolower($code));
+        return in_array($code, self::CODES, true)
+            ? $locale->text('reactions.' . strtolower($code))
+            : $locale->text('browser.emoji_catalog_fallback', ['code' => $code]);
     }
 }

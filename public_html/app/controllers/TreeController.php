@@ -120,7 +120,7 @@ class TreeController extends Controller {
             return [
                 'user' => [
                     'id' => $userId,
-                    'username' => 'Unknown',
+                    'username' => null,
                     'user_number' => '0000000000000000',
                     'created_at' => '',
                 ],

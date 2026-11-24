@@ -104,13 +104,14 @@ class ErrorHandler {
 
     public static function abort($status, $message = 'Unexpected error', $debug = []) {
         $status = (int) $status;
+        $httpStatus = self::httpStatus($status);
 
         $uri = $_SERVER['REQUEST_URI'] ?? '';
         $silentPrefixes = ['/.well-known/'];
         foreach ($silentPrefixes as $prefix) {
             if (strncmp($uri, $prefix, strlen($prefix)) === 0) {
                 if (!headers_sent()) {
-                    @http_response_code($status);
+                    @http_response_code($httpStatus);
                 }
                 exit;
             }
@@ -124,11 +125,16 @@ class ErrorHandler {
         ]);
 
         if (!headers_sent()) {
-            @http_response_code($status);
+            @http_response_code($httpStatus);
         }
 
         self::render($status, $message, $debug);
         exit;
+    }
+
+    private static function httpStatus(int $status): int {
+        // Keep the session-expired message while sending a standard HTTP status.
+        return $status === 419 ? 403 : $status;
     }
 
     private static function handleException($exception) {
@@ -153,9 +159,15 @@ class ErrorHandler {
 
     private static function render($status, $message, $debug = []) {
         $key = self::statusKey($status);
-        if (self::isApiRequest()) {
+        $path = self::applicationPath();
+        if ($path === '/api' || str_starts_with($path, '/api/')
+            || stripos($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json') !== false
+        ) {
+            $locale = Locale::forApiPath($path);
+            header('Cache-Control: no-store');
             header('Content-Type: application/json');
-            $payload = ['error' => Locale::resolve('en')->text('error.' . $key)];
+            header('Content-Language: ' . $locale->language());
+            $payload = ['error' => $locale->text('error.' . $key)];
 
             if (self::$debugMode) {
                 $payload['debug'] = [
@@ -170,28 +182,28 @@ class ErrorHandler {
         }
 
         $locale = Locale::current();
-        $title = $status . ' - ' . $locale->text('error.' . $key);
+        $title = self::httpStatus($status) . ' - ' . $locale->text('error.' . $key);
         $description = $locale->html('error.' . $key . '_help');
 
         $debugBlock = '';
         if (self::$debugMode) {
             $versions = self::versionMetadata();
             $details = [
-                'Message: ' . $message,
-                'App Version: ' . $versions['appVersion'],
-                'Database Version: ' . $versions['databaseVersion']
+                $locale->text('error.debug_message', ['value' => $message]),
+                $locale->text('error.debug_application_version', ['value' => $versions['appVersion']]),
+                $locale->text('error.debug_database_version', ['value' => $versions['databaseVersion']]),
             ];
 
             if (!empty($debug['file'])) {
-                $details[] = 'File: ' . $debug['file'];
+                $details[] = $locale->text('error.debug_file', ['value' => $debug['file']]);
             }
 
             if (!empty($debug['line'])) {
-                $details[] = 'Line: ' . $debug['line'];
+                $details[] = $locale->text('error.debug_line', ['value' => $debug['line']]);
             }
 
             if (!empty($debug['trace'])) {
-                $details[] = "Trace:\n" . $debug['trace'];
+                $details[] = $locale->text('error.debug_trace') . "\n" . $debug['trace'];
             }
 
             $debugBlock = '<pre class="debug">'
@@ -201,6 +213,7 @@ class ErrorHandler {
 
         if (!headers_sent()) {
             header('Cache-Control: no-store');
+            header('Content-Language: ' . $locale->language());
             header("Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
         }
         echo '<!doctype html>'
@@ -210,7 +223,8 @@ class ErrorHandler {
             . '</head><body><main>'
             . '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
             . '<p>' . $description . '</p>'
-            . '<a class="home-link" href="/">' . $locale->html('error.back_home') . '</a>'
+            . '<a class="home-link" href="' . htmlspecialchars(base_path('/'), ENT_QUOTES, 'UTF-8') . '">'
+            . $locale->html('error.back_home') . '</a>'
             . $debugBlock
             . '</main></body></html>';
     }
@@ -238,14 +252,14 @@ class ErrorHandler {
         error_log('[Causette][' . $type . '][fallback:' . $filename . '] ' . $contextJson);
     }
 
-    private static function isApiRequest() {
-        $uri = $_SERVER['REQUEST_URI'] ?? '';
-        if (strpos($uri, '/api') === 0) {
-            return true;
+    private static function applicationPath(): string {
+        $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+        $path = is_string($path) ? $path : '/';
+        $prefix = defined('APP_BASE_PATH') ? trim(APP_BASE_PATH, '/') : '';
+        if ($prefix !== '' && str_starts_with($path, '/' . $prefix . '/')) {
+            return substr($path, 1 + strlen($prefix));
         }
-
-        $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
-        return stripos($accept, 'application/json') !== false;
+        return $prefix !== '' && $path === '/' . $prefix ? '/' : $path;
     }
 
     private static function statusKey($status): string {

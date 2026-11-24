@@ -8,22 +8,34 @@ class FriendController extends Controller {
         Auth::csrfValidate();
         $user = Auth::user();
         $userId = $user->id;
-        $targetNumber = str_replace('-', '', $_POST['user_number']);
+        $submittedNumber = $_POST['user_number'] ?? null;
+        if (!is_string($submittedNumber) || !preg_match('/\A(?:[0-9]{16}|[0-9]{4}(?:-[0-9]{4}){3})\z/', $submittedNumber)) {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
+        }
+
+        $targetNumber = str_replace('-', '', $submittedNumber);
         $target = User::findByUserNumber($targetNumber);
         if (!$target) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         if ((int)$target->id === (int)$userId) {
-            $this->json(['error' => 'You cannot send a friend request to yourself'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_cannot_send_a_friend_request_to_yourself')], 400);
         }
 
         $exists = Database::query("SELECT id FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", [$userId, $target->id, $target->id, $userId])->fetch();
         if ($exists) {
-            $this->json(['error' => 'Friend relationship already exists'], 409);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.friend_relationship_already_exists')], 409);
         }
 
-        Database::query("INSERT IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, 'pending')", [$userId, $target->id]);
+        $inserted = Database::query(
+            "INSERT IGNORE INTO friends (user_id, friend_id, status) VALUES (?, ?, 'pending')",
+            [$userId, $target->id]
+        );
+        if ($inserted->rowCount() === 0) {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.friend_relationship_already_exists')], 409);
+        }
+
         $locale = DisplayPreferences::localeForRecipient((int) $target->id);
         Notification::create(
             $target->id,
@@ -43,25 +55,42 @@ class FriendController extends Controller {
         $requesterId = (int)($_POST['requester_id'] ?? 0);
 
         if ($requesterId <= 0) {
-            $this->json(['error' => 'Invalid requester'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_requester')], 400);
         }
 
-        Database::query("UPDATE friends SET status = 'accepted' WHERE friend_id = ? AND user_id = ?", [$userId, $requesterId]);
-
-        $row = Database::query("SELECT id FROM friends WHERE friend_id = ? AND user_id = ? AND status = 'accepted'", [$userId, $requesterId])->fetch();
-        if (!$row) {
-            $this->json(['error' => 'Request not found'], 404);
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            $updated = Database::query(
+                "UPDATE friends SET status = 'accepted' WHERE friend_id = ? AND user_id = ? AND status = 'pending'",
+                [$userId, $requesterId]
+            )->rowCount() === 1;
+            $accepted = $updated || Database::query(
+                "SELECT id FROM friends WHERE friend_id = ? AND user_id = ? AND status = 'accepted'",
+                [$userId, $requesterId]
+            )->fetch();
+            $chat = $accepted ? Chat::getOrCreatePersonalChat($userId, $userId, $requesterId) : null;
+            $connection->commit();
+        } finally {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
         }
 
-        $chat = Chat::getOrCreatePersonalChat($userId, $userId, $requesterId);
-        $locale = DisplayPreferences::localeForRecipient($requesterId);
-        Notification::create(
-            $requesterId,
-            'friend_request_accepted',
-            $locale->text('notifications.friend_request_accepted_title'),
-            $locale->text('notifications.friend_request_accepted_message', ['username' => $user->username]),
-            '/u/' . User::formatUserNumber($user->user_number),
-        );
+        if (!$chat) {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.request_not_found')], 404);
+        }
+
+        if ($updated) {
+            $locale = DisplayPreferences::localeForRecipient($requesterId);
+            Notification::create(
+                $requesterId,
+                'friend_request_accepted',
+                $locale->text('notifications.friend_request_accepted_title'),
+                $locale->text('notifications.friend_request_accepted_message', ['username' => $user->username]),
+                '/u/' . User::formatUserNumber($user->user_number),
+            );
+        }
 
         $this->json(['success' => true, 'chat_number' => $chat->chat_number]);
     }
@@ -74,7 +103,7 @@ class FriendController extends Controller {
         $targetUserId = (int)($_POST['target_user_id'] ?? 0);
 
         if ($targetUserId <= 0 || $targetUserId === $userId) {
-            $this->json(['error' => 'Invalid request target'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_request_target')], 400);
         }
 
         $result = Database::query(
@@ -83,7 +112,7 @@ class FriendController extends Controller {
         );
 
         if ($result->rowCount() <= 0) {
-            $this->json(['error' => 'Request not found or already accepted'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.request_not_found_or_already_accepted')], 404);
         }
 
         $this->json(['success' => true]);
@@ -97,7 +126,7 @@ class FriendController extends Controller {
         $targetUserId = (int)($_POST['user_id'] ?? 0);
 
         if ($targetUserId <= 0 || $targetUserId === $userId) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         $result = Database::query(
@@ -108,7 +137,7 @@ class FriendController extends Controller {
         );
 
         if ($result->rowCount() <= 0) {
-            $this->json(['error' => 'Friendship not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.friendship_not_found')], 404);
         }
 
         Database::query(
@@ -130,7 +159,7 @@ class FriendController extends Controller {
         $makeFavorite = (int)($_POST['favorite'] ?? 0) === 1;
 
         if ($targetUserId <= 0 || $targetUserId === $userId) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         $friendship = Database::query(
@@ -142,7 +171,7 @@ class FriendController extends Controller {
         )->fetch();
 
         if (!$friendship) {
-            $this->json(['error' => 'Only accepted friends can be favorited'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_accepted_friends_can_be_favorited')], 403);
         }
 
         if ($makeFavorite) {

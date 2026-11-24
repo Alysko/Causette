@@ -1,9 +1,10 @@
-<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <?php
+$locale = \Causette\Localization\Locale::current();
+$tr = $locale->html(...);
 $postReactionCodes = Post::REACTION_CODES;
-$postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels(\Causette\Localization\Locale::current());
+$postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels($locale);
 
-$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel): string {
+$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel, $locale): string {
     if (count($reactions) === 0) {
         return '';
     }
@@ -39,8 +40,11 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             }
         }
 
-        $label = $postReactionCodeToLabel[$code] ?? 'Reaction';
-        $tooltip = $label . ': ' . (count($users) > 0 ? implode(', ', $users) : 'No users');
+        $label = $postReactionCodeToLabel[$code] ?? $locale->text('ui.reaction_label');
+        $tooltip = $locale->text('ui.reaction_tooltip', [
+            'reaction' => $label,
+            'users' => $users === [] ? $locale->text('ui.reaction_no_users') : implode(', ', $users),
+        ]);
         $reactedByCurrentUser = !empty($reaction->reacted_by_current_user);
         $badgeClass = $reactedByCurrentUser
             ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
@@ -106,7 +110,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
         $scopeParam = 'scope=' . urlencode($selectedPostScope);
     ?>
     <?php if (empty($posts)): ?>
-        <p class="text-zinc-400 text-sm"><?= $selectedPostScope === 'server' ? 'No posts on this server yet.' : 'No posts from friends yet.' ?></p>
+        <p class="text-zinc-400 text-sm"><?= $tr($selectedPostScope === 'server' ? 'ui.no_posts_on_server_yet' : 'ui.no_posts_from_friends_yet') ?></p>
     <?php else: ?>
         <div class="space-y-4" id="friends-post-list">
             <?php foreach ($posts as $post): ?>
@@ -133,7 +137,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                     <div class="flex items-center gap-2.5 mb-3">
                         <a href="<?= htmlspecialchars($postAuthorUrl, ENT_QUOTES, 'UTF-8') ?>">
                             <?php if ($postAvatar): ?>
-                                <img src="<?= htmlspecialchars($postAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($postAuthorUsername, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                <img src="<?= htmlspecialchars($postAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $postAuthorUsername]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                             <?php else: ?>
                                 <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($postAuthorNumber), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars(User::avatarInitial($postAuthorUsername), ENT_QUOTES, 'UTF-8') ?>
@@ -174,7 +178,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
                 <?php else: ?>
                     <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default"><i class="fa fa-arrow-left text-xs"></i> <?= $tr('ui.previous') ?></span>
                 <?php endif; ?>
-                <span class="text-zinc-400 text-sm">Page <?= $currentPage ?> of <?= $totalPages ?></span>
+                <span class="text-zinc-400 text-sm"><?= $tr('ui.pagination_position', ['page' => $currentPage, 'total' => $totalPages]) ?></span>
                 <?php if ($currentPage < $totalPages): ?>
                     <a href="<?= htmlspecialchars(base_url('/posts?' . $scopeParam . '&page=' . ($currentPage + 1)), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition"><?= $tr('ui.next') ?> <i class="fa fa-arrow-right text-xs"></i></a>
                 <?php else: ?>

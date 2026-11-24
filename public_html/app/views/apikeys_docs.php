@@ -67,19 +67,20 @@
         </div>
 
         <h3 class="text-lg font-medium text-zinc-200"><?= $tr('api_help.example') ?></h3>
+        <p class="text-sm text-zinc-400"><?= $tr('api_help.example_environment', ['variable' => 'CAUSETTE_API_KEY']) ?></p>
         <div class="rounded-xl border border-zinc-700 bg-zinc-900 p-4 overflow-x-auto">
             <pre class="text-sm text-zinc-300 whitespace-pre"><code>curl -X POST <?= htmlspecialchars(rtrim(base_url(''), '/')) ?>/api/bot/send \
-  -d "api_key=YOUR_API_KEY" \
+  -d "api_key=$CAUSETTE_API_KEY" \
   -d "chat_number=1234-5678-9012-3456" \
-  -d "text=Hello from the bot!"</code></pre>
+  -d "text=<?= $tr('api_help.example_message') ?>"</code></pre>
         </div>
 
         <p class="text-sm text-zinc-400"><?= $tr('api_help.example_header') ?></p>
         <div class="rounded-xl border border-zinc-700 bg-zinc-900 p-4 overflow-x-auto">
             <pre class="text-sm text-zinc-300 whitespace-pre"><code>curl -X POST <?= htmlspecialchars(rtrim(base_url(''), '/')) ?>/api/bot/send \
-  -H "X-API-Key: YOUR_API_KEY" \
+  -H "X-API-Key: $CAUSETTE_API_KEY" \
   -d "chat_number=1234-5678-9012-3456" \
-  -d "text=Hello from the bot!"</code></pre>
+  -d "text=<?= $tr('api_help.example_message') ?>"</code></pre>
         </div>
 
         <h3 class="text-lg font-medium text-zinc-200"><?= $tr('api_help.success_response') ?></h3>
@@ -93,7 +94,7 @@
         <h3 class="text-lg font-medium text-zinc-200"><?= $tr('api_help.error_response') ?></h3>
         <div class="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
             <pre class="text-sm text-zinc-300"><code>{
-  "error": "Description of the error"
+  "error": "<?= $tr('api_help.example_error_message') ?>"
 }</code></pre>
         </div>
     </section>

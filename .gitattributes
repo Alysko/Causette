@@ -1,3 +1,4 @@
 /tests/apache-storage-routing.sh text eol=lf
 /tests/isolated-checks.sh text eol=lf
+/tests/smtp-transport-fixture.sh text eol=lf
 /public_html/app/config/example.config.php export-ignore

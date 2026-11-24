@@ -1,15 +1,13 @@
 <?php
-require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../core/SecretSettings.php';
+require_once __DIR__ . '/../core/MailDelivery.php';
 require_once __DIR__ . '/../core/PushEndpoint.php';
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\MailDelivery;
 use Causette\Push\PushEndpoint;
 use Causette\Security\SecretSettings;
 use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception as MailException;
 
 class AdminController extends Controller {
     private function requireAdminUser() {
@@ -125,9 +123,19 @@ class AdminController extends Controller {
         $this->requireAdminUser();
         Auth::csrfValidate();
 
-        $allTypes = ['png', 'jpg', 'webp', 'mp4', 'webm', 'pdf', 'odt', 'doc', 'docx', 'zip', '7z'];
+        if (array_key_exists('attachments_expiry_hours', $_POST)) {
+            $hours = Attachment::parseExpiryHours($_POST['attachments_expiry_hours']);
+            if ($hours === null) {
+                $this->flash('error', 'attachments_invalid_expiry');
+                $this->redirect('/settings');
+                return;
+            }
+            Setting::set('attachments_expiry_hours', implode(',', $hours));
+            Setting::set('attachments_expiry_enabled', isset($_POST['attachments_expiry_enabled']) ? '1' : '0');
+        }
+
         $types = [];
-        foreach ($allTypes as $type) {
+        foreach (Attachment::supportedExtensions() as $type) {
             if (isset($_POST['type_' . $type])) $types[] = $type;
         }
         Setting::set('attachments_accepted_file_types', implode(',', $types));
@@ -144,24 +152,37 @@ class AdminController extends Controller {
         $this->requireAdminUser();
         Auth::csrfValidate();
 
-        $mailHost = trim((string)($_POST['mail_host'] ?? ''));
-        $mailPort = trim((string)($_POST['mail_port'] ?? ''));
-        $mailUser = trim((string)($_POST['mail_user'] ?? ''));
-        $mailPass = $_POST['mail_pass'] ?? '';
-        $mailFrom = trim((string)($_POST['mail_from'] ?? ''));
-        $mailFromName = trim((string)($_POST['mail_from_name'] ?? ''));
+        $transport = $_POST['mail_transport'] ?? MailDelivery::transport();
+        $from = $_POST['mail_from'] ?? '';
+        $fromName = $_POST['mail_from_name'] ?? '';
+        if (!in_array($transport, [MailDelivery::PHP, MailDelivery::SMTP], true)
+            || !is_string($from) || !is_string($fromName)
+            || ($transport === MailDelivery::PHP && !filter_var(trim($from), FILTER_VALIDATE_EMAIL))
+        ) {
+            $this->flash('error', 'mail_settings_invalid');
+            $this->redirect('/settings');
+            return;
+        }
+
+        $settings = ['mail_transport' => $transport, 'mail_from' => trim($from), 'mail_from_name' => trim($fromName)];
+        $password = '';
+        if ($transport === MailDelivery::SMTP) {
+            $host = $_POST['mail_host'] ?? '';
+            $port = $_POST['mail_port'] ?? '';
+            $user = $_POST['mail_user'] ?? '';
+            $password = $_POST['mail_pass'] ?? '';
+            if (!is_string($host) || !is_string($port) || !is_string($user) || !is_string($password)
+                || (trim($port) !== '' && filter_var(trim($port), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]) === false)
+            ) {
+                $this->flash('error', 'mail_settings_invalid');
+                $this->redirect('/settings');
+                return;
+            }
+            $settings += ['mail_host' => trim($host), 'mail_port' => trim($port) ?: '587', 'mail_user' => trim($user)];
+        }
 
         try {
-            if (!is_string($mailPass)) {
-                throw new RuntimeException('Invalid password field.');
-            }
-            SecretSettings::save([
-                'mail_host' => $mailHost,
-                'mail_port' => $mailPort !== '' ? $mailPort : '587',
-                'mail_user' => $mailUser,
-                'mail_from' => $mailFrom,
-                'mail_from_name' => $mailFromName,
-            ], SecretSettings::SMTP, $mailPass);
+            SecretSettings::save($settings, SecretSettings::SMTP, $password);
         } catch (RuntimeException) {
             $this->flash('error', 'integration_storage_error');
             $this->redirect('/settings');
@@ -209,41 +230,18 @@ class AdminController extends Controller {
         $user = $this->requireAdminUser();
         Auth::csrfValidate();
 
-        $mailHost = (string)(Setting::get('mail_host') ?? '');
-        $mailUser = (string)(Setting::get('mail_user') ?? '');
-
-        if ($mailHost === '' || $mailUser === '') {
-            $this->flash('mail_test_error', 'Mail host and username must be configured before sending a test email.');
+        if (!MailDelivery::isConfigured()) {
+            $this->flash('mail_test_error', 'mail_test_missing_settings');
             $this->redirect('/settings');
+            return;
         }
 
-        $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailFrom = (string)(Setting::get('mail_from') ?? '');
-        $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
-
-        $mail = $this->createTestMailer();
-        try {
-            $mail->isSMTP();
-            $mail->Host = $mailHost;
-            $mail->SMTPAuth = true;
-            $mail->Username = $mailUser;
-            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = $mailPort;
-
-            $mail->setFrom($mailFrom, $mailFromName);
-            $mail->addAddress($user->email);
-            $mail->isHTML(false);
-            $mail->CharSet = PHPMailer::CHARSET_UTF8;
-            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
-            $locale = DisplayPreferences::localeForRecipient((int) $user->id);
-            $mail->Subject = $locale->text('mail.smtp_test_subject');
-            $mail->Body = $locale->text('mail.smtp_test_body');
-            $mail->send();
-
+        $locale = DisplayPreferences::localeForRecipient((int) $user->id);
+        if (MailDelivery::send($user->email, $locale->text('mail.smtp_test_subject'), $locale->text('mail.smtp_test_body'),
+            false, $this->createTestMailer())) {
             $this->flash('success', 'mail_test_sent');
-        } catch (MailException | RuntimeException) {
-            $this->flash('mail_test_error', 'The SMTP credential is unavailable or the mail server refused the test message.');
+        } else {
+            $this->flash('mail_test_error', 'mail_test_delivery_failed');
         }
 
         $this->redirect('/settings');

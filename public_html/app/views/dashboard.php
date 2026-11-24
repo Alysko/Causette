@@ -17,7 +17,7 @@ $tr = $locale->html(...);
         >
             <div class="h-full w-full flex items-center justify-center">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="invite-referral-modal-title">
-                    <h2 id="invite-referral-modal-title" class="text-lg font-semibold text-zinc-100">You were referred by <?= htmlspecialchars((string)$inviteReferralPromptData['username'], ENT_QUOTES, 'UTF-8') ?></h2>
+                    <h2 id="invite-referral-modal-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.invite_referred_by', ['name' => $inviteReferralPromptData['username']]) ?></h2>
                     <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.would_you_like_to_send_them') ?></p>
                     <div class="mt-5 flex items-center justify-end gap-3">
                         <button type="button" id="invite-referral-modal-skip" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-200"><?= $tr('ui.not_now') ?></button>
@@ -44,6 +44,10 @@ $tr = $locale->html(...);
 
     <?php
         $dashboardAnnouncement = trim((string)($announcementMessage ?? ''));
+        $defaultAnnouncement = \Causette\Localization\Locale::resolve('en')->text('ui.default_site_announcement');
+        if ($dashboardAnnouncement === $defaultAnnouncement) {
+            $dashboardAnnouncement = $locale->text('ui.default_site_announcement');
+        }
         $dashboardAnnouncementStyle = trim((string)($announcementStyle ?? 'orange'));
         $announcementClassMap = [
             'orange' => [
@@ -147,7 +151,7 @@ $tr = $locale->html(...);
                             <div class="flex items-center justify-between gap-3">
                                 <div class="flex items-center gap-3 min-w-0">
                                     <?php if ($requestAvatar): ?>
-                                        <img src="<?= htmlspecialchars($requestAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($request->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                        <img src="<?= htmlspecialchars($requestAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $request->username]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                                     <?php else: ?>
                                         <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($request->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                             <?= htmlspecialchars(User::avatarInitial($request->username), ENT_QUOTES, 'UTF-8') ?>
@@ -169,7 +173,7 @@ $tr = $locale->html(...);
                             <div class="flex items-center justify-between gap-3">
                                 <div class="flex items-center gap-3 min-w-0">
                                     <?php if ($requestAvatar): ?>
-                                        <img src="<?= htmlspecialchars($requestAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($request->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                        <img src="<?= htmlspecialchars($requestAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $request->username]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                                     <?php else: ?>
                                         <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($request->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                             <?= htmlspecialchars(User::avatarInitial($request->username), ENT_QUOTES, 'UTF-8') ?>
@@ -198,7 +202,7 @@ $tr = $locale->html(...);
                         <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($friend->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="block bg-zinc-800 rounded-xl p-3 hover:bg-zinc-700 transition">
                             <div class="flex items-center gap-3 min-w-0">
                                 <?php if ($friendAvatar): ?>
-                                    <img src="<?= htmlspecialchars($friendAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($friend->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                    <img src="<?= htmlspecialchars($friendAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $friend->username]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                                 <?php else: ?>
                                     <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($friend->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                         <?= htmlspecialchars(User::avatarInitial($friend->username), ENT_QUOTES, 'UTF-8') ?>
@@ -212,7 +216,7 @@ $tr = $locale->html(...);
                                         <?php endif; ?>
                                     </div>
                                     <div class="text-xs <?= htmlspecialchars($friend->effective_status_text_class ?? 'text-zinc-500', ENT_QUOTES, 'UTF-8') ?> mt-0.5">
-                                        <?= htmlspecialchars($friend->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>
+                                        <?= $tr('ui.' . (User::normalizePresenceStatus($friend->effective_status ?? null) ?? 'offline')) ?>
                                     </div>
                                 </div>
                             </div>
@@ -321,7 +325,7 @@ $tr = $locale->html(...);
                     >
                         <div class="flex items-center gap-2 mb-2">
                             <?php if ($postAvatar): ?>
-                                <img src="<?= htmlspecialchars($postAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $postAuthorUsername ?> avatar" class="w-7 h-7 rounded-full object-cover border border-zinc-700">
+                                <img src="<?= htmlspecialchars($postAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $post->username]) ?>" class="w-7 h-7 rounded-full object-cover border border-zinc-700">
                             <?php else: ?>
                                 <div class="w-7 h-7 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-xs <?= htmlspecialchars(User::avatarColorClasses($postAuthorNumber), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars(User::avatarInitial((string)($post->username ?? '')), ENT_QUOTES, 'UTF-8') ?>

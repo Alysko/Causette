@@ -30,7 +30,7 @@ $tr = $locale->html(...);
         <?php if (!empty($mayTrustBrowser)): ?>
             <label class="mt-5 flex items-center justify-center gap-2 text-sm text-zinc-300">
                 <input type="checkbox" name="trust_browser" value="1">
-                Trust this browser for <?= \Causette\Security\TrustedBrowser::LIFETIME_DAYS ?> days
+                <?= $tr('ui.trust_browser_for_days', ['days' => \Causette\Security\TrustedBrowser::LIFETIME_DAYS]) ?>
             </label>
         <?php endif; ?>
         <button type="submit" class="mt-8 w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-semibold"><?= $tr('ui.verify') ?></button>

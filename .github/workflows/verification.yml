@@ -29,14 +29,22 @@ jobs:
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo_mysql, curl, gd
+          extensions: pdo_mysql, pdo_sqlite, curl, gd
           coverage: none
           tools: none
       - run: node scripts/check-syntax.mjs
       - run: node --test tests/*.test.mjs
+      - name: Build and verify the validation ZIP
+        if: matrix.php == '8.5'
+        shell: pwsh
+        run: |
+          ./tests/package-validation.test.ps1
+          $archive = Join-Path $env:RUNNER_TEMP 'Causette-validation.zip'
+          ./scripts/package-validation.ps1 -OutputPath $archive
+          ./scripts/package-validation.ps1 -VerifyPath $archive
       - name: Verify PHP behavior in isolation
         run: sh tests/isolated-checks.sh php
-      - name: Verify account changes, reaction upgrades and attachment uploads against MariaDB
+      - name: Verify installation, accounts, storage and calls against MariaDB
         run: sh tests/isolated-checks.sh database
       - name: Verify Apache routing in isolation
         if: matrix.php == '8.5'

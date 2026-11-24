@@ -1,18 +1,13 @@
 <?php
-require_once __DIR__ . '/../../../../vendor/phpmailer/src/PHPMailer.php';
-require_once __DIR__ . '/../../../../vendor/phpmailer/src/SMTP.php';
-require_once __DIR__ . '/../../../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../../../core/AccountMail.php';
 require_once __DIR__ . '/../../../core/AuthChallenge.php';
 require_once __DIR__ . '/../../../core/DisplayPreferences.php';
-require_once __DIR__ . '/../../../core/SecretSettings.php';
+require_once __DIR__ . '/../../../core/MailDelivery.php';
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\MailDelivery;
 use Causette\Mail\AccountMail;
 use Causette\Security\AuthChallenge;
-use Causette\Security\SecretSettings;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 class EmailTwoFAProvider implements TwoFAProviderInterface {
     public function getName(): string {
@@ -24,9 +19,7 @@ class EmailTwoFAProvider implements TwoFAProviderInterface {
     }
 
     public function isAvailable(int $userId): bool {
-        $mailHost = trim((string)(Setting::get('mail_host') ?? ''));
-        $mailUser = trim((string)(Setting::get('mail_user') ?? ''));
-        return $mailHost !== '' && $mailUser !== '';
+        return MailDelivery::isConfigured();
     }
 
     public function sendChallenge(int $userId, ?string $deliveryCode): bool {
@@ -48,39 +41,6 @@ class EmailTwoFAProvider implements TwoFAProviderInterface {
     }
 
     protected function sendEmail(string $to, string $subject, string $body): bool {
-        $mailHost = (string)(Setting::get('mail_host') ?? '');
-        $mailUser = (string)(Setting::get('mail_user') ?? '');
-
-        if ($mailHost === '' || $mailUser === '') {
-            return false;
-        }
-
-        $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailFrom = (string)(Setting::get('mail_from') ?? '');
-        $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
-
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host = $mailHost;
-            $mail->SMTPAuth = true;
-            $mail->Username = $mailUser;
-            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = $mailPort;
-            $mail->Timeout = 10;
-
-            $mail->setFrom($mailFrom, $mailFromName);
-            $mail->addAddress($to);
-            $mail->isHTML(true);
-            $mail->CharSet = PHPMailer::CHARSET_UTF8;
-            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
-            $mail->Subject = $subject;
-            $mail->Body = $body;
-            $mail->send();
-            return true;
-        } catch (Exception | RuntimeException) {
-            return false;
-        }
+        return MailDelivery::send($to, $subject, $body);
     }
 }

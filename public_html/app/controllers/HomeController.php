@@ -1,23 +1,18 @@
 <?php
 require_once __DIR__ . '/../modules/2fa/totp/TOTP.php';
 require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../core/AccountMail.php';
 require_once __DIR__ . '/../core/AccountPassword.php';
-require_once __DIR__ . '/../core/SecretSettings.php';
+require_once __DIR__ . '/../core/MailDelivery.php';
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\MailDelivery;
 use Causette\Mail\AccountMail;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthBudget;
 use Causette\Security\AuthChallenge;
 use Causette\Security\BrowserSession;
-use Causette\Security\SecretSettings;
 use Causette\Security\TrustedBrowser;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 class HomeController extends Controller {
     public function index() {
@@ -246,7 +241,7 @@ class HomeController extends Controller {
 
     public function exitSession() {
         Auth::requireAuth();
-        Auth::csrfValidate();
+        Auth::csrfValidate(403);
 
         $user = Auth::user();
         $sessionId = (int)($_POST['session_id'] ?? 0);
@@ -306,14 +301,25 @@ class HomeController extends Controller {
             $this->redirect('/settings');
         }
 
-        $inviteCount = (int) Database::query("SELECT COUNT(*) FROM invite_codes WHERE creator_id = ?", [$user->id])->fetchColumn();
-        if ($inviteCount >= $inviteLimit) {
+        $created = AuthChallenge::withAccount($user, function (object $account) use ($inviteLimit): bool {
+            $inviteCount = (int)Database::query(
+                'SELECT COUNT(*) FROM invite_codes WHERE creator_id = ?',
+                [$account->id]
+            )->fetchColumn();
+            if ($inviteCount >= $inviteLimit) {
+                return false;
+            }
+
+            Database::query('INSERT INTO invite_codes (code, creator_id) VALUES (?, ?)', [$this->generateInviteCode(), $account->id]);
+            return true;
+        });
+        if ($created === null) {
+            $this->redirect('/login');
+        }
+        if (!$created) {
             $this->flash('error', 'invite_limit');
             $this->redirect('/settings');
         }
-
-        $newCode = $this->generateInviteCode();
-        Database::query("INSERT INTO invite_codes (code, creator_id) VALUES (?, ?)", [$newCode, $user->id]);
 
         $this->flash('success', 'invite_created');
         $this->redirect('/settings');
@@ -582,7 +588,7 @@ class HomeController extends Controller {
         $requestedSetting = trim((string)($_POST['setting'] ?? ''));
         if ($requestedSetting !== '') {
             if (!isset($allowedSettings[$requestedSetting])) {
-                $this->json(['error' => 'Invalid notification setting'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_notification_setting')], 400);
             }
 
             $enabledRaw = (string)($_POST['enabled'] ?? '0');
@@ -848,39 +854,7 @@ class HomeController extends Controller {
     }
 
     protected function sendEmail($to, $subject, $body): bool {
-        $mailHost = (string)(Setting::get('mail_host') ?? '');
-        $mailUser = (string)(Setting::get('mail_user') ?? '');
-
-        if ($mailHost === '' || $mailUser === '') {
-            return false;
-        }
-
-        $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailFrom = (string)(Setting::get('mail_from') ?? '');
-        $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
-
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host = $mailHost;
-            $mail->SMTPAuth = true;
-            $mail->Username = $mailUser;
-            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = $mailPort;
-            $mail->Timeout = 10;
-
-            $mail->setFrom($mailFrom, $mailFromName);
-            $mail->addAddress($to);
-            $mail->isHTML(true);
-            $mail->CharSet = PHPMailer::CHARSET_UTF8;
-            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
-            $mail->Subject = $subject;
-            $mail->Body = $body;
-            return $mail->send();
-        } catch (Exception | RuntimeException) {
-            return false;
-        }
+        return MailDelivery::send($to, $subject, $body);
     }
 
     public function totpSetupBegin() {

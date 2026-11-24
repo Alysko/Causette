@@ -1,6 +1,13 @@
 // Extracted from app.js for feature-focused organization.
 
 const PENDING_PAGE_TOAST_STORAGE_KEY = 'pending_page_toast';
+const NOTIFICATION_RAIL_HIDE_DELAY_MS = 2000;
+let notificationHistoryHasEntries = false;
+let notificationRailHideTimer = null;
+let notificationHistoryOpenedEmpty = false;
+let applyNotificationHistoryLayout = () => {};
+let notificationRefresh = null;
+const notificationReadsInFlight = new Set();
 
 function queuePendingPageToast(message, kind = 'info') {
     const payload = {
@@ -63,7 +70,25 @@ async function markNotificationsSeen(ids) {
 
 
 function isNotificationHistoryExpanded() {
-    return Boolean(window.NOTIFICATION_SIDEBAR_EXPANDED);
+    return Boolean(window.NOTIFICATION_SIDEBAR_EXPANDED)
+        && (notificationHistoryHasEntries || notificationRailHideTimer !== null || notificationHistoryOpenedEmpty);
+}
+
+function syncNotificationHistoryRail(hasEntries) {
+    if (hasEntries === notificationHistoryHasEntries) return;
+
+    notificationHistoryHasEntries = hasEntries;
+    notificationHistoryOpenedEmpty = false;
+    if (hasEntries) {
+        if (notificationRailHideTimer !== null) clearTimeout(notificationRailHideTimer);
+        notificationRailHideTimer = null;
+    } else {
+        notificationRailHideTimer = setTimeout(() => {
+            notificationRailHideTimer = null;
+            applyNotificationHistoryLayout();
+        }, NOTIFICATION_RAIL_HIDE_DELAY_MS);
+    }
+    applyNotificationHistoryLayout();
 }
 
 function syncToastHostPosition() {
@@ -91,15 +116,6 @@ function clearActiveToastPopup(toastId) {
     activeToastPopups.delete(toastId);
 }
 
-function isLoggedInNotificationView() {
-    const panel = document.getElementById('notification-history-panel');
-    if (!panel) return false;
-    if (window.innerWidth < 1024) {
-        return panel.classList.contains('mobile-open');
-    }
-    return true;
-}
-
 function scheduleToastExpirySweep() {
     if (toastExpirySweepTimeoutId) {
         clearTimeout(toastExpirySweepTimeoutId);
@@ -111,7 +127,8 @@ function scheduleToastExpirySweep() {
 
     for (const toast of toastHistory) {
         const expiresAt = Number(toast?.expiresAt || 0);
-        if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+        if (!Number.isFinite(expiresAt) || expiresAt <= 0) continue;
+        if (expiresAt <= now) {
             nextExpiryAt = now;
             break;
         }
@@ -285,10 +302,6 @@ function showToast(message, kind = 'info', metadata = null) {
         scheduleToastExpirySweep();
     }
 
-    if (isLoggedInNotificationView()) {
-        return;
-    }
-
     const isNotificationToast = Boolean(metadata?.notificationId);
     if (isNotificationToast && isNotificationHistoryExpanded()) {
         return;
@@ -382,7 +395,7 @@ async function fetchWebPushStatus(forceRefresh = false) {
         return webPushStatusCache;
     }
 
-    const response = await fetch('/api/push/status', {
+    const response = await fetch(appPath('/api/push/status'), {
         method: 'GET',
         headers: {
             Accept: 'application/json',
@@ -393,7 +406,7 @@ async function fetchWebPushStatus(forceRefresh = false) {
 
     const data = await response.json();
     if (!response.ok || !data?.success) {
-        throw new Error(data?.error || 'Unable to fetch push status');
+        throw new Error(data?.error || uiText('push_status_unavailable'));
     }
 
     if (data.csrf_token) {
@@ -406,17 +419,37 @@ async function fetchWebPushStatus(forceRefresh = false) {
 
 async function getServiceWorkerRegistration() {
     if (!('serviceWorker' in navigator)) {
-        throw new Error('Service workers are not supported in this browser');
+        throw new Error(uiText('push_service_worker_unsupported'));
     }
 
-    const registration = await navigator.serviceWorker.register('/service-worker.js');
-    await navigator.serviceWorker.ready;
-    return registration;
+    const registration = await navigator.serviceWorker.register(appPath('/service-worker.js'), { scope: appPath('/') });
+    if (registration.active?.state === 'activated') return registration;
+
+    const worker = registration.installing || registration.waiting || registration.active;
+    const activationError = () => new Error(uiText('push_service_worker_not_ready'));
+    if (!worker) throw activationError();
+
+    // The global ready promise can resolve to an older worker at a broader scope.
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => finish(activationError()), 10000);
+        function finish(error) {
+            clearTimeout(timer);
+            worker.removeEventListener('statechange', onStateChange);
+            if (error) reject(error);
+            else resolve(registration);
+        }
+        function onStateChange() {
+            if (registration.active?.state === 'activated') finish();
+            else if (worker.state === 'redundant') finish(activationError());
+        }
+        worker.addEventListener('statechange', onStateChange);
+        onStateChange();
+    });
 }
 
 async function syncPushSubscriptionWithServer(subscription) {
     if (!subscription) {
-        throw new Error('Missing push subscription');
+        throw new Error(uiText('push_subscription_missing'));
     }
 
     const subscriptionJson = subscription.toJSON ? subscription.toJSON() : null;
@@ -425,7 +458,7 @@ async function syncPushSubscriptionWithServer(subscription) {
     const auth = String(subscriptionJson?.keys?.auth || '').trim();
 
     if (!endpoint || !p256dh || !auth) {
-        throw new Error('Invalid push subscription payload');
+        throw new Error(uiText('push_subscription_invalid'));
     }
 
     const result = await postForm('/api/push/subscribe', {
@@ -435,13 +468,11 @@ async function syncPushSubscriptionWithServer(subscription) {
         auth
     });
 
-    if (!result?.success) {
-        throw new Error(result?.error || 'Unable to save push subscription');
+    if (result?.success !== true || typeof result.csrf_token !== 'string' || !result.csrf_token) {
+        throw new Error(result?.error || uiText('push_subscription_save_failed'));
     }
 
-    if (result.csrf_token) {
-        window.CSRF_TOKEN = result.csrf_token;
-    }
+    window.CSRF_TOKEN = result.csrf_token;
 }
 
 async function unsubscribePushSubscriptionOnServer(subscription) {
@@ -466,26 +497,26 @@ async function unsubscribePushSubscriptionOnServer(subscription) {
 async function enableWebPushNotifications() {
     const status = await fetchWebPushStatus();
     if (!status?.configured || !status?.vapid_public_key) {
-        throw new Error('Web push is not configured on the server');
+        throw new Error(uiText('push_not_configured'));
     }
 
     if (!('PushManager' in window)) {
-        throw new Error('Push notifications are not supported in this browser');
+        throw new Error(uiText('push_not_supported'));
     }
 
     if (typeof Notification === 'undefined') {
-        throw new Error('Browser notifications are unavailable');
+        throw new Error(uiText('browser_notifications_unavailable'));
     }
 
     if (Notification.permission === 'default') {
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
-            throw new Error('Browser notification permission is required for web push');
+            throw new Error(uiText('push_permission_required'));
         }
     }
 
     if (Notification.permission !== 'granted') {
-        throw new Error('Browser notification permission is blocked');
+        throw new Error(uiText('push_permission_blocked'));
     }
 
     const registration = await getServiceWorkerRegistration();
@@ -495,13 +526,20 @@ async function enableWebPushNotifications() {
     if (!subscription) {
         const applicationServerKey = base64UrlToUint8Array(status.vapid_public_key);
         if (!applicationServerKey) {
-            throw new Error('Invalid VAPID public key');
+            throw new Error(uiText('push_vapid_key_invalid'));
         }
 
-        subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey
-        });
+        try {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+        } catch (error) {
+            if (error?.name === 'NotAllowedError') {
+                throw new Error(uiText('push_permission_blocked'));
+            }
+            throw new Error(uiText('push_subscription_create_failed'));
+        }
     }
 
     await syncPushSubscriptionWithServer(subscription);
@@ -599,45 +637,37 @@ function bindNotificationSettingsToggles() {
             const previousEnabled = !enabled;
 
             toggleNode.disabled = true;
-            setNotificationSettingsStatus('Saving…', 'info');
+            setNotificationSettingsStatus(uiText('notification_settings_saving'), 'info');
 
             try {
-                const result = await postForm('/settings/notifications', {
-                    csrf_token: getCsrfToken(),
-                    setting,
-                    enabled: enabled ? '1' : '0'
-                });
-
-                if (!result.success) {
-                    throw new Error(result.error || 'Unable to save notification setting');
+                if (setting === 'web_push_notifications' && enabled) {
+                    // The subscription endpoint persists the preference after registering this browser.
+                    await enableWebPushNotifications();
+                } else {
+                    const result = await postForm('/settings/notifications', {
+                        csrf_token: getCsrfToken(),
+                        setting,
+                        enabled: enabled ? '1' : '0'
+                    });
+                    if (!result.success) {
+                        throw new Error(result.error || uiText('unable_to_save_notification_setting'));
+                    }
+                    if (setting === 'web_push_notifications') await disableWebPushNotifications().catch(() => {});
                 }
 
                 applyNotificationSettingState(setting, enabled);
                 if (setting === 'browser_notifications' && enabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
                     Notification.requestPermission();
                 }
-                if (setting === 'web_push_notifications') {
-                    if (enabled) {
-                        await enableWebPushNotifications();
-                    } else {
-                        await disableWebPushNotifications();
-                    }
-                }
-                setNotificationSettingsStatus('Saved', 'success');
+                setNotificationSettingsStatus(uiText('notification_settings_saved'), 'success');
             } catch (error) {
                 toggleNode.checked = previousEnabled;
                 applyNotificationSettingState(setting, previousEnabled);
 
-                if (setting === 'web_push_notifications' && enabled) {
-                    postForm('/settings/notifications', {
-                        csrf_token: getCsrfToken(),
-                        setting,
-                        enabled: '0'
-                    }).catch(() => {});
-                }
-
-                setNotificationSettingsStatus('Failed to save. Please try again.', 'error');
-                showToast(uiActionError(error.message, 'unable_to_save_notification_setting'), 'error');
+                const message = setting === 'web_push_notifications' && error.message
+                    ? error.message : uiText('notification_settings_save_failed');
+                setNotificationSettingsStatus(message, 'error');
+                showToast(message, 'error');
             } finally {
                 toggleNode.disabled = false;
             }
@@ -859,7 +889,7 @@ async function queryBrowserPermissionState(permissionName) {
 async function getSoundPlaybackPermissionState() {
     const testSource = NOTIFICATION_SOUND_FILE_BY_BUCKET.other;
     if (!testSource) {
-        return { kind: 'info', label: 'Unavailable' };
+        return { kind: 'info', label: uiText('permission_unavailable') };
     }
 
     try {
@@ -874,13 +904,13 @@ async function getSoundPlaybackPermissionState() {
         }
 
         audio.pause();
-        return { kind: 'granted', label: 'Allowed' };
+        return { kind: 'granted', label: uiText('permission_allowed') };
     } catch (error) {
         const errorName = String(error?.name || '').trim();
         if (errorName === 'NotAllowedError') {
-            return { kind: 'prompt', label: 'Needs interaction' };
+            return { kind: 'prompt', label: uiText('permission_needs_interaction') };
         }
-        return { kind: 'info', label: 'Unknown' };
+        return { kind: 'info', label: uiText('permission_unknown') };
     }
 }
 
@@ -899,15 +929,15 @@ function stopStreamTracks(stream) {
 
 function mapPermissionStateToBadge(state) {
     if (state === 'granted') {
-        return { kind: 'granted', label: 'Allowed' };
+        return { kind: 'granted', label: uiText('permission_allowed') };
     }
     if (state === 'prompt') {
-        return { kind: 'prompt', label: 'Ask first' };
+        return { kind: 'prompt', label: uiText('permission_ask_first') };
     }
     if (state === 'denied') {
-        return { kind: 'denied', label: 'Blocked' };
+        return { kind: 'denied', label: uiText('permission_blocked') };
     }
-    return { kind: 'info', label: 'Unknown' };
+    return { kind: 'info', label: uiText('permission_unknown') };
 }
 
 async function updateBrowserPermissionsStatuses() {
@@ -921,9 +951,9 @@ async function updateBrowserPermissionsStatuses() {
     const hasMediaDevices = Boolean(navigator?.mediaDevices);
     const hasUserMedia = hasMediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function';
     if (!hasUserMedia) {
-        setBrowserPermissionStatus('camera', 'Unavailable', 'info');
+        setBrowserPermissionStatus('camera', uiText('permission_unavailable'), 'info');
         setBrowserPermissionTestButtonState('camera', 'info');
-        setBrowserPermissionStatus('microphone', 'Unavailable', 'info');
+        setBrowserPermissionStatus('microphone', uiText('permission_unavailable'), 'info');
         setBrowserPermissionTestButtonState('microphone', 'info');
     } else {
         const cameraState = await queryBrowserPermissionState('camera');
@@ -948,12 +978,12 @@ async function testBrowserPermission(type) {
     }
 
     if (!navigator?.mediaDevices) {
-        throw new Error('Media devices are unavailable in this browser.');
+        throw new Error(uiText('permissions_media_unavailable'));
     }
 
     if (permissionType === 'camera') {
         if (typeof navigator.mediaDevices.getUserMedia !== 'function') {
-            throw new Error('Camera access is not supported in this browser.');
+            throw new Error(uiText('permissions_camera_unsupported'));
         }
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         stopStreamTracks(stream);
@@ -962,7 +992,7 @@ async function testBrowserPermission(type) {
 
     if (permissionType === 'microphone') {
         if (typeof navigator.mediaDevices.getUserMedia !== 'function') {
-            throw new Error('Microphone access is not supported in this browser.');
+            throw new Error(uiText('permissions_microphone_unsupported'));
         }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stopStreamTracks(stream);
@@ -996,23 +1026,28 @@ function bindBrowserPermissionChecks() {
             } finally {
                 await updateBrowserPermissionsStatuses().catch(() => {});
                 buttonNode.disabled = false;
-                buttonNode.textContent = previousText || 'Test';
+                buttonNode.textContent = previousText || uiText('test_permission');
             }
         });
     });
 
     updateBrowserPermissionsStatuses().catch(() => {
-        setBrowserPermissionStatus('sound', 'Unknown', 'info');
+        setBrowserPermissionStatus('sound', uiText('permission_unknown'), 'info');
         setBrowserPermissionTestButtonState('sound', 'info');
-        setBrowserPermissionStatus('camera', 'Unknown', 'info');
+        setBrowserPermissionStatus('camera', uiText('permission_unknown'), 'info');
         setBrowserPermissionTestButtonState('camera', 'info');
-        setBrowserPermissionStatus('microphone', 'Unknown', 'info');
+        setBrowserPermissionStatus('microphone', uiText('permission_unknown'), 'info');
         setBrowserPermissionTestButtonState('microphone', 'info');
     });
 }
 
-async function fetchNotifications() {
-    const res = await fetch('/notifications');
+function fetchNotifications() {
+    notificationRefresh ??= refreshNotificationHistory().finally(() => { notificationRefresh = null; });
+    return notificationRefresh;
+}
+
+async function refreshNotificationHistory() {
+    const res = await fetch(appPath('/notifications'));
     const data = await res.json();
     if (data.csrf_token) {
         window.CSRF_TOKEN = data.csrf_token;
@@ -1101,6 +1136,7 @@ async function fetchNotifications() {
     if (newlySeenIds.length > 0) {
         await markNotificationsSeen(newlySeenIds);
     }
+    await clearCurrentChatMessageNotifications();
 }
 
 
@@ -1198,6 +1234,8 @@ function renderToastHistory() {
         expiredToastIds.forEach((toastId) => clearActiveToastPopup(toastId));
     }
 
+    syncNotificationHistoryRail(visibleToasts.length > 0);
+
     if (badge) {
         if (visibleToasts.length > 0) {
             badge.textContent = String(Math.min(visibleToasts.length, 99));
@@ -1269,25 +1307,30 @@ function getNotificationAction(toast) {
 
     const type = String(meta.type || '').toLowerCase();
     const title = String(meta.title || '').toLowerCase();
+    const link = String(meta.link).trim();
+    if (!link.startsWith('/') || link.startsWith('//')) return null;
+    const target = new URL(appPath(link), window.location.origin);
+    if (target.origin !== window.location.origin || appRoute(target.pathname) === null) return null;
+    const href = target.pathname + target.search + target.hash;
 
-    if (type === 'message') {
-        return { href: meta.link };
+    if (['message', 'group_join_request', 'group_join_approved', 'group_join_denied'].includes(type)) {
+        return { href };
     }
 
     if (type === 'call' || title === 'incoming call') {
-        return { href: meta.link };
+        return { href };
     }
 
     if (type === 'poke' || title === 'call poke') {
-        return { href: withPokeJoinIntent(meta.link) };
+        return { href: withPokeJoinIntent(href) };
     }
 
     if (type === 'friend_request' || title === 'friend request') {
-        return { href: meta.link };
+        return { href };
     }
 
     if (type === 'friend_request_accepted' || title === 'friend request accepted') {
-        return { href: meta.link };
+        return { href };
     }
 
     if (type === 'report' && title === 'update available') {
@@ -1295,7 +1338,7 @@ function getNotificationAction(toast) {
     }
 
     if (type === 'report' || title === 'new report') {
-        return { href: meta.link };
+        return { href };
     }
 
     return null;
@@ -1369,23 +1412,34 @@ async function handleToastHistoryClick(event) {
 
 function bindNotificationHistory() {
     const button = document.getElementById('notification-history-button');
+    const desktopLauncher = document.getElementById('notification-history-launcher');
     const mobileButton = document.getElementById('notification-history-button-mobile');
     const panel = document.getElementById('notification-history-panel');
     const list = document.getElementById('notification-history-list');
     const title = document.getElementById('notification-history-title');
     const header = document.getElementById('notification-history-header');
     const clear = document.getElementById('notification-clear-all-btn');
-    if (!button || !mobileButton || !panel || !list || !title || !header || !clear) return;
+    if (!button || !desktopLauncher || !mobileButton || !panel || !list || !title || !header || !clear) return;
 
     const mobileLayout = window.matchMedia('(max-width: 1023px)');
     const sidebar = document.getElementById('app-sidebar');
     let pendingSave = null;
     let saving = false;
 
-    const applyExpandedState = () => {
+    const focusHistoryControl = () => {
+        const railHidden = panel.classList.contains('notification-history-empty');
+        (mobileLayout.matches ? mobileButton : railHidden ? desktopLauncher : button).focus();
+    };
+
+    applyNotificationHistoryLayout = () => {
         const expanded = isNotificationHistoryExpanded();
         const mobileOpen = mobileLayout.matches && expanded;
+        const railHidden = !expanded && !notificationHistoryHasEntries && notificationRailHideTimer === null;
+        const visible = mobileLayout.matches ? mobileOpen : !railHidden;
+        const hadFocus = !visible && panel.contains(document.activeElement);
         panel.classList.toggle('mobile-open', mobileOpen);
+        panel.classList.toggle('notification-history-empty', railHidden);
+        panel.inert = !visible;
         panel.classList.toggle('w-20', !expanded);
         panel.classList.toggle('w-96', expanded);
         panel.classList.toggle('max-w-[95vw]', expanded);
@@ -1395,12 +1449,14 @@ function bindNotificationHistory() {
         header.classList.toggle('justify-center', !expanded);
         header.classList.toggle('justify-between', expanded);
         button.setAttribute('aria-expanded', String(expanded));
+        desktopLauncher.setAttribute('aria-expanded', String(expanded));
         mobileButton.setAttribute('aria-expanded', String(expanded));
 
         if (mobileOpen) sidebar?.classList.remove('mobile-open');
         syncMobileOverlayBackdrop();
         syncToastHostPosition();
         renderNotificationIconPreview();
+        if (hadFocus) focusHistoryControl();
     };
 
     const saveExpandedState = async (expanded) => {
@@ -1422,18 +1478,20 @@ function bindNotificationHistory() {
     const setExpanded = (expanded, restoreFocus = false) => {
         if (expanded === isNotificationHistoryExpanded()) return;
         window.NOTIFICATION_SIDEBAR_EXPANDED = expanded;
-        applyExpandedState();
+        notificationHistoryOpenedEmpty = expanded && !notificationHistoryHasEntries;
+        applyNotificationHistoryLayout();
         if (expanded) {
             dismissVisibleNotificationToasts();
             if (mobileLayout.matches) button.focus();
         } else if (restoreFocus) {
-            (mobileLayout.matches ? mobileButton : button).focus();
+            focusHistoryControl();
         }
         saveExpandedState(expanded);
     };
 
     const toggle = () => setExpanded(!isNotificationHistoryExpanded(), true);
     button.addEventListener('click', toggle);
+    desktopLauncher.addEventListener('click', toggle);
     mobileButton.addEventListener('click', toggle);
     list.addEventListener('click', handleToastHistoryClick);
     panel.addEventListener('keydown', (event) => {
@@ -1442,9 +1500,9 @@ function bindNotificationHistory() {
         setExpanded(false, true);
     });
     window.collapseNotificationPanel = (restoreFocus = false) => setExpanded(false, restoreFocus);
-    mobileLayout.addEventListener('change', applyExpandedState);
+    mobileLayout.addEventListener('change', applyNotificationHistoryLayout);
 
-    applyExpandedState();
+    applyNotificationHistoryLayout();
     renderToastHistory();
 }
 
@@ -1484,7 +1542,9 @@ function isToastForCurrentChatMessage(toast) {
 }
 
 async function clearCurrentChatMessageNotifications() {
-    if (!currentChat) return;
+    const chat = currentChat;
+    const chatView = document.getElementById('chat-view');
+    if (!chat || chatView?.dataset.chatId !== String(chat.id)) return;
 
     const matchingToasts = toastHistory.filter((toast) => isToastForCurrentChatMessage(toast));
     if (matchingToasts.length === 0) return;
@@ -1492,11 +1552,13 @@ async function clearCurrentChatMessageNotifications() {
     let clearedCount = 0;
 
     for (const toast of matchingToasts) {
+        if (currentChat !== chat || !chatView.isConnected) break;
         const notificationId = Number(toast?.metadata?.notificationId || 0);
-        if (!Number.isFinite(notificationId) || notificationId <= 0) {
+        if (!Number.isFinite(notificationId) || notificationId <= 0 || notificationReadsInFlight.has(notificationId)) {
             continue;
         }
 
+        notificationReadsInFlight.add(notificationId);
         try {
             const result = await postForm('/api/notifications/read', {
                 csrf_token: getCsrfToken(),
@@ -1508,6 +1570,8 @@ async function clearCurrentChatMessageNotifications() {
             }
         } catch {
             continue;
+        } finally {
+            notificationReadsInFlight.delete(notificationId);
         }
 
         toastHistory = toastHistory.filter((item) => item.id !== toast.id);

@@ -1,4 +1,7 @@
 <?php
+
+use Causette\Localization\Locale;
+
 class TrashController extends Controller {
     private function requireAdminUser() {
         Auth::requireAuth();
@@ -43,17 +46,18 @@ class TrashController extends Controller {
 
         $toastMessage = '';
         $toastKind = 'info';
+        $locale = Locale::current();
         $success = strtolower(trim((string)($_GET['success'] ?? '')));
         $error = strtolower(trim((string)($_GET['error'] ?? '')));
 
         if ($success === 'chat_permanently_deleted') {
-            $toastMessage = 'Chat permanently deleted.';
+            $toastMessage = $locale->text('feedback.trash_permanently_deleted');
             $toastKind = 'success';
         } elseif ($error === 'chat_not_found') {
-            $toastMessage = 'Deleted chat not found.';
+            $toastMessage = $locale->text('feedback.trash_chat_not_found');
             $toastKind = 'error';
         } elseif ($error === 'chat_delete_failed') {
-            $toastMessage = 'Unable to permanently delete chat.';
+            $toastMessage = $locale->text('feedback.trash_delete_failed');
             $toastKind = 'error';
         }
 

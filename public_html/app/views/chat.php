@@ -1,4 +1,5 @@
 <?php
+use Causette\Chat\GroupHistoryText;
 use Causette\Chat\PollDraft;
 use Causette\Localization\DisplayPreferences;
 use Causette\Localization\Locale;
@@ -7,6 +8,8 @@ use Causette\View\HtmlJson;
 require_once __DIR__ . '/../core/HtmlJson.php';
 require_once __DIR__ . '/../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../core/Locale.php';
+require_once __DIR__ . '/../core/CallHistoryText.php';
+require_once __DIR__ . '/../core/GroupHistoryText.php';
 require_once __DIR__ . '/../core/DisplayPreferences.php';
 require_once __DIR__ . '/../core/PollDraft.php';
 require_once __DIR__ . '/../core/ReactionCatalog.php';
@@ -64,17 +67,17 @@ $groupMessageCount = (int)($groupMessageCount ?? 0);
 $canSendMessages = (bool)($canSendMessages ?? true);
 $messageRestrictionReason = (string)($messageRestrictionReason ?? '');
 $canStartCalls = (bool)($canStartCalls ?? true);
-$messageDisabledNoticeText = 'Messaging is currently disabled.';
+$messageDisabledNoticeText = $chatLocale->text('ui.messaging_disabled');
 if ($messageRestrictionReason === 'banned_user') {
-    $messageDisabledNoticeText = "You can't send messages to a banned user.";
+    $messageDisabledNoticeText = $chatLocale->text('browser.messaging_target_banned');
 } elseif ($messageRestrictionReason === 'not_friends') {
-    $messageDisabledNoticeText = 'Messaging is disabled in this private chat until you add each other as friends again.';
+    $messageDisabledNoticeText = $chatLocale->text('browser.messaging_friend_required');
 } elseif ($messageRestrictionReason === 'group_muted') {
-    $messageDisabledNoticeText = 'You are muted in this group.';
+    $messageDisabledNoticeText = $chatLocale->text('browser.messaging_muted');
 } elseif ($messageRestrictionReason === 'group_members_only') {
-    $messageDisabledNoticeText = 'Join this group to send messages.';
+    $messageDisabledNoticeText = $chatLocale->text('browser.messaging_join_required');
 } elseif ($messageRestrictionReason === 'group_read_only_public') {
-    $messageDisabledNoticeText = 'This is a public read-only view. Join the group to participate.';
+    $messageDisabledNoticeText = $chatLocale->text('browser.messaging_public_read_only');
 }
 $canReportChat = ((int)$chat->created_by !== (int)$currentUserId);
 $isGroupOwner = $isGroupChat && ((int)$chat->created_by === (int)$currentUserId);
@@ -115,7 +118,7 @@ if ($isPersonalChat) {
         $personalChatUserId = (int)($member->id ?? 0);
         $personalChatUserNumber = preg_replace('/\D+/', '', (string)($member->user_number ?? ''));
         $personalChatStatusDotClass = (string)($member->effective_status_dot_class ?? 'bg-zinc-500');
-        $personalChatStatusLabel = (string)($member->effective_status_label ?? 'Offline');
+        $personalChatStatusLabel = $chatLocale->text('ui.' . (User::normalizePresenceStatus($member->effective_status ?? null) ?? 'offline'));
         $personalChatPeerUsername = (string)($member->username ?? '');
         break;
     }
@@ -161,7 +164,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <span id="chat-title" class="font-semibold"><?= htmlspecialchars($chatTitle ?? ('Chat #' . User::formatUserNumber($chat->chat_number)), ENT_QUOTES, 'UTF-8') ?></span>
                 <?php endif; ?>
                 <?php if ($isPersonalChat && $personalChatStatusLabel !== null): ?>
-                    <span id="chat-title-status-dot" class="inline-block w-2 h-2 rounded-full <?= htmlspecialchars($personalChatStatusDotClass ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($personalChatStatusLabel ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>"></span>
+                    <span id="chat-title-status-dot" class="presence-dot inline-block w-2 h-2 rounded-full <?= htmlspecialchars($personalChatStatusDotClass ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($personalChatStatusLabel ?? $chatLocale->text('ui.offline'), ENT_QUOTES, 'UTF-8') ?>"></span>
                 <?php endif; ?>
             </div>
             <?php if ($hasChatActions): ?>
@@ -199,14 +202,14 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php endif; ?>
         </div>
         <div class="flex gap-6">
-            <button id="start-voice-call-button" data-app-action="start-voice-call" class="causette-accent hover:text-emerald-300 <?= $canStartCalls ? '' : 'opacity-50 cursor-not-allowed' ?> <?= !empty($isUserInActiveCall) ? 'hidden' : '' ?>" <?= $canStartCalls ? '' : 'disabled title="You can\'t call a banned user"' ?>><i class="fa fa-phone text-2xl"></i></button>
+            <button id="start-voice-call-button" type="button" data-app-action="start-voice-call" class="causette-accent hover:text-emerald-300 <?= $canStartCalls ? '' : 'opacity-50 cursor-not-allowed' ?> <?= !empty($isUserInActiveCall) ? 'hidden' : '' ?>" title="<?= $tr($canStartCalls ? 'calls.start_call' : 'calls.cannot_call_banned_user') ?>" aria-label="<?= $tr('calls.start_call') ?>" <?= $canStartCalls ? '' : 'disabled' ?>><i class="fa fa-phone text-2xl" aria-hidden="true"></i></button>
         </div>
     </div>
     <?php if ($isGroupChat && $isRequestablePreview): ?>
     <div class="px-6 py-4 border-b border-zinc-800">
         <div class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
             <div class="text-sm text-zinc-300"><?= $tr('ui.this_group_is_requestable') ?></div>
-            <div class="mt-2 text-sm text-zinc-400">Members: <?= (int)$groupMemberCount ?> · Messages: <?= (int)$groupMessageCount ?></div>
+            <div class="mt-2 text-sm text-zinc-400"><?= $tr('ui.chat_summary', ['members' => (int)$groupMemberCount, 'messages' => (int)$groupMessageCount]) ?></div>
             <div class="mt-4 flex items-center gap-3">
                 <?php if ($currentUserJoinRequestStatus === 'pending'): ?>
                     <button type="button" id="cancel-group-join-request" class="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-100"><?= $tr('ui.cancel_request') ?></button>
@@ -267,10 +270,10 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php foreach ($groupMembersOrdered as $member): ?>
                 <?php $memberIsSelf = (int)($member->id ?? 0) === (int)$currentUserId; ?>
                 <?php $memberIsInCall = (int)($member->is_in_group_call ?? 0) === 1; ?>
-                <?php $friendLabel = $memberIsSelf ? 'You' : (((int)($member->is_friend ?? 0) === 1) ? 'Friend' : 'Not Friend'); ?>
+                <?php $friendLabel = $chatLocale->text($memberIsSelf ? 'ui.you' : (((int)($member->is_friend ?? 0) === 1) ? 'ui.friend_status' : 'ui.not_friend_status')); ?>
                 <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 border <?= $memberIsSelf ? 'bg-zinc-700 border-zinc-600' : 'bg-zinc-800 border-zinc-700' ?> <?= $memberIsInCall ? 'border-b-2 border-b-emerald-400' : '' ?>" data-group-member-user-id="<?= (int)$member->id ?>" data-group-member-in-call="<?= $memberIsInCall ? '1' : '0' ?>" data-group-member-username="<?= htmlspecialchars((string)$member->username, ENT_QUOTES, 'UTF-8') ?>">
-                    <span class="inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($member->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($member->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>"></span>
-                    <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($member->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="hover:underline underline-offset-2" title="<?= htmlspecialchars($friendLabel, ENT_QUOTES, 'UTF-8') ?>" aria-label="<?= htmlspecialchars($friendLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($member->username, ENT_QUOTES, 'UTF-8') ?></a>
+                    <span class="presence-dot inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($member->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= $tr('ui.' . (User::normalizePresenceStatus($member->effective_status ?? null) ?? 'offline')) ?>"></span>
+                    <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($member->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="font-bold hover:underline underline-offset-2" title="<?= htmlspecialchars($friendLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($member->username, ENT_QUOTES, 'UTF-8') ?></a>
                     <?php if ((int)$member->id === (int)$chat->created_by): ?>
                     <i class="fa-solid fa-crown causette-accent" title="<?= $tr('ui.group_owner') ?>" aria-label="<?= $tr('ui.group_owner') ?>"></i>
                     <?php elseif (strtolower((string)($member->group_role ?? 'member')) === 'moderator'): ?>
@@ -307,7 +310,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         </button>
                         <div id="group-member-menu-<?= $memberId ?>" data-group-member-menu class="hidden absolute right-0 top-full mt-2 min-w-44 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-2 z-30">
                             <?php if ($canPokeMember): ?>
-                            <button type="button" data-group-member-action class="w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-emerald-300" data-app-action="poke-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
+                            <button type="button" data-group-member-action class="hidden w-full text-left px-3 py-2.5 min-h-10 rounded-lg hover:bg-zinc-800 text-sm text-emerald-300" data-app-action="poke-group-member" data-user-id="<?= $memberId ?>" data-username="<?= $memberUsernameHtml ?>">
                                 <i class="fa-solid fa-hand-point-right mr-2" aria-hidden="true"></i><?= $tr('ui.poke') ?>
                             </button>
                             <?php endif; ?>
@@ -541,7 +544,10 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <?php
                     $systemToggleGroupKey = (string)($entry['group_key'] ?? '');
                     $systemToggleHiddenCount = max(0, (int)($entry['hidden_count'] ?? 0));
-                    $systemToggleLabel = 'Show ' . $systemToggleHiddenCount . ' more ' . ($systemToggleHiddenCount === 1 ? 'event' : 'events');
+                    $systemToggleLabel = $chatLocale->text(
+                        $systemToggleHiddenCount === 1 ? 'chat.system_events_show_one' : 'chat.system_events_show_other',
+                        ['count' => $systemToggleHiddenCount],
+                    );
                 ?>
                 <div class="flex gap-3 mt-1">
                     <div class="w-10 shrink-0"><div class="w-10 h-1"></div></div>
@@ -579,7 +585,10 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     $isCallSystemEvent = strpos($systemEventType, 'call_') === 0;
                     $sysFullTimestamp = (string)($message->created_at ?? '');
                     $sysCompactTimestamp = DisplayPreferences::formatTimestamp($sysFullTimestamp);
-                    $systemContentRaw = (string)($message->content ?? '');
+                    $systemContentRaw = \Causette\Calls\CallHistoryText::localize(
+                        $systemEventType,
+                        (string)($message->content ?? ''),
+                    );
 
                     $systemAvatarIcon = 'fa-comments';
                     $systemHeaderLabel = 'Causette';
@@ -603,12 +612,13 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         $systemHeaderLabel = $chatLocale->text('chat.poll_expired');
                     }
 
+                    $systemContentRaw = GroupHistoryText::localize($systemEventType, $systemContentRaw, $chatLocale);
                     $systemContentEscaped = htmlspecialchars($systemContentRaw, ENT_QUOTES, 'UTF-8');
                     $systemContentHtml = preg_replace_callback(
                         '#/c/\d{4}-\d{4}-\d{4}-\d{4}/delete#',
                         static function ($matches) {
                             $path = (string)($matches[0] ?? '');
-                            return '<a href="' . htmlspecialchars($path, ENT_QUOTES, 'UTF-8') . '" class="text-red-400 hover:text-red-300 hover:underline underline-offset-2">Delete chat</a>';
+                            return '<a href="' . htmlspecialchars($path, ENT_QUOTES, 'UTF-8') . '" class="text-red-400 hover:text-red-300 hover:underline underline-offset-2">' . \Causette\Localization\Locale::current()->html('ui.delete_chat') . '</a>';
                         },
                         $systemContentEscaped
                     );
@@ -668,7 +678,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <?php if ($isBot): ?>
                             <div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>
                         <?php elseif ($avatarUrl): ?>
-                            <img src="<?= htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-10 h-10 rounded-full object-cover border border-zinc-700 mt-0.5">
+                            <img src="<?= htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $message->username]) ?>" class="w-10 h-10 rounded-full object-cover border border-zinc-700 mt-0.5">
                         <?php else: ?>
                             <div class="w-10 h-10 rounded-full border border-zinc-700 flex items-center justify-center font-semibold mt-0.5 <?= htmlspecialchars(User::avatarColorClasses($message->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                 <?= htmlspecialchars(User::avatarInitial($message->username), ENT_QUOTES, 'UTF-8') ?>
@@ -685,10 +695,10 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                 <span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300"><?= $tr('browser.bot') ?></span>
                                 <bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent"><?= htmlspecialchars($botName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></bdi>
                             <?php else: ?>
-                                <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($message->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2"><?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?></a>
+                                <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($message->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2"><?= htmlspecialchars($message->username, ENT_QUOTES, 'UTF-8') ?></a>
                             <?php endif; ?>
                             <?php if ($showStatus): ?>
-                                <span class="inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($message->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($message->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>"></span>
+                                <span class="presence-dot inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($message->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= $tr('ui.' . (User::normalizePresenceStatus($message->effective_status ?? null) ?? 'offline')) ?>"></span>
                             <?php endif; ?>
                         </div>
                     <?php endif; ?>
@@ -697,9 +707,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <div class="mt-1.5 mb-2 p-2 rounded-lg border border-zinc-700 bg-zinc-900/70 text-sm">
                             <div class="text-zinc-400 text-xs mb-1">
                                 <?php if ($quotedBotName === '' && $quotedUserNumber !== ''): ?>
-                                    <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($quotedUserNumber)), ENT_QUOTES, 'UTF-8') ?>" class="hover:underline underline-offset-2"><?= htmlspecialchars($quotedUsername !== '' ? $quotedUsername : 'Unknown user', ENT_QUOTES, 'UTF-8') ?></a>
+                                    <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($quotedUserNumber)), ENT_QUOTES, 'UTF-8') ?>" class="hover:underline underline-offset-2"><?= $quotedUsername !== '' ? htmlspecialchars($quotedUsername, ENT_QUOTES, 'UTF-8') : $tr('chat.unknown_user') ?></a>
                                 <?php else: ?>
-                                    <?= htmlspecialchars($quotedUsername !== '' ? $quotedUsername : 'Unknown user', ENT_QUOTES, 'UTF-8') ?>
+                                    <?= $quotedUsername !== '' ? htmlspecialchars($quotedUsername, ENT_QUOTES, 'UTF-8') : $tr('chat.unknown_user') ?>
                                 <?php endif; ?>
                             </div>
                             <div class="text-zinc-300 leading-5 truncate" title="<?= htmlspecialchars($quotedDisplayContent, ENT_QUOTES, 'UTF-8') ?>"><?= nl2br(htmlspecialchars($quotedDisplayContent, ENT_QUOTES, 'UTF-8')) ?></div>
@@ -728,24 +738,33 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                     $attachmentExt = (string)($attachment->file_extension ?? '');
                                     $attachmentCategory = Attachment::extensionCategory($attachmentExt);
                                     $attachmentUrl = htmlspecialchars($attachment->url ?? '', ENT_QUOTES, 'UTF-8');
-                                    $attachmentName = htmlspecialchars($attachment->original_name ?? 'Attachment', ENT_QUOTES, 'UTF-8');
+                                    $attachmentName = htmlspecialchars($attachment->original_name ?? $chatLocale->text('browser.attachment_label'), ENT_QUOTES, 'UTF-8');
                                     $attachmentDownloadName = htmlspecialchars($attachment->original_name ?? (($attachment->file_name ?? '') . '.' . $attachmentExt), ENT_QUOTES, 'UTF-8');
                                     $attachmentIsDeleted = !empty($attachment->is_deleted);
                                     $attachmentDeleteReason = strtolower((string)($attachment->delete_reason ?? 'manual'));
-                                    $attachmentDeleteLabel = $attachmentDeleteReason === 'expired' ? 'Expired attachment' : 'Deleted attachment';
-                                    $attachmentSizeLabel = number_format(((int)$attachment->file_size) / 1024, 1) . ' KB';
-                                    if ((int)$attachment->file_size >= 1024 * 1024) {
-                                        $attachmentSizeLabel = number_format(((int)$attachment->file_size) / (1024 * 1024), 2) . ' MB';
-                                    }
+                                    $attachmentDeleteLabel = $chatLocale->text($attachmentDeleteReason === 'expired' ? 'browser.attachment_expired' : 'browser.attachment_deleted');
+                                    $attachmentBytes = max(0, (int)$attachment->file_size);
+                                    $useMegabytes = $attachmentBytes >= 1024 * 1024;
+                                    $isFrench = $chatLocale->language() === 'fr';
+                                    $size = number_format(
+                                        $attachmentBytes / ($useMegabytes ? 1024 * 1024 : 1024),
+                                        $attachmentBytes === 0 ? 0 : ($useMegabytes ? 2 : 1),
+                                        $isFrench ? ',' : '.',
+                                        $isFrench ? ' ' : ','
+                                    );
+                                    $attachmentSizeLabel = $chatLocale->text($useMegabytes ? 'browser.file_size_mb' : 'browser.file_size_kb', ['size' => $size]);
                                 ?>
-                                <div class="w-44 bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
+                                <div class="<?= $attachmentCategory === 'video' ? 'w-72 max-w-full' : 'w-44' ?> bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
                                     <?php if ($attachmentIsDeleted): ?>
                                         <div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-900/70 flex flex-col items-center justify-center gap-1.5">
                                             <i class="fa-solid fa-file-circle-xmark text-2xl text-zinc-500"></i>
                                             <span class="text-xs text-zinc-400 text-center px-2"><?= htmlspecialchars($attachmentDeleteLabel, ENT_QUOTES, 'UTF-8') ?></span>
                                         </div>
                                         <div class="mt-2 text-xs text-zinc-500 truncate" title="<?= $attachmentName ?>"><?= $attachmentName ?></div>
-                                    <?php elseif ($attachmentCategory === 'image'): ?>
+                                    <?php elseif ($attachmentCategory === 'image' || $attachmentCategory === 'video'): ?>
+                                        <?php if ($attachmentCategory === 'video'): ?>
+                                            <video controls playsinline preload="none" src="<?= $attachmentUrl ?>" aria-label="<?= $attachmentName ?>" class="w-full rounded-lg bg-black aspect-video"></video>
+                                        <?php else: ?>
                                         <button
                                             type="button"
                                             class="js-lightbox-trigger block w-full"
@@ -761,6 +780,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                                 decoding="async"
                                             >
                                         </button>
+                                        <?php endif; ?>
                                         <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">
                                             <span><?= htmlspecialchars($attachmentSizeLabel, ENT_QUOTES, 'UTF-8') ?></span>
                                             <div class="flex items-center gap-2">
@@ -857,7 +877,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                             $reactionCount = (int)($reaction->count ?? 0);
                                             $reactionUsers = is_array($reaction->users ?? null) ? $reaction->users : [];
                                             $reactionTitlePrefix = $reactionCodeToLabel[$reactionCode] ?? 'Reaction';
-                                            $reactionTitleUsers = !empty($reactionUsers) ? implode(', ', $reactionUsers) : 'No users';
+                                            $reactionTitleUsers = !empty($reactionUsers) ? implode(', ', $reactionUsers) : $chatLocale->text('ui.reaction_no_users');
                                             $reactionTitle = $reactionTitlePrefix . ': ' . $reactionTitleUsers;
                                             $emojiPath = \Causette\Chat\ReactionCatalog::imagePath($reactionCode);
                                             $reactedByCurrentUser = !empty($reaction->reacted_by_current_user);
@@ -907,7 +927,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <button type="button" id="emoji-toggle" class="order-2 sm:order-2 w-[calc((100%-1.5rem)/3)] sm:w-14 rounded-3xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 min-h-12" aria-label="<?= $tr('ui.open_emoji_picker') ?>" aria-expanded="false" aria-controls="emoji-drawer">
                 <i class="fa-regular fa-face-smile"></i>
             </button>
-            <input type="text" id="message-input" maxlength="16384" class="order-1 sm:order-3 w-full sm:flex-1 bg-zinc-800 border border-zinc-700 rounded-3xl px-6 py-4" placeholder="<?= $tr('ui.message') ?>" required>
+            <input type="text" id="message-input" maxlength="16384" class="order-1 sm:order-3 w-full sm:flex-1 bg-zinc-800 border border-zinc-700 rounded-3xl px-6 py-4" placeholder="<?= $tr('ui.message') ?>">
             <button type="submit" class="order-2 sm:order-4 w-[calc((100%-1.5rem)/3)] sm:w-auto bg-emerald-600 px-10 rounded-3xl min-h-12"><?= $tr('ui.send') ?></button>
         </div>
         <div id="message-disabled-notice" class="w-full bg-zinc-900 border border-zinc-700 rounded-2xl px-4 py-3 text-sm text-amber-300 <?= $canSendMessages ? 'hidden' : '' ?>"><?= htmlspecialchars($messageDisabledNoticeText, ENT_QUOTES, 'UTF-8') ?></div>
@@ -933,7 +953,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
         <?php if ($attachmentsEnabled): ?>
         <div id="attachments-drawer" class="hidden absolute left-6 right-6 bottom-[calc(100%+0.75rem)] bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-4 z-30">
             <div class="flex items-center justify-between gap-3 mb-3">
-                <div class="text-sm text-zinc-300">Attachments (<?= htmlspecialchars($attachmentAcceptedTypes, ENT_QUOTES, 'UTF-8') ?>, max <?= (int)$attachmentMaxSizeMb ?>MB)</div>
+                <div class="text-sm text-zinc-300"><?= $tr('ui.attachment_types_and_limit', ['types' => $attachmentAcceptedTypes, 'size' => (int)$attachmentMaxSizeMb]) ?></div>
                 <input type="file" id="attachments-file-input" class="hidden" accept="<?= htmlspecialchars($attachmentFileInputAccept, ENT_QUOTES, 'UTF-8') ?>" multiple>
                 <button type="button" id="attachments-select-button" class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 rounded-lg px-3 py-1.5 text-xs"><?= $tr('ui.select_files') ?></button>
             </div>
@@ -951,6 +971,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     window.CAUSETTE_CHAT_I18N = <?= HtmlJson::encode(['language' => $chatLocale->language(), 'labels' => $chatLocale->catalog('chat')]) ?>;
     window.CAUSETTE_POLL_LIMITS = <?= HtmlJson::encode(['minOptions' => PollDraft::MIN_OPTIONS, 'maxOptions' => PollDraft::MAX_OPTIONS, 'maxHours' => PollDraft::MAX_HOURS, 'maxDays' => PollDraft::MAX_DAYS]) ?>;
     window.PENDING_ATTACHMENTS = <?= HtmlJson::encode($pendingAttachments ?? []) ?>;
+    window.CAUSETTE_ATTACHMENT_EXPIRY_OPTIONS = <?= HtmlJson::encode(Attachment::expiryOptions()) ?>;
     window.INITIAL_PINNED_MESSAGE = <?= HtmlJson::encode($pinnedMessage) ?>;
     window.INITIAL_ACTIVE_POLL = <?= HtmlJson::encode($activePoll) ?>;
 </script>
@@ -1007,9 +1028,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     </div>
 </div>
 
-<div id="create-poll-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
+<div id="create-poll-modal" class="chat-form-overlay hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
     <div class="h-full w-full flex items-center justify-center">
-        <div class="w-full max-w-md max-h-[90vh] overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="create-poll-modal-title">
+        <div class="w-full max-w-md max-h-full overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="create-poll-modal-title">
             <h2 id="create-poll-modal-title" class="text-lg font-semibold text-zinc-100"><?= $chatLabel('create_poll') ?></h2>
             <form id="create-poll-form" class="mt-4 space-y-4">
                 <div>
@@ -1108,9 +1129,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
 </div>
 
 <?php if ($canManageGroupSettings): ?>
-<div id="message-settings-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
+<div id="message-settings-modal" class="chat-form-overlay hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
     <div class="h-full w-full flex items-center justify-center">
-        <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="message-settings-modal-title">
+        <div class="w-full max-w-md max-h-full overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="message-settings-modal-title">
             <h2 id="message-settings-modal-title" class="text-lg font-semibold text-zinc-100"><?= $tr('ui.group_settings') ?></h2>
             <p class="mt-2 text-sm text-zinc-400"><?= $tr('ui.manage_group_access_and_message_permissions') ?></p>
             <form id="message-settings-form" class="mt-4 space-y-4">
@@ -1118,7 +1139,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <div>
                     <label for="group-settings-visibility" class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.non_member_visibility') ?></label>
                     <select id="group-settings-visibility" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
-                        <option value="none"><?= $tr('ui.none') ?></option>
+                        <option value="none"><?= $tr('ui.group_visibility_private') ?></option>
                         <option value="requestable"><?= $tr('ui.requestable') ?></option>
                         <option value="public"><?= $tr('ui.public') ?></option>
                     </select>

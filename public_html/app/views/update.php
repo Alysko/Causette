@@ -11,11 +11,20 @@ ob_start();
     <dd><?= htmlspecialchars($appVersion, ENT_QUOTES, 'UTF-8') ?></dd>
 </dl>
 <?php if ($recentAuthentication): ?>
-    <?php if ($reactionSteps !== null): ?>
+    <?php if ($reactionSteps !== null && version_compare($dbVersion, '1.0.4', '<')): ?>
         <p><?= $tr('ui.reaction_upgrade_progress', ['count' => $reactionSteps]) ?></p>
         <p><?= $tr('ui.reaction_upgrade_permissions') ?></p>
-    <?php else: ?>
+    <?php elseif (empty($apiLimitsUpgrade) && empty($groupNotificationsUpgrade) && empty($openMojiUpgrade)): ?>
         <p><?= $tr('ui.this_update_uses_the_existing_database') ?></p>
+    <?php endif; ?>
+    <?php if (!empty($apiLimitsUpgrade)): ?>
+        <p><?= $tr('ui.api_limit_upgrade_permissions') ?></p>
+    <?php endif; ?>
+    <?php if (!empty($groupNotificationsUpgrade)): ?>
+        <p><?= $tr('ui.group_notifications_upgrade_permissions') ?></p>
+    <?php endif; ?>
+    <?php if (!empty($openMojiUpgrade)): ?>
+        <p><?= $tr('ui.openmoji_upgrade') ?></p>
     <?php endif; ?>
     <form method="post" action="<?= htmlspecialchars(base_path('/update'), ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">

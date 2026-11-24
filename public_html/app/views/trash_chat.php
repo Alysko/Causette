@@ -1,4 +1,10 @@
-<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
+<?php
+require_once __DIR__ . '/../core/CallHistoryText.php';
+require_once __DIR__ . '/../core/GroupHistoryText.php';
+require_once __DIR__ . '/../core/DisplayPreferences.php';
+$locale = \Causette\Localization\Locale::current();
+$tr = $locale->html(...);
+?>
 <?php
 $renderStoredMentionsToPlain = static function (string $content, $mentionMap): string {
     $map = [];
@@ -37,8 +43,8 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     <section class="bg-zinc-900 border border-zinc-700 rounded-2xl p-5 max-w-5xl mb-6">
         <div class="text-sm text-zinc-300">
             <div><?= $tr('ui.deleted_at') ?> <span class="text-zinc-100"><?= htmlspecialchars((string)$chat->deleted_at, ENT_QUOTES, 'UTF-8') ?></span></div>
-            <div class="mt-1"><?= $tr('ui.deleted_by') ?> <span class="text-zinc-100"><?= htmlspecialchars((string)($chat->deleted_by_username ?? 'Unknown'), ENT_QUOTES, 'UTF-8') ?></span></div>
-            <div class="mt-1"><?= $tr('ui.created_by') ?> <span class="text-zinc-100"><?= htmlspecialchars((string)($chat->created_by_username ?? 'Unknown'), ENT_QUOTES, 'UTF-8') ?></span></div>
+            <div class="mt-1"><?= $tr('ui.deleted_by') ?> <span class="text-zinc-100"><?= isset($chat->deleted_by_username) ? htmlspecialchars((string)$chat->deleted_by_username, ENT_QUOTES, 'UTF-8') : $tr('chat.unknown_user') ?></span></div>
+            <div class="mt-1"><?= $tr('ui.created_by') ?> <span class="text-zinc-100"><?= isset($chat->created_by_username) ? htmlspecialchars((string)$chat->created_by_username, ENT_QUOTES, 'UTF-8') : $tr('chat.unknown_user') ?></span></div>
         </div>
     </section>
 
@@ -51,8 +57,13 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <?php foreach (($messages ?? []) as $message): ?>
                     <?php if ($message->is_system_event ?? false): ?>
                         <div class="bg-zinc-800/50 border border-zinc-700 rounded-xl p-3 text-sm text-zinc-300">
-                            <div class="text-zinc-400 text-xs mb-1">System · <?= htmlspecialchars((string)$message->created_at, ENT_QUOTES, 'UTF-8') ?></div>
-                            <div><?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?></div>
+                            <div class="text-zinc-400 text-xs mb-1"><?= $tr('ui.system') ?> · <?= htmlspecialchars(\Causette\Localization\DisplayPreferences::formatTimestamp((string)$message->created_at), ENT_QUOTES, 'UTF-8') ?></div>
+                            <?php
+                            $eventType = (string)($message->event_type ?? '');
+                            $eventContent = \Causette\Calls\CallHistoryText::localize($eventType, (string)$message->content);
+                            $eventContent = \Causette\Chat\GroupHistoryText::archived($eventType, $eventContent, $locale);
+                            ?>
+                            <div><?= htmlspecialchars($eventContent, ENT_QUOTES, 'UTF-8') ?></div>
                         </div>
                         <?php continue; ?>
                     <?php endif; ?>
@@ -65,7 +76,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <div class="bg-zinc-800 rounded-xl p-3">
                         <div class="flex items-start gap-3">
                             <?php if (!empty($avatarUrl)): ?>
-                                <img src="<?= htmlspecialchars((string)$avatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars((string)$message->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                <img src="<?= htmlspecialchars((string)$avatarUrl, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $message->username]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                             <?php else: ?>
                                 <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-xs <?= htmlspecialchars(User::avatarColorClasses((string)$message->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                     <?= htmlspecialchars(User::avatarInitial((string)$message->username), ENT_QUOTES, 'UTF-8') ?>
@@ -75,7 +86,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <div class="min-w-0 flex-1">
                                 <div class="flex items-center gap-2">
                                     <span class="font-medium text-zinc-100"><?= htmlspecialchars((string)$message->username, ENT_QUOTES, 'UTF-8') ?></span>
-                                    <span class="text-xs text-zinc-500"><?= htmlspecialchars((string)$message->created_at, ENT_QUOTES, 'UTF-8') ?></span>
+                                    <span class="text-xs text-zinc-500"><?= htmlspecialchars(\Causette\Localization\DisplayPreferences::formatTimestamp((string)$message->created_at), ENT_QUOTES, 'UTF-8') ?></span>
                                 </div>
                                 <div class="text-sm text-zinc-200 mt-1 break-words"><?= nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) ?></div>
 
@@ -84,7 +95,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                         <?php foreach ($message->attachments as $attachment): ?>
                                             <a href="<?= htmlspecialchars((string)($attachment->url ?? ''), ENT_QUOTES, 'UTF-8') ?>" class="inline-flex items-center gap-2 text-xs bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 hover:bg-zinc-800" download>
                                                 <i class="fa-solid fa-paperclip"></i>
-                                                <span><?= htmlspecialchars((string)($attachment->original_name ?? 'Attachment'), ENT_QUOTES, 'UTF-8') ?></span>
+                                                <span><?= htmlspecialchars((string)($attachment->original_name ?? $locale->text('browser.attachment_label')), ENT_QUOTES, 'UTF-8') ?></span>
                                             </a>
                                         <?php endforeach; ?>
                                     </div>

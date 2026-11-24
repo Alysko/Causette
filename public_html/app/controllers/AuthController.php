@@ -1,22 +1,17 @@
 <?php
-require_once __DIR__ . '/../../vendor/phpmailer/src/PHPMailer.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/SMTP.php';
-require_once __DIR__ . '/../../vendor/phpmailer/src/Exception.php';
 require_once __DIR__ . '/../modules/2fa/TwoFAManager.php';
 require_once __DIR__ . '/../modules/captcha/CaptchaManager.php';
 require_once __DIR__ . '/../core/AccountMail.php';
 require_once __DIR__ . '/../core/AccountPassword.php';
-require_once __DIR__ . '/../core/SecretSettings.php';
+require_once __DIR__ . '/../core/MailDelivery.php';
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\MailDelivery;
 use Causette\Mail\AccountMail;
 use Causette\Security\AccountPassword;
 use Causette\Security\AuthBudget;
 use Causette\Security\AuthChallenge;
-use Causette\Security\SecretSettings;
 use Causette\Security\TrustedBrowser;
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
 
 class AuthController extends Controller {
     private const AUTH_ATTEMPT_LIMIT_PER_MINUTE = 5;
@@ -24,16 +19,16 @@ class AuthController extends Controller {
     private const AUTH_ATTEMPT_REGISTER_INVITE_FAILED = 'register_invite_failed';
 
     public function showLogin() {
-        if (Auth::user()) {
-            $this->redirect('/');
+        if ($account = Auth::user()) {
+            $this->redirect($this->signedInDestination($account));
         }
 
         $this->view('auth/login', array_merge(['csrf' => $this->csrfToken()], $this->getCaptchaViewData()));
     }
 
     public function login() {
-        if (Auth::user()) {
-            $this->redirect('/');
+        if ($account = Auth::user()) {
+            $this->redirect($this->signedInDestination($account));
         }
 
         Auth::csrfValidate();
@@ -45,9 +40,7 @@ class AuthController extends Controller {
 
         $user = null;
         if ($identifier !== '' && is_string($password) && $password !== '') {
-            $user = str_contains($identifier, '@')
-                ? User::findByEmail($identifier)
-                : User::findByUsername($identifier);
+            $user = User::findByLoginIdentifier($identifier);
         }
 
         // Unknown names share a fixed bucket, and both identifiers for an account share its user ID.
@@ -128,7 +121,7 @@ class AuthController extends Controller {
         Attachment::cleanupPendingForUser($user);
         $this->createSafariDesktopLoginNotice((int)$user->id, $userAgent);
         $_SESSION['last_activity_touch_at'] = time();
-        $this->redirect('/');
+        $this->redirect($this->signedInDestination($user));
     }
 
     public function show2FA() {
@@ -190,7 +183,18 @@ class AuthController extends Controller {
         }
         $this->createSafariDesktopLoginNotice((int)$userId, $userAgent);
         $_SESSION['last_activity_touch_at'] = time();
-        $this->redirect('/');
+        $this->redirect($this->signedInDestination($authedUser ?: null));
+    }
+
+    private function signedInDestination(?object $account): string
+    {
+        if (($account->role ?? null) !== 'admin' || empty($account->email_verified_at)
+            || !defined('CAUSETTE_UPDATE_SOURCES')) {
+            return '/';
+        }
+
+        $version = Setting::get('database_version');
+        return is_string($version) && UpdateController::supportsVersion($version) ? '/update' : '/';
     }
 
     public function showRegister() {
@@ -418,16 +422,21 @@ class AuthController extends Controller {
     public function forgotPassword() {
         Auth::csrfValidate();
         $this->verifyCaptchaOrFail('/forgot-password');
-        $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->flash('success', 'sent');
-            $this->redirect('/forgot-password');
-        }
+        // A reset form opened before this update may still submit the old field name.
+        $submitted = $_POST['identifier'] ?? $_POST['email'] ?? null;
+        $identifier = is_string($submitted) ? trim($submitted) : '';
+        $isEmail = str_contains($identifier, '@');
+        $valid = $isEmail ? strlen($identifier) <= 254 && filter_var($identifier, FILTER_VALIDATE_EMAIL)
+            : $identifier !== '' && strlen($identifier) <= 32;
+        $user = $valid ? User::findByLoginIdentifier($identifier) : null;
 
-        $user = Database::query("SELECT id, email FROM users WHERE email = ?", [$email])->fetch();
-        if (!$user || !AuthBudget::allow('reset_issue', (int)$user->id, $_SERVER['REMOTE_ADDR'] ?? '', 3)) {
+        // The login name and email for an account share its reset budget.
+        if (!AuthBudget::allow('reset_issue', (int)($user->id ?? 0), $_SERVER['REMOTE_ADDR'] ?? '', 3)
+            || !$user || User::isBanned($user)
+        ) {
             $this->flash('success', 'sent');
             $this->redirect('/forgot-password');
+            return;
         }
 
         $token = AccountPassword::issueReset((int)$user->id, $user->email);
@@ -516,39 +525,7 @@ class AuthController extends Controller {
     }
 
     protected function sendEmail($to, $subject, $body): bool {
-        $mailHost = (string)(Setting::get('mail_host') ?? '');
-        $mailUser = (string)(Setting::get('mail_user') ?? '');
-
-        if ($mailHost === '' || $mailUser === '') {
-            return false;
-        }
-
-        $mailPort = (int)(Setting::get('mail_port') ?? 587);
-        $mailFrom = (string)(Setting::get('mail_from') ?? '');
-        $mailFromName = (string)(Setting::get('mail_from_name') ?? '');
-
-        $mail = new PHPMailer(true);
-        try {
-            $mail->isSMTP();
-            $mail->Host = $mailHost;
-            $mail->SMTPAuth = true;
-            $mail->Username = $mailUser;
-            $mail->Password = SecretSettings::read(SecretSettings::SMTP) ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = $mailPort;
-            $mail->Timeout = 10;
-
-            $mail->setFrom($mailFrom, $mailFromName);
-            $mail->addAddress($to);
-            $mail->isHTML(true);
-            $mail->CharSet = PHPMailer::CHARSET_UTF8;
-            $mail->Encoding = PHPMailer::ENCODING_QUOTED_PRINTABLE;
-            $mail->Subject = $subject;
-            $mail->Body = $body;
-            return $mail->send();
-        } catch (Exception | RuntimeException) {
-            return false;
-        }
+        return MailDelivery::send($to, $subject, $body);
     }
 
     private function sendNewUserNotification(string $username, string $email, string $ip, ?string $referredBy) {

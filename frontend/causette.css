@@ -1,3 +1,85 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root { color-scheme: dark; }
+
+:root[data-theme="light"] {
+    color-scheme: light;
+    --color-gray-200: var(--color-zinc-200);
+    --color-zinc-100: 15 23 42;
+    --color-zinc-200: 30 41 59;
+    --color-zinc-300: 42 57 76;
+    --color-zinc-400: 67 85 105;
+    --color-zinc-500: 78 96 116;
+    --color-zinc-600: 136 153 173;
+    --color-zinc-700: 187 200 216;
+    --color-zinc-800: 224 232 243;
+    --color-zinc-900: 244 247 251;
+    --color-zinc-950: 255 255 255;
+    --color-emerald-100: 19 78 74;
+    --color-emerald-200: 6 78 59;
+    --color-emerald-300: 6 95 70;
+    --color-emerald-400: 4 103 82;
+    --color-emerald-500: 4 113 88;
+    --color-emerald-600: 6 95 70;
+    --color-emerald-700: 5 80 61;
+    --color-emerald-800: 126 186 168;
+    --color-emerald-900: 214 243 232;
+    --color-emerald-950: 235 251 245;
+    --color-green-200: 20 83 45;
+    --color-green-300: 22 101 52;
+    --color-green-950: 240 253 244;
+    --color-red-100: 127 29 29;
+    --color-red-200: 153 27 27;
+    --color-red-300: 165 27 37;
+    --color-red-400: 173 29 43;
+    --color-red-500: 185 28 28;
+    --color-red-600: 162 23 37;
+    --color-red-700: 138 20 35;
+    --color-red-800: 125 18 31;
+    --color-red-950: 255 239 239;
+    --color-amber-100: 120 53 15;
+    --color-amber-200: 120 53 15;
+    --color-amber-300: 133 65 14;
+    --color-amber-400: 141 70 13;
+    --color-amber-500: 145 71 10;
+    --color-amber-600: 131 64 9;
+    --color-amber-700: 115 54 9;
+    --color-amber-900: 253 239 212;
+    --color-amber-950: 255 248 231;
+    --color-blue-200: 30 58 138;
+    --color-blue-300: 30 64 175;
+    --color-blue-400: 29 78 216;
+    --color-blue-950: 239 246 255;
+    --color-sky-200: 7 89 133;
+    --color-sky-300: 3 105 161;
+    --color-purple-300: 107 33 168;
+    --color-purple-400: 126 34 206;
+}
+
+:root[data-theme="colorblind"] {
+    --color-emerald-100: 219 234 254;
+    --color-emerald-200: 191 219 254;
+    --color-emerald-300: 147 197 253;
+    --color-emerald-400: 125 185 254;
+    --color-emerald-500: 37 99 235;
+    --color-emerald-600: 29 78 216;
+    --color-emerald-700: 30 64 175;
+    --color-emerald-800: 30 58 138;
+    --color-emerald-900: 29 51 91;
+    --color-emerald-950: 19 35 67;
+    --color-green-200: var(--color-emerald-200);
+    --color-green-300: var(--color-emerald-300);
+    --color-green-700: var(--color-emerald-700);
+    --color-green-950: var(--color-emerald-950);
+    --color-red-100: 255 237 213;
+    --color-red-200: 254 215 170;
+    --color-red-300: 253 186 116;
+    --color-red-400: 251 146 60;
+    --color-red-500: 194 65 12;
+    --color-red-600: 154 52 18;
+    --color-red-700: 124 45 18;
+    --color-red-800: 115 39 17;
+    --color-red-950: 67 25 11;
+}

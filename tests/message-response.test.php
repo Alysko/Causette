@@ -159,12 +159,15 @@ $cases = [
     'pin replacement confirmation' => [2, static fn() => $controller->pinMessage(), 'pinned_message', 'content', 409, '51'],
     'message search' => [2, static fn() => $controller->searchMessages(), 'messages', 'content'],
     'conversation preview' => [2, static fn() => $controller->getChats(), 'chats', 'last_message'],
+    'French conversation preview' => [2, static fn() => $controller->getChats(), 'chats', 'last_message', 200, '50', 'fr'],
 ];
 
 $failures = 0;
 foreach ($cases as $name => $case) {
     [$viewer, $request, $responseKey, $contentKey] = $case;
     $expectedStatus = $case[4] ?? 200;
+    $language = $case[6] ?? 'en';
+    \Causette\Localization\Locale::initializeForAccount($language, 'en');
     $_POST = ['chat_id' => '8', 'message_id' => $case[5] ?? '50'];
     Auth::$viewer = $viewer;
     try {
@@ -176,7 +179,8 @@ foreach ($cases as $name => $case) {
             $row = is_array($data) ? $data[0] ?? null : $data;
             expectMessageResponse($response->getCode() === $expectedStatus && ($row->$contentKey ?? null) === 'Fixture text', 'Expected the authorized content');
             $displayName = $row->username ?? $row->sender_username ?? $row->last_message_sender_username ?? null;
-            expectMessageResponse($displayName === 'formeruser (deleted user)', 'Retained identities must still be labeled');
+            $expectedName = $language === 'fr' ? 'formeruser (compte supprimé)' : 'formeruser (deleted user)';
+            expectMessageResponse($displayName === $expectedName, 'Retained identities must be labeled in the viewer language');
             if (str_ends_with($name, 'history')) {
                 expectMessageResponse($row->quoted_content === 'Earlier message' && $row->attachments[0]->url === '/attachment/fixture.png'
                     && ($data[1]->is_system_event ?? 0) === 1, 'Quotes, attachments and system events must still render');

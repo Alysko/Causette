@@ -1,10 +1,19 @@
 <?php
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Localization\Locale;
+use Causette\Calls\CallSignals;
+use Causette\Calls\CallTurnConfiguration;
+
+require_once __DIR__ . '/../core/CallSignals.php';
+require_once __DIR__ . '/../core/CallTurnConfiguration.php';
 
 class CallController extends Controller {
     private const CALL_USER_LIMIT = 99;
-    private const USER_LIMIT_REACHED_MESSAGE = 'User limit reached. Please try again later.';
+
+    private function callError(string $key, int $status): void {
+        $this->json(['error' => Locale::current()->text('calls.' . $key)], $status);
+    }
 
     private function supportsSystemEvents(): bool {
         static $supports = null;
@@ -22,10 +31,12 @@ class CallController extends Controller {
 
     private function getActiveParticipantCount(int $callId): int {
         return (int)Database::query(
-            "SELECT COUNT(DISTINCT user_id)
-             FROM call_participants
-             WHERE call_id = ?
-               AND left_at IS NULL",
+            "SELECT COUNT(DISTINCT cp.user_id)
+             FROM call_participants cp
+             JOIN calls c ON c.id = cp.call_id
+             JOIN chat_members cm ON cm.chat_id = c.chat_id AND cm.user_id = cp.user_id
+             JOIN users u ON u.id = cp.user_id AND COALESCE(u.is_banned, 0) = 0
+             WHERE cp.call_id = ? AND cp.left_at IS NULL",
             [$callId]
         )->fetchColumn();
     }
@@ -41,6 +52,26 @@ class CallController extends Controller {
         )->fetchColumn();
 
         return $count > 0;
+    }
+
+    private function closeEmptyGroupCall(int $callId): bool {
+        $closed = Database::query(
+            "UPDATE calls SET status = 'ended', ended_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status = 'active' AND NOT EXISTS (
+                 SELECT 1 FROM call_participants cp
+                 JOIN chat_members cm ON cm.chat_id = calls.chat_id AND cm.user_id = cp.user_id
+                 JOIN users u ON u.id = cp.user_id AND COALESCE(u.is_banned, 0) = 0
+                 WHERE cp.call_id = calls.id AND cp.left_at IS NULL
+             )",
+            [$callId],
+        )->rowCount() > 0;
+        if ($closed) {
+            Database::query(
+                "UPDATE call_participants SET left_at = CURRENT_TIMESTAMP WHERE call_id = ? AND left_at IS NULL",
+                [$callId],
+            );
+        }
+        return $closed;
     }
 
     private function isUserInJoinedActiveCall(int $userId, int $excludeChatId = 0): bool {
@@ -59,6 +90,7 @@ class CallController extends Controller {
             "SELECT COUNT(*)
              FROM calls c
              JOIN call_participants cp ON cp.call_id = c.id
+             JOIN chat_members cm ON cm.chat_id = c.chat_id AND cm.user_id = cp.user_id
              WHERE c.status = 'active'
                AND cp.user_id = ?
                AND cp.left_at IS NULL" . $excludeChatFilter,
@@ -66,35 +98,6 @@ class CallController extends Controller {
         )->fetchColumn();
 
         return $count > 0;
-    }
-
-    private function enforceCallCapacityOrFail(int $callId, int $userId): void {
-        if ($this->isUserActivelyInCall($callId, $userId)) {
-            return;
-        }
-
-        if ($this->getActiveParticipantCount($callId) >= self::CALL_USER_LIMIT) {
-            $this->json(['error' => self::USER_LIMIT_REACHED_MESSAGE], 429);
-        }
-    }
-
-    private function ensureCallSignalTableExists(): void {
-        Database::query(
-            "CREATE TABLE IF NOT EXISTS call_signals (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                call_id INT NOT NULL,
-                from_user_id INT NOT NULL,
-                to_user_id INT NOT NULL,
-                signal_type ENUM('offer','answer','ice','meta') NOT NULL,
-                payload LONGTEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_call_signals_to (call_id, to_user_id, id),
-                INDEX idx_call_signals_from (call_id, from_user_id, id),
-                FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
-                FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-        );
     }
 
     private function upsertActiveParticipant(int $callId, int $userId, int $video = 0): void {
@@ -300,130 +303,139 @@ class CallController extends Controller {
     public function startCall() {
         Auth::requireAuth();
         Auth::csrfValidate();
-        $chatId = (int)($_POST['chat_id'] ?? 0);
-        $userId = Auth::user()->id;
+        $chatId = CallSignals::id($_POST['chat_id'] ?? null, 1);
+        $userId = (int) Auth::user()->id;
 
-        if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid chat'], 400);
+        if ($chatId === null) {
+            $this->callError('invalid_chat', 400);
+            return;
         }
 
-        $chat = Database::query("SELECT id, chat_number, type FROM chats WHERE id = ?", [$chatId])->fetch();
-        if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
-        }
-
-        $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
-        if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
-        }
-
-        if ($this->isPersonalChatPeerBanned($chatId, (int)$userId)) {
-            $this->json(['error' => "You can't call a banned user"], 403);
-        }
-
-        if ($this->isUserInJoinedActiveCall((int)$userId, $chatId)) {
-            $this->json(['error' => 'You are already in an active call'], 409);
-        }
-
-        $activeCall = Database::query("SELECT id, started_by FROM calls WHERE chat_id = ? AND status = 'active'", [$chatId])->fetch();
-        if ($activeCall) {
-            $activeCallId = (int)$activeCall->id;
-            $activeCallStarterId = (int)($activeCall->started_by ?? 0);
-            $wasAlreadyActive = $this->isUserActivelyInCall($activeCallId, (int)$userId);
-            $this->enforceCallCapacityOrFail($activeCallId, (int)$userId);
-            $this->upsertActiveParticipant($activeCallId, (int)$userId, 0);
-
-            if (!Chat::isGroupType($chat->type ?? null) && !$wasAlreadyActive && $activeCallStarterId > 0 && $activeCallStarterId !== (int)$userId) {
-                Database::query(
-                    "UPDATE calls
-                     SET started_at = NOW()
-                     WHERE id = ?
-                       AND status = 'active'",
-                    [$activeCallId]
-                );
+        $connection = Database::getInstance();
+        $connection->beginTransaction();
+        try {
+            // Serialize creation in a conversation and concurrent joins by one account.
+            $chat = Database::query("SELECT id, type FROM chats WHERE id = ? FOR UPDATE", [$chatId])->fetch();
+            if (!$chat) {
+                $connection->rollBack();
+                $this->callError('chat_not_found', 404);
+                return;
             }
 
-            if (Chat::isGroupType($chat->type ?? null) && !$wasAlreadyActive) {
-                $this->appendGroupCallPresenceMessage((int)$chatId, (int)$userId, 'joined');
+            Database::query("SELECT id FROM users WHERE id = ? FOR UPDATE", [$userId])->fetch();
+            $member = Database::query(
+                "SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?",
+                [$chatId, $userId],
+            )->fetch();
+            if (!$member) {
+                $connection->rollBack();
+                $this->callError('access_denied', 403);
+                return;
             }
 
-            $this->json(['call_id' => $activeCallId, 'joined_existing' => true]);
+            if ($this->isPersonalChatPeerBanned($chatId, $userId)) {
+                $connection->rollBack();
+                $this->callError('cannot_call_banned_user', 403);
+                return;
+            }
+
+            if ($this->isUserInJoinedActiveCall($userId, $chatId)) {
+                $connection->rollBack();
+                $this->callError('already_in_another_call', 409);
+                return;
+            }
+
+            $group = Chat::isGroupType($chat->type ?? null);
+            $activeCall = Database::query(
+                "SELECT id, started_by FROM calls WHERE chat_id = ? AND status = 'active'
+                 ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                [$chatId],
+            )->fetch();
+            if ($activeCall && $group && $this->closeEmptyGroupCall((int) $activeCall->id)) {
+                $activeCall = null;
+            }
+
+            $joinedExisting = (bool) $activeCall;
+            if ($joinedExisting) {
+                $callId = (int) $activeCall->id;
+                $wasAlreadyActive = $this->isUserActivelyInCall($callId, $userId);
+                if (!$wasAlreadyActive && $this->getActiveParticipantCount($callId) >= self::CALL_USER_LIMIT) {
+                    $connection->rollBack();
+                    $this->callError('call_participant_limit', 429);
+                    return;
+                }
+
+                if (!$wasAlreadyActive && !$group && (int) $activeCall->started_by !== $userId) {
+                    Database::query('UPDATE calls SET started_at = CURRENT_TIMESTAMP WHERE id = ?', [$callId]);
+                }
+            } else {
+                Database::query("INSERT INTO calls (chat_id, started_by) VALUES (?, ?)", [$chatId, $userId]);
+                $callId = $connection->lastInsertId();
+                $wasAlreadyActive = false;
+            }
+
+            if (!$wasAlreadyActive) {
+                $this->upsertActiveParticipant((int) $callId, $userId, 0);
+                if ($group) {
+                    $this->appendGroupCallPresenceMessage($chatId, $userId, 'joined');
+                }
+            }
+            $connection->commit();
+        } finally {
+            if ($connection->inTransaction()) {
+                $connection->rollBack();
+            }
         }
 
-        Database::query("INSERT INTO calls (chat_id, started_by) VALUES (?, ?)", [$chatId, $userId]);
-        $callId = Database::getInstance()->lastInsertId();
-
-        // Add starter as participant
-        $this->upsertActiveParticipant((int)$callId, (int)$userId, 0);
-
-        if (Chat::isGroupType($chat->type ?? null)) {
-            $this->appendGroupCallPresenceMessage((int)$chatId, (int)$userId, 'joined');
+        $response = ['call_id' => $callId, 'joined_existing' => $joinedExisting];
+        $turn = CallTurnConfiguration::issueFor((int) $callId, $userId);
+        if ($turn !== null) {
+            header('Cache-Control: private, no-store');
+            $response['turn'] = $turn;
         }
-
-        $this->json(['call_id' => $callId, 'joined_existing' => false]);
+        $this->json($response);
     }
 
     public function signal() {
         Auth::requireAuth();
         Auth::csrfValidate();
-        $this->ensureCallSignalTableExists();
 
-        $callId = (int)($_POST['call_id'] ?? 0);
-        $userId = Auth::user()->id;
-        $type = $_POST['type'] ?? ''; // offer, answer, ice
-        $data = $_POST['data'] ?? '';
-        $toUserId = (int)($_POST['to_user_id'] ?? 0);
-
-        $call = Database::query("SELECT id, chat_id FROM calls WHERE id = ? AND status = 'active'", [$callId])->fetch();
-        if (!$call) {
-            $this->json(['error' => 'Call not found'], 404);
+        $callId = CallSignals::id($_POST['call_id'] ?? null, 1);
+        $toUserId = CallSignals::id($_POST['to_user_id'] ?? 0, 0);
+        $userId = (int) Auth::user()->id;
+        $type = $_POST['type'] ?? null;
+        $packet = $_POST['data'] ?? null;
+        $locale = Locale::current();
+        if ($callId === null || $toUserId === null || $toUserId === $userId
+            || !is_string($type) || !is_string($packet)) {
+            $this->json(['error' => $locale->text('calls.invalid_signal')], 400);
+            return;
+        }
+        if (strlen($packet) > CallSignals::MAX_PACKET_BYTES) {
+            $this->json(['error' => $locale->text('calls.signal_too_large')], 413);
+            return;
+        }
+        $decoded = CallSignals::decode($type, $packet, $toUserId);
+        if ($decoded === null) {
+            $this->json(['error' => $locale->text('calls.invalid_signal')], 400);
+            return;
         }
 
-        $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$call->chat_id, $userId])->fetch();
-        if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
-        }
-
-        $this->enforceCallCapacityOrFail((int)$callId, (int)$userId);
-
-        $this->upsertActiveParticipant((int)$callId, (int)$userId, 0);
-
-        if ($type === 'meta') {
-            $meta = json_decode($data, true) ?: [];
-            if (isset($meta['screen_sharing'])) {
-                $screenSharing = (int)((bool)$meta['screen_sharing']);
-                try {
-                    Database::query("UPDATE call_participants SET screen_sharing = ? WHERE call_id = ? AND user_id = ?", [$screenSharing, $callId, $userId]);
-                } catch (Throwable $e) {
-                    // Column may not exist on older installs; ignore
-                }
+        $error = CallSignals::store($callId, $userId, $toUserId, $type, $packet, $decoded);
+        if ($error !== null) {
+            $status = match ($error) {
+                'call_not_found' => 404,
+                'access_denied' => 403,
+                'peer_not_joined' => 409,
+                'signal_budget_exceeded' => 429,
+                'signal_busy' => 503,
+            };
+            $response = ['error' => $locale->text('calls.' . $error)];
+            if ($status === 503) {
+                $response['retry_after_ms'] = 80;
             }
-        }
-
-        if (!in_array($type, ['offer', 'answer', 'ice', 'meta'], true)) {
-            $this->json(['error' => 'Invalid signal type'], 400);
-        }
-
-        if ($toUserId > 0) {
-            $targetActive = Database::query(
-                "SELECT id
-                 FROM call_participants
-                 WHERE call_id = ?
-                   AND user_id = ?
-                   AND left_at IS NULL
-                 LIMIT 1",
-                [$callId, $toUserId]
-            )->fetch();
-
-            if (!$targetActive) {
-                $this->json(['error' => 'Target user is not in call'], 409);
-            }
-
-            Database::query(
-                "INSERT INTO call_signals (call_id, from_user_id, to_user_id, signal_type, payload)
-                 VALUES (?, ?, ?, ?, ?)",
-                [$callId, $userId, $toUserId, $type, $data]
-            );
+            $this->json($response, $status);
+            return;
         }
 
         $this->json(['success' => true]);
@@ -438,7 +450,7 @@ class CallController extends Controller {
         $userId = (int)$user->id;
 
         if ($callId <= 0) {
-            $this->json(['error' => 'Invalid call'], 400);
+            $this->callError('invalid_call', 400);
         }
 
         $call = Database::query(
@@ -449,7 +461,7 @@ class CallController extends Controller {
             [$callId]
         )->fetch();
         if (!$call) {
-            $this->json(['error' => 'Call not found'], 404);
+            $this->callError('call_not_found', 404);
         }
 
         $member = Database::query(
@@ -457,7 +469,7 @@ class CallController extends Controller {
             [(int)$call->chat_id, $userId]
         )->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->callError('access_denied', 403);
         }
 
         $this->upsertActiveParticipant((int)$callId, $userId, 0);
@@ -529,12 +541,12 @@ class CallController extends Controller {
             [$callId]
         )->fetch();
         if (!$call) {
-            $this->json(['error' => 'Call not found'], 404);
+            $this->callError('call_not_found', 404);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$call->chat_id, $userId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->callError('access_denied', 403);
         }
 
                 $leaveStatement = Database::query(
@@ -553,7 +565,7 @@ class CallController extends Controller {
             if ($leaveStatement->rowCount() > 0) {
                 $this->appendGroupCallPresenceMessage((int)$call->chat_id, (int)$userId, 'left');
             }
-            $this->json(['success' => true, 'ended' => false]);
+            $this->json(['success' => true, 'ended' => $this->closeEmptyGroupCall((int)$callId)]);
         }
 
         $remainingParticipants = (int)Database::query(
@@ -600,7 +612,7 @@ class CallController extends Controller {
         $userId = Auth::user()->id;
 
         if ($callId <= 0) {
-            $this->json(['error' => 'Invalid call'], 400);
+            $this->callError('invalid_call', 400);
             return;
         }
 
@@ -627,6 +639,7 @@ class CallController extends Controller {
 
         if (Chat::isGroupType($call->chat_type ?? null) && $leaveStatement->rowCount() > 0) {
             $this->appendGroupCallPresenceMessage((int)$call->chat_id, (int)$userId, 'left');
+            $this->closeEmptyGroupCall((int)$callId);
         }
 
         $this->json(['success' => true]);
@@ -642,11 +655,11 @@ class CallController extends Controller {
         $userId = (int)$user->id;
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid request'], 400);
+            $this->callError('invalid_poke', 400);
         }
 
         if ($targetUserId === $userId) {
-            $this->json(['error' => 'You cannot poke yourself'], 400);
+            $this->callError('cannot_poke_self', 400);
         }
 
         $chat = Database::query(
@@ -656,11 +669,11 @@ class CallController extends Controller {
             [$chatId]
         )->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->callError('chat_not_found', 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Poke is only available in group chats'], 400);
+            $this->callError('pokes_require_group', 400);
         }
 
         $isRequesterMember = Database::query(
@@ -672,7 +685,7 @@ class CallController extends Controller {
             [$chatId, $userId]
         )->fetch();
         if (!$isRequesterMember) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->callError('access_denied', 403);
         }
 
         $isTargetMember = Database::query(
@@ -684,7 +697,7 @@ class CallController extends Controller {
             [$chatId, $targetUserId]
         )->fetch();
         if (!$isTargetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->callError('peer_not_in_group', 404);
         }
 
         $activeCall = Database::query(
@@ -697,16 +710,16 @@ class CallController extends Controller {
             [$chatId]
         )->fetch();
         if (!$activeCall) {
-            $this->json(['error' => 'No active group call to poke for'], 409);
+            $this->callError('no_active_group_call', 409);
         }
 
         $callId = (int)($activeCall->id ?? 0);
         if ($callId <= 0 || !$this->isUserActivelyInCall($callId, $userId)) {
-            $this->json(['error' => 'Join the call before poking other members'], 409);
+            $this->callError('join_before_poking', 409);
         }
 
         if ($this->isUserActivelyInCall($callId, $targetUserId)) {
-            $this->json(['error' => 'User is already in the call'], 409);
+            $this->callError('peer_already_in_call', 409);
         }
 
         $locale = DisplayPreferences::localeForRecipient($targetUserId);

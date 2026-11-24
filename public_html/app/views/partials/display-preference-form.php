@@ -13,13 +13,16 @@ $displayOptions = [
     'date_format' => ['ui.date_format', array_map($locale->text(...), DisplayPreferences::DATE_FORMATS)],
     'time_format' => ['ui.time_format', array_map($locale->text(...), DisplayPreferences::TIME_FORMATS)],
 ];
+if (!$displayForSite) {
+    $displayOptions['theme'] = ['ui.theme', array_map($locale->text(...), DisplayPreferences::THEMES)];
+}
 ?>
 <form method="POST" action="<?= htmlspecialchars(base_path($displayAction), ENT_QUOTES, 'UTF-8') ?>" class="space-y-4">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
     <?php foreach ($displayOptions as $field => [$label, $choices]): ?>
         <?php
         $fieldId = $displayPrefix . '-' . $field;
-        if (!$displayForSite && $field !== 'language') {
+        if (!$displayForSite && in_array($field, ['date_format', 'time_format'], true)) {
             $choices = ['' => $locale->text('ui.use_site_default')] + $choices;
         }
         ?>
@@ -32,5 +35,5 @@ $displayOptions = [
             </select>
         </div>
     <?php endforeach; ?>
-    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-2 rounded-xl"><?= $tr('ui.save_display_preferences') ?></button>
+    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-xl"><?= $tr('ui.save_display_preferences') ?></button>
 </form>

@@ -1,6 +1,7 @@
 <?php
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Localization\Locale;
 
 class ReportController extends Controller {
     private function requireAdminUser() {
@@ -66,17 +67,18 @@ class ReportController extends Controller {
 
         $toastMessage = '';
         $toastKind = 'info';
+        $locale = Locale::current();
         $success = strtolower(trim((string)($_GET['success'] ?? '')));
         $error = strtolower(trim((string)($_GET['error'] ?? '')));
 
         if ($success === 'report_handled') {
-            $toastMessage = 'Report marked as handled.';
+            $toastMessage = $locale->text('feedback.report_handled');
             $toastKind = 'success';
         } elseif ($error === 'invalid_report') {
-            $toastMessage = 'Invalid report.';
+            $toastMessage = $locale->text('feedback.report_invalid_selection');
             $toastKind = 'error';
         } elseif ($error === 'report_not_found') {
-            $toastMessage = 'Report not found or already handled.';
+            $toastMessage = $locale->text('feedback.report_missing_or_handled');
             $toastKind = 'error';
         }
 
@@ -122,39 +124,39 @@ class ReportController extends Controller {
         $reason = trim($_POST['reason'] ?? '');
 
         if (!in_array($type, ['user', 'chat', 'message'], true) || $targetId <= 0 || $reason === '' || mb_strlen($reason) > 1000) {
-            $this->json(['error' => 'Invalid report'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_report')], 400);
         }
 
         if ($type === 'user') {
             if ($targetId === (int)$userId) {
-                $this->json(['error' => 'You cannot report yourself'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_cannot_report_yourself')], 400);
             }
 
             $targetUser = Database::query("SELECT id FROM users WHERE id = ?", [$targetId])->fetch();
             if (!$targetUser) {
-                $this->json(['error' => 'Invalid report target'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_report_target')], 404);
             }
         }
 
         if ($type === 'message') {
             $targetMessage = Database::query("SELECT user_id FROM messages WHERE id = ?", [$targetId])->fetch();
             if (!$targetMessage) {
-                $this->json(['error' => 'Invalid report target'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_report_target')], 404);
             }
 
             if ((int)$targetMessage->user_id === (int)$userId) {
-                $this->json(['error' => 'You cannot report your own content'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_cannot_report_your_own_content')], 400);
             }
         }
 
         if ($type === 'chat') {
             $targetChat = Database::query("SELECT created_by FROM chats WHERE id = ?", [$targetId])->fetch();
             if (!$targetChat) {
-                $this->json(['error' => 'Invalid report target'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_report_target')], 404);
             }
 
             if ((int)$targetChat->created_by === (int)$userId) {
-                $this->json(['error' => 'You cannot report your own content'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_cannot_report_your_own_content')], 400);
             }
         }
 

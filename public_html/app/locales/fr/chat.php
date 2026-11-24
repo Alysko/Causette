@@ -3,6 +3,10 @@
 declare(strict_types=1);
 
 return [
+    'system_events_show_one' => 'Afficher {count} autre événement',
+    'system_events_show_other' => 'Afficher {count} autres événements',
+    'system_events_hide_one' => 'Masquer {count} événement',
+    'system_events_hide_other' => 'Masquer {count} événements',
     'actions_menu' => 'Ouvrir le menu de la conversation',
     'active_poll' => 'Sondage en cours',
     'add_option' => 'Ajouter un choix',
@@ -55,6 +59,7 @@ return [
     'replace_pin_help' => 'Cette conversation contient déjà un message épinglé. Voulez-vous le remplacer ?',
     'replacing' => 'Remplacement en cours…',
     'unknown_user' => 'Utilisateur inconnu',
+    'deleted_user_label' => '{name} (compte supprimé)',
     'unpin' => 'Désépingler',
     'unpin_error' => 'Impossible de désépingler le message',
     'vote_count_one' => '{count} vote',

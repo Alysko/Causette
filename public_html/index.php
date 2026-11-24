@@ -7,13 +7,15 @@ use Causette\Security\IntegrationKeyring;
 use Causette\Security\LegacySite;
 use Causette\Security\RequestOrigin;
 
+require_once __DIR__ . '/app/core/Locale.php';
+
 date_default_timezone_set('UTC');
 ini_set('display_errors', '0');
 ini_set('zend.exception_ignore_args', '1');
 if (session_status() !== PHP_SESSION_NONE) {
     header_remove('Set-Cookie');
     http_response_code(503);
-    echo 'Causette requires PHP sessions with automatic session start disabled.';
+    echo Locale::current()->text('error.session_auto_start');
     exit;
 }
 
@@ -21,7 +23,6 @@ require_once __DIR__ . '/app/core/RequestOrigin.php';
 require_once __DIR__ . '/app/core/BrowserSession.php';
 require_once __DIR__ . '/app/core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/app/core/IntegrationKeyring.php';
-require_once __DIR__ . '/app/core/Locale.php';
 require_once __DIR__ . '/app/install/SetupConfiguration.php';
 
 $publicPath = RequestOrigin::requestPath($_SERVER);
@@ -68,12 +69,12 @@ try {
 $scheme = $origin->scheme($_SERVER);
 if (!$origin->acceptsHost($_SERVER, $scheme)) {
     http_response_code(421);
-    echo 'Open Causette using the configured HTTPS address.';
+    echo Locale::current()->text('error.configured_https_required');
     exit;
 }
 if ($scheme === null) {
     http_response_code(400);
-    echo 'The approved proxy did not report a valid request scheme.';
+    echo Locale::current()->text('error.invalid_proxy_scheme');
     exit;
 }
 
@@ -93,7 +94,7 @@ if ($scheme !== 'https') {
         header('Location: ' . $origin->urlFor($requestPath), true, 302);
     } else {
         http_response_code(403);
-        echo 'Open the HTTPS page before submitting this request.';
+        echo Locale::current()->text('error.https_page_required');
     }
     exit;
 }
@@ -175,7 +176,7 @@ function start_causette_session(string $path, ?string $name = null, string $same
     if (!session_start()) {
         header_remove('Set-Cookie');
         http_response_code(503);
-        echo 'Causette could not start a protected session.';
+        echo Locale::current()->text('error.session_start_failed');
         exit;
     }
 }
@@ -200,6 +201,8 @@ function send_security_headers(bool $isRecoveryPage, ?string $captchaProvider): 
 }
 
 start_causette_session(CAUSETTE_PUBLIC_PATH . '/');
+$causetteVersion = require __DIR__ . '/version.php';
+define('CAUSETTE_DATABASE_VERSION', $causetteVersion['database_version']);
 if ($privateConfiguration !== null) {
     require __DIR__ . '/app/config/private-runtime.php';
 } else {
@@ -238,7 +241,7 @@ try {
         header('Cache-Control: no-store');
         header('Content-Type: text/plain; charset=UTF-8');
         http_response_code(503);
-        echo 'The Causette private configuration does not match the selected database.';
+        echo Locale::current()->text('error.database_configuration_mismatch');
         exit;
     }
     $dbVersion = Setting::get('database_version');
@@ -261,7 +264,7 @@ if ($requestPath === '/credential-upgrade') {
 if ($requestPath === '/reset-password') {
     header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 }
-if ($dbVersion !== APP_VERSION) {
+if ($dbVersion !== CAUSETTE_DATABASE_VERSION) {
     header('Cache-Control: no-store');
     $updateAvailable = UpdateController::supportsVersion($dbVersion);
     if (!UpdateController::allowsDuringMaintenance($requestPath, $_SERVER['REQUEST_METHOD'] ?? 'GET', $updateAvailable)) {
@@ -405,6 +408,7 @@ $router->post('/trash/delete', 'TrashController@delete');
 // Settings
 $router->get('/settings', 'SettingsController@index');
 $router->post('/settings/display-preferences', 'SettingsController@saveDisplayPreferences');
+$router->post('/settings/call-video', 'SettingsController@saveCallVideoPreference');
 $router->get('/apikeys', 'ApiKeyController@index');
 $router->post('/apikeys/create', 'ApiKeyController@create');
 $router->post('/apikeys/expire', 'ApiKeyController@expire');

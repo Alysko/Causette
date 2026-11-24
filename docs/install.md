@@ -37,7 +37,7 @@ Once the sign-in budget for an account runs out, Causette refuses all password c
 
 If PHP receives the proxy address in `REMOTE_ADDR`, visitors share a network budget. A hosting provider can configure [Apache `mod_remoteip`](https://httpd.apache.org/docs/2.4/mod/mod_remoteip.html) or its equivalent to supply the client address. Trust only the provider's actual proxy addresses and have the proxy overwrite the header it supplies. Once `REMOTE_ADDR` contains the client address, use HTTPS from the proxy to the backend so that PHP still sees a secure request. Check that the site and sign-in work over HTTPS through the proxy after the change.
 
-For a mounted path, the web server must route that public prefix to the dedicated `public_html/` directory while preserving the request path. Keep `storage/` private and outside every document root. Setup, sign-in and password recovery under a prefix were exercised on a local Apache test site. Use a dedicated domain or subdomain for the hosted trial while the full browser workflow under a prefix is being verified.
+For a mounted path, the web server must route that public prefix to the dedicated `public_html/` directory while preserving the request path. Keep `storage/` private and outside every document root. Local Apache tests exercise installed browser navigation at a mounted path, including when the mount is `/api` and an application API path begins with a second `/api` segment. The service worker script and scope use the same public mount. The shared-hosting profile uses a dedicated domain or subdomain.
 
 ## Install in the browser
 

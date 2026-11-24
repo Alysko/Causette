@@ -9,6 +9,7 @@ final class Locale
     private const DEFAULT_LANGUAGE = 'en';
     private const COOKIE = 'CAUSETTE_LANGUAGE';
     private static ?self $current = null;
+    private static ?int $authenticatedAccountId = null;
     private array $catalogs = [];
 
     private function __construct(private readonly string $language)
@@ -17,6 +18,7 @@ final class Locale
 
     public static function initialize(string $method, string $basePath, string $siteLanguage = ''): void
     {
+        self::$authenticatedAccountId = null;
         $requested = $method === 'GET' ? $_GET['lang'] ?? null : null;
         $cookie = $_COOKIE[self::COOKIE] ?? null;
         self::$current = self::resolve($requested, self::supported($cookie) ? $cookie : $siteLanguage, self::acceptLanguage());
@@ -36,9 +38,34 @@ final class Locale
         self::$current = self::resolve($personalLanguage, $siteLanguage, self::acceptLanguage());
     }
 
+    public static function bindAuthenticatedAccount(int $accountId): void
+    {
+        if (self::$authenticatedAccountId !== $accountId) {
+            self::$authenticatedAccountId = $accountId;
+            self::$current = null;
+        }
+    }
+
     public static function current(): self
     {
+        if (self::$current === null && self::$authenticatedAccountId !== null) {
+            // Resolve preferences only if this request needs translations.
+            try {
+                $personal = DisplayPreferences::read(self::$authenticatedAccountId);
+                $site = DisplayPreferences::read();
+                self::initializeForAccount($personal['language'], $site['language']);
+            } catch (\PDOException) {
+                // Error responses still need a language when the database is unavailable.
+                self::$current = self::resolve(acceptLanguage: self::acceptLanguage());
+            }
+        }
         return self::$current ?? self::resolve($_GET['lang'] ?? null, $_COOKIE[self::COOKIE] ?? null, self::acceptLanguage());
+    }
+
+    public static function forApiPath(string $path): self
+    {
+        // The public bot API keeps the error wording clients already receive.
+        return str_starts_with($path, '/api/bot/') ? self::resolve('en') : self::current();
     }
 
     public static function resolve(mixed $requested = null, mixed $preferred = null, string $acceptLanguage = ''): self

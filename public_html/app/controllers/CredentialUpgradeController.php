@@ -22,7 +22,7 @@ final class CredentialUpgradeController extends Controller
             http_response_code(404);
             return;
         }
-        if ($databaseVersion !== APP_VERSION && !UpdateController::supportsVersion($databaseVersion)) {
+        if ($databaseVersion !== CAUSETTE_DATABASE_VERSION && !UpdateController::supportsVersion($databaseVersion)) {
             $this->render(409, 'ui.credential_version_unavailable');
             return;
         }

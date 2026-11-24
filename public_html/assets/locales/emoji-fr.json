@@ -1,0 +1,1018 @@
+{
+  "locale": "fr",
+  "source": "Unicode CLDR 48.0.0",
+  "sourceUrl": "https://github.com/unicode-org/cldr-json/tree/4d06be52b51bb2f75688d0abe55c52a66afed790",
+  "license": "Unicode-3.0",
+  "licenseNotice": "UNICODE LICENSE V3\n\nCOPYRIGHT AND PERMISSION NOTICE\n\nCopyright © 2015-2024 Unicode, Inc.\n\nNOTICE TO USER: Carefully read the following legal agreement. BY\nDOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR\nSOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE\nTERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT\nDOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.\n\nPermission is hereby granted, free of charge, to any person obtaining a\ncopy of data files and any associated documentation (the \"Data Files\") or\nsoftware and any associated documentation (the \"Software\") to deal in the\nData Files or Software without restriction, including without limitation\nthe rights to use, copy, modify, merge, publish, distribute, and/or sell\ncopies of the Data Files or Software, and to permit persons to whom the\nData Files or Software are furnished to do so, provided that either (a)\nthis copyright and permission notice appear with all copies of the Data\nFiles or Software, or (b) this copyright and permission notice appear in\nassociated Documentation.\n\nTHE DATA FILES AND SOFTWARE ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY\nKIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\nTHIRD PARTY RIGHTS.\n\nIN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE\nBE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,\nOR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,\nWHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,\nARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA\nFILES OR SOFTWARE.\n\nExcept as contained in this notice, the name of a copyright holder shall\nnot be used in advertising or otherwise to promote the sale, use or other\ndealings in these Data Files or Software without prior written\nauthorization of the copyright holder.\n\nSPDX-License-Identifier: Unicode-3.0",
+  "annotations": {
+    "1F308": {
+      "name": "arc-en-ciel",
+      "keywords": [
+        "arc-en-ciel",
+        "bisexuelle",
+        "Gay Pride",
+        "homosexuelle",
+        "lesbienne",
+        "LGBTQIA",
+        "météo",
+        "nature",
+        "pluie",
+        "transgenre"
+      ]
+    },
+    "1F31F": {
+      "name": "étoile brillante",
+      "keywords": [
+        "éclat",
+        "étincelant",
+        "étincelle",
+        "étoile",
+        "étoile brillante",
+        "nuit",
+        "nuit étoilée",
+        "succès"
+      ]
+    },
+    "1F33B": {
+      "name": "tournesol",
+      "keywords": [
+        "champs",
+        "fleur",
+        "plante",
+        "soleil",
+        "tournesol"
+      ]
+    },
+    "1F381": {
+      "name": "cadeau",
+      "keywords": [
+        "anniversaire",
+        "cadeau",
+        "cadeau emballé",
+        "fête",
+        "Noël",
+        "nœud",
+        "surprise"
+      ]
+    },
+    "1F382": {
+      "name": "gâteau d’anniversaire",
+      "keywords": [
+        "anniversaire",
+        "bougies",
+        "dessert",
+        "fête",
+        "gâteau",
+        "gâteau d’anniversaire",
+        "goûter",
+        "joyeux anniversaire",
+        "nourriture",
+        "pâtisserie"
+      ]
+    },
+    "1F388": {
+      "name": "ballon gonflable",
+      "keywords": [
+        "anniversaire",
+        "ballon",
+        "ballon de baudruche",
+        "ballon gonflable",
+        "fête"
+      ]
+    },
+    "1F389": {
+      "name": "cotillons",
+      "keywords": [
+        "anniversaire",
+        "cotillons",
+        "fête",
+        "super"
+      ]
+    },
+    "1F3C6": {
+      "name": "trophée",
+      "keywords": [
+        "champion",
+        "championne",
+        "coupe",
+        "gagner",
+        "prix",
+        "trophée",
+        "victoire"
+      ]
+    },
+    "1F431": {
+      "name": "tête de chat",
+      "keywords": [
+        "animal",
+        "chat",
+        "chaton",
+        "miaou",
+        "minou",
+        "tête de chat"
+      ]
+    },
+    "1F436": {
+      "name": "tête de chien",
+      "keywords": [
+        "animal",
+        "animal domestique",
+        "chien",
+        "chiot",
+        "tête de chien",
+        "visage"
+      ]
+    },
+    "1F440": {
+      "name": "yeux",
+      "keywords": [
+        "chercher",
+        "corps",
+        "coup d’œil",
+        "œil",
+        "regarder",
+        "visage",
+        "voir",
+        "yeux"
+      ]
+    },
+    "1F44A": {
+      "name": "poing de face",
+      "keywords": [
+        "absolument",
+        "battre",
+        "boum",
+        "correct",
+        "coup de poing",
+        "d’accord",
+        "main",
+        "mon pote",
+        "poing",
+        "poing de face",
+        "serrer"
+      ]
+    },
+    "1F44B": {
+      "name": "signe de la main",
+      "keywords": [
+        "à bientôt",
+        "à plus tard",
+        "au revoir",
+        "bonjour",
+        "bye",
+        "coucou",
+        "hello",
+        "il y a quelqu’un ?",
+        "main",
+        "main qui salue",
+        "salut",
+        "signe",
+        "signe de la main"
+      ]
+    },
+    "1F44C": {
+      "name": "ok",
+      "keywords": [
+        "compris",
+        "d’accord",
+        "geste",
+        "main",
+        "nickel",
+        "ok",
+        "OK",
+        "parfait",
+        "super",
+        "tout va bien"
+      ]
+    },
+    "1F44D": {
+      "name": "pouce vers le haut",
+      "keywords": [
+        "bien",
+        "compris",
+        "d’accord",
+        "génial",
+        "haut",
+        "main",
+        "moi aussi",
+        "OK",
+        "oui",
+        "pouce levé",
+        "pouce vers le haut",
+        "super",
+        "top"
+      ]
+    },
+    "1F44E": {
+      "name": "pouce vers le bas",
+      "keywords": [
+        "bas",
+        "main",
+        "mauvais",
+        "non",
+        "nul",
+        "pouce",
+        "pouce baissé",
+        "pouce vers le bas"
+      ]
+    },
+    "1F44F": {
+      "name": "applaudissements",
+      "keywords": [
+        "applaudissements",
+        "bien joué",
+        "bon travail",
+        "bravo",
+        "félicitations",
+        "formidable",
+        "geste",
+        "mains",
+        "mains qui applaudissent",
+        "super"
+      ]
+    },
+    "1F480": {
+      "name": "crâne",
+      "keywords": [
+        "corps",
+        "crâne",
+        "dead",
+        "fantastique",
+        "je suis mort",
+        "mort",
+        "squelette",
+        "tête de mort",
+        "visage",
+        "yolo"
+      ]
+    },
+    "1F494": {
+      "name": "cœur brisé",
+      "keywords": [
+        "amour",
+        "cœur",
+        "cœur brisé",
+        "malheureux",
+        "sentiment",
+        "séparé",
+        "triste"
+      ]
+    },
+    "1F495": {
+      "name": "deux cœurs",
+      "keywords": [
+        "amour",
+        "anniversaire",
+        "cœurs",
+        "deux cœurs",
+        "deux cœurs roses",
+        "petits cœurs",
+        "rendez-vous",
+        "sentiment"
+      ]
+    },
+    "1F499": {
+      "name": "cœur bleu",
+      "keywords": [
+        "amour",
+        "cœur",
+        "cœur bleu",
+        "sentiment"
+      ]
+    },
+    "1F49A": {
+      "name": "cœur vert",
+      "keywords": [
+        "amour",
+        "cœur",
+        "sentiment",
+        "vert"
+      ]
+    },
+    "1F49B": {
+      "name": "cœur jaune",
+      "keywords": [
+        "amour",
+        "cœur",
+        "cœur jaune",
+        "sentiment"
+      ]
+    },
+    "1F49C": {
+      "name": "cœur violet",
+      "keywords": [
+        "amour",
+        "cœur",
+        "sentiment",
+        "violet"
+      ]
+    },
+    "1F4A9": {
+      "name": "tas de crotte",
+      "keywords": [
+        "bande dessinée",
+        "BD",
+        "caca",
+        "crotte",
+        "dessin",
+        "excrément",
+        "odeur",
+        "popo",
+        "puer",
+        "sentir mauvais",
+        "tas de crotte",
+        "visage"
+      ]
+    },
+    "1F4AA": {
+      "name": "biceps contracté",
+      "keywords": [
+        "bande dessinée",
+        "BD",
+        "biceps",
+        "bodybuilding",
+        "contracté",
+        "corps",
+        "culturisme",
+        "entraînement",
+        "exercice",
+        "force",
+        "haltérophilie",
+        "muscle",
+        "muscles",
+        "soulever"
+      ]
+    },
+    "1F4AF": {
+      "name": "cent points",
+      "keywords": [
+        "100",
+        "cent",
+        "cent points",
+        "score"
+      ]
+    },
+    "1F525": {
+      "name": "feu",
+      "keywords": [
+        "allumer",
+        "brûler",
+        "chaud",
+        "feu",
+        "flamme",
+        "fournaise",
+        "incendie"
+      ]
+    },
+    "1F590": {
+      "name": "main levée doigts écartés",
+      "keywords": [
+        "doigts",
+        "main",
+        "main levée doigts écartés",
+        "paume",
+        "stop"
+      ]
+    },
+    "1F600": {
+      "name": "visage rieur",
+      "keywords": [
+        "content",
+        "dents",
+        "émoticône",
+        "grand sourire",
+        "heureux",
+        "joyeux",
+        "rire",
+        "sourire",
+        "super",
+        "visage",
+        "visage rieur",
+        "visage très souriant"
+      ]
+    },
+    "1F601": {
+      "name": "visage souriant aux yeux rieurs",
+      "keywords": [
+        "content",
+        "dents",
+        "émoticône",
+        "grand sourire",
+        "heureux",
+        "sourire",
+        "sourire de toutes ses dents",
+        "super",
+        "visage",
+        "visage souriant aux yeux rieurs",
+        "visage souriant avec yeux souriants",
+        "yeux souriants"
+      ]
+    },
+    "1F602": {
+      "name": "visage riant aux larmes",
+      "keywords": [
+        "content",
+        "émoticône",
+        "heureux",
+        "joie",
+        "larmes",
+        "lol",
+        "mdr",
+        "pleurer de joie",
+        "pleurer de rire",
+        "rire aux larmes",
+        "sourire",
+        "visage riant aux larmes"
+      ]
+    },
+    "1F605": {
+      "name": "visage souriant avec une goutte de sueur",
+      "keywords": [
+        "émoticône",
+        "excité",
+        "froid",
+        "goutte",
+        "sourire",
+        "sourire nerveux",
+        "stressé",
+        "sueur",
+        "sueurs froides",
+        "visage souriant avec une goutte de sueur"
+      ]
+    },
+    "1F609": {
+      "name": "visage faisant un clin d’œil",
+      "keywords": [
+        "blague",
+        "clin d’œil",
+        "émoticône",
+        "flirter",
+        "plaisanter",
+        "sexy",
+        "visage",
+        "visage faisant un clin d’œil"
+      ]
+    },
+    "1F60D": {
+      "name": "visage souriant avec yeux en forme de cœur",
+      "keywords": [
+        "amour",
+        "amoureux",
+        "cœur",
+        "émoticône",
+        "œil",
+        "romantique",
+        "sourire",
+        "visage",
+        "visage souriant avec yeux en forme de cœur",
+        "yeux"
+      ]
+    },
+    "1F60E": {
+      "name": "visage avec lunettes de soleil",
+      "keywords": [
+        "cool",
+        "lunettes de soleil",
+        "posé",
+        "tranquille",
+        "visage avec lunettes de soleil"
+      ]
+    },
+    "1F60F": {
+      "name": "visage avec un sourire malin",
+      "keywords": [
+        "arrogant",
+        "charmeur",
+        "émoticône",
+        "malin",
+        "ricaner",
+        "rusé",
+        "séducteur",
+        "sourire",
+        "sourire suffisant",
+        "suspicieux",
+        "visage avec un sourire malin",
+        "visage avec un sourire suffisant"
+      ]
+    },
+    "1F610": {
+      "name": "visage neutre",
+      "keywords": [
+        "émoticône",
+        "gêné",
+        "neutre",
+        "ni chaud ni froid",
+        "pas drôle",
+        "peu importe",
+        "rester de marbre",
+        "sans commentaires",
+        "sans rire",
+        "visage neutre",
+        "visage sans expression"
+      ]
+    },
+    "1F612": {
+      "name": "visage blasé",
+      "keywords": [
+        "bizarre",
+        "blasé",
+        "émoticône",
+        "énervé",
+        "fâché",
+        "jaloux",
+        "pas content",
+        "peu importe",
+        "visage",
+        "visage qui s’ennuie"
+      ]
+    },
+    "1F615": {
+      "name": "visage confus",
+      "keywords": [
+        "confus",
+        "désolé",
+        "émoticône",
+        "ennuyé",
+        "je ne sais pas",
+        "triste",
+        "visage"
+      ]
+    },
+    "1F618": {
+      "name": "visage envoyant un bisou",
+      "keywords": [
+        "amour",
+        "baiser",
+        "bise",
+        "bisou et cœur",
+        "bonjour",
+        "bonne nuit",
+        "cœur",
+        "embrasser",
+        "émoticône",
+        "je t’aime",
+        "visage envoyant un bisou",
+        "visage qui fait une bise avec un cœur"
+      ]
+    },
+    "1F621": {
+      "name": "visage boudeur",
+      "keywords": [
+        "colère",
+        "émoticône",
+        "énervé",
+        "exaspéré",
+        "fâché",
+        "furieux",
+        "mécontent",
+        "rageur",
+        "rouge",
+        "rouge de colère",
+        "sourcils froncés",
+        "visage boudeur"
+      ]
+    },
+    "1F622": {
+      "name": "visage qui pleure",
+      "keywords": [
+        "émoticône",
+        "horrible",
+        "larme",
+        "larmes",
+        "malheureux",
+        "pleurer",
+        "triste",
+        "visage qui pleure"
+      ]
+    },
+    "1F624": {
+      "name": "visage avec fumée sortant des narines",
+      "keywords": [
+        "colère",
+        "émoticône",
+        "énervé",
+        "fâché",
+        "mécontent",
+        "triomphe",
+        "victoire",
+        "visage",
+        "visage avec fumée sortant des narines"
+      ]
+    },
+    "1F629": {
+      "name": "visage épuisé",
+      "keywords": [
+        "échec",
+        "émoticône",
+        "épuisé",
+        "faim",
+        "fatigué",
+        "mécontent",
+        "non",
+        "pleurer",
+        "sommeil",
+        "triste",
+        "visage",
+        "visage las"
+      ]
+    },
+    "1F62D": {
+      "name": "visage qui pleure à chaudes larmes",
+      "keywords": [
+        "émoticône",
+        "larme",
+        "larmes",
+        "malheureux",
+        "pleurer",
+        "pleurs",
+        "sangloter",
+        "triste",
+        "visage",
+        "visage qui pleure à chaudes larmes"
+      ]
+    },
+    "1F62E": {
+      "name": "visage avec bouche ouverte",
+      "keywords": [
+        "bouche bée",
+        "bouche ouverte",
+        "choqué",
+        "émoticône",
+        "épaté",
+        "incroyable",
+        "omd",
+        "oubli",
+        "surpris",
+        "visage avec bouche ouverte",
+        "visage avec la bouche ouverte",
+        "visage étonné"
+      ]
+    },
+    "1F631": {
+      "name": "visage qui hurle de peur",
+      "keywords": [
+        "choqué",
+        "cri",
+        "effrayé",
+        "Munch",
+        "omd",
+        "peur",
+        "surpris",
+        "terreur",
+        "visage",
+        "visage qui hurle de peur"
+      ]
+    },
+    "1F636": {
+      "name": "visage sans bouche",
+      "keywords": [
+        "émoticône",
+        "muet",
+        "ne rien dire",
+        "neutre",
+        "sans commentaires",
+        "sans expression",
+        "sans voix",
+        "se taire",
+        "secret",
+        "silence",
+        "sourdine",
+        "visage sans bouche"
+      ]
+    },
+    "1F642": {
+      "name": "visage avec un léger sourire",
+      "keywords": [
+        "content",
+        "émoticône",
+        "heureux",
+        "léger sourire",
+        "sourire",
+        "visage avec un léger sourire",
+        "visage souriant"
+      ]
+    },
+    "1F644": {
+      "name": "visage roulant des yeux",
+      "keywords": [
+        "agacé",
+        "émoticône",
+        "excédé",
+        "incrédulité",
+        "roulement",
+        "visage qui lève les yeux au ciel",
+        "visage qui roule des yeux",
+        "visage roulant des yeux",
+        "yeux"
+      ]
+    },
+    "1F64C": {
+      "name": "mains levées",
+      "keywords": [
+        "air",
+        "geste",
+        "hourra",
+        "mains",
+        "mains en l’air",
+        "mains levées",
+        "youpi"
+      ]
+    },
+    "1F64F": {
+      "name": "mains en prière",
+      "keywords": [
+        "demander",
+        "félicitations",
+        "mains",
+        "mains en prière",
+        "mains l’une contre l’autre",
+        "merci",
+        "prier",
+        "prière",
+        "s’il te plaît",
+        "s’il vous plaît",
+        "salut",
+        "se taper dans la main",
+        "tope là"
+      ]
+    },
+    "1F680": {
+      "name": "fusée",
+      "keywords": [
+        "décollage",
+        "espace",
+        "fusée",
+        "moyen de transport",
+        "voyage"
+      ]
+    },
+    "1F90D": {
+      "name": "cœur blanc",
+      "keywords": [
+        "blanc",
+        "cœur"
+      ]
+    },
+    "1F914": {
+      "name": "visage en pleine réflexion",
+      "keywords": [
+        "émoticône",
+        "hum",
+        "méditer",
+        "penser",
+        "réfléchir",
+        "réflexion",
+        "visage",
+        "visage en pleine réflexion"
+      ]
+    },
+    "1F917": {
+      "name": "visage qui fait un câlin",
+      "keywords": [
+        "câlin",
+        "émoticône",
+        "gentil",
+        "mains",
+        "visage",
+        "visage qui fait un câlin"
+      ]
+    },
+    "1F918": {
+      "name": "cornes avec les doigts",
+      "keywords": [
+        "cornes",
+        "cornes avec les doigts",
+        "cornes du diable",
+        "doigts",
+        "main",
+        "rock",
+        "rock’n roll",
+        "yeah"
+      ]
+    },
+    "1F91D": {
+      "name": "poignée de main",
+      "keywords": [
+        "d’accord",
+        "main",
+        "mains",
+        "marché conclu",
+        "poignée",
+        "poignée de main",
+        "présentation",
+        "rencontre",
+        "serrer la main"
+      ]
+    },
+    "1F91E": {
+      "name": "doigts croisés",
+      "keywords": [
+        "bonne chance",
+        "chance",
+        "croisés",
+        "doigts",
+        "main"
+      ]
+    },
+    "1F923": {
+      "name": "se rouler par terre de rire",
+      "keywords": [
+        "content",
+        "drôle",
+        "émoticône",
+        "hilare",
+        "joyeux",
+        "larmes",
+        "lol",
+        "mdr",
+        "pleurer de rire",
+        "rire",
+        "rire aux larmes",
+        "se rouler par terre",
+        "se rouler par terre de rire",
+        "se tordre de rire",
+        "visage",
+        "visage qui rit aux larmes"
+      ]
+    },
+    "1F929": {
+      "name": "visage avec des étoiles à la place des yeux",
+      "keywords": [
+        "étoile",
+        "étoiles dans les yeux",
+        "grand sourire",
+        "heureux",
+        "pressé",
+        "surexcité",
+        "tête avec étoiles",
+        "visage",
+        "visage avec des étoiles à la place des yeux",
+        "wow",
+        "yeux"
+      ]
+    },
+    "1F92F": {
+      "name": "tête qui explose",
+      "keywords": [
+        "choc",
+        "choqué",
+        "surpris",
+        "surprise",
+        "tête choquée",
+        "tête qui explose"
+      ]
+    },
+    "1F970": {
+      "name": "visage souriant avec cœurs",
+      "keywords": [
+        "adorer",
+        "aimer",
+        "amour",
+        "béguin",
+        "coeur",
+        "cœurs",
+        "j’adore",
+        "Je t’aime",
+        "smiley avec 3 coeurs",
+        "sourire",
+        "visage souriant avec cœurs"
+      ]
+    },
+    "1F973": {
+      "name": "visage festif",
+      "keywords": [
+        "anniversaire",
+        "célébration",
+        "chapeau pointu",
+        "émoticône",
+        "fête",
+        "heureux",
+        "hourra",
+        "joyeux anniversaire",
+        "sifflet",
+        "visage de fête",
+        "visage festif",
+        "youpi"
+      ]
+    },
+    "1F97A": {
+      "name": "visage implorant",
+      "keywords": [
+        "embarrassé",
+        "excuse",
+        "gros yeux",
+        "pardon",
+        "pitié",
+        "s’il te plaît",
+        "supplication",
+        "supplie",
+        "visage implorant",
+        "yeux de chiens battus"
+      ]
+    },
+    "1F9E0": {
+      "name": "cerveau",
+      "keywords": [
+        "cerveau",
+        "intelligent",
+        "intelligente"
+      ]
+    },
+    "1FA77": {
+      "name": "cœur rose",
+      "keywords": [
+        "143",
+        "adorable",
+        "aimer",
+        "amour",
+        "cœur",
+        "émotion",
+        "jtm",
+        "mignon",
+        "rose"
+      ]
+    },
+    "1FAE0": {
+      "name": "visage qui fond",
+      "keywords": [
+        "disparaître",
+        "fondre",
+        "gêne",
+        "liquéfié",
+        "liquide",
+        "sarcasme",
+        "se dissoudre",
+        "visage qui fond"
+      ]
+    },
+    "1FAE1": {
+      "name": "visage qui fait un salut militaire",
+      "keywords": [
+        "armée",
+        "bonne chance",
+        "compris",
+        "OK",
+        "oui",
+        "respect",
+        "salut",
+        "visage qui fait un salut militaire"
+      ]
+    },
+    "2615": {
+      "name": "boisson chaude",
+      "keywords": [
+        "boisson",
+        "boisson chaude",
+        "café",
+        "caféine",
+        "matin",
+        "thé"
+      ]
+    },
+    "2665": {
+      "name": "cœur cartes",
+      "keywords": [
+        "cartes à jouer",
+        "cœur",
+        "cœur cartes",
+        "couleur",
+        "jeu",
+        "rouge"
+      ]
+    },
+    "270C": {
+      "name": "V de la victoire",
+      "keywords": [
+        "ciseaux",
+        "doigts",
+        "main",
+        "paix et amour",
+        "peace and love",
+        "V de la victoire",
+        "victoire"
+      ]
+    },
+    "2728": {
+      "name": "étincelles",
+      "keywords": [
+        "*",
+        "étincelles",
+        "étoile",
+        "étoiles",
+        "magie",
+        "nuit",
+        "nuit étoilée",
+        "scintiller"
+      ]
+    },
+    "2764": {
+      "name": "cœur rouge",
+      "keywords": [
+        "amour",
+        "cœur",
+        "cœur rouge",
+        "sentiment"
+      ]
+    }
+  }
+}

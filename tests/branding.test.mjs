@@ -43,3 +43,10 @@ test('mobile navigation, the desktop sidebar, and sign-in use the Causette mark'
     const html = readFileSync(new URL('app/views/layouts/main.php', webRoot), 'utf8');
     assert.equal(html.match(/<img src="[^\n]*\/assets\/img\/logo\.png[^\n]*alt=""/g)?.length, 3);
 });
+
+test('desktop and mobile branding expose the running application version on hover', () => {
+    const html = readFileSync(new URL('app/views/layouts/main.php', webRoot), 'utf8');
+    assert.match(html, /\$brandTitle\s*=\s*htmlspecialchars\('Causette '\s*\.\s*APP_VERSION,/);
+    assert.match(html, /id="app-brand"[^\n]*title="<\?= \$brandTitle \?>"/);
+    assert.match(html, /id="sidebar-toggle-mobile"[^\n]*title="<\?= \$brandTitle \?>"/);
+});

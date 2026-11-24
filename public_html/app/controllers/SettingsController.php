@@ -2,12 +2,37 @@
 require_once __DIR__ . '/../modules/2fa/totp/TOTP.php';
 require_once __DIR__ . '/../../vendor/phpqrcode/qrcode.php';
 require_once __DIR__ . '/../core/AuthChallenge.php';
+require_once __DIR__ . '/../core/MailDelivery.php';
+require_once __DIR__ . '/../core/CallVideoPreferences.php';
 
+use Causette\Calls\CallVideoPreferences;
 use Causette\Localization\DisplayPreferences;
+use Causette\Mail\MailDelivery;
 use Causette\Security\AuthChallenge;
 use Causette\Security\BrowserSession;
 
 class SettingsController extends Controller {
+    public function saveCallVideoPreference(): void {
+        Auth::requireAuth();
+        Auth::csrfValidate(403);
+        $user = Auth::user();
+        $media = $_POST['media'] ?? null;
+        $quality = $_POST['quality'] ?? null;
+        $isAjax = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        if (!CallVideoPreferences::save((int)$user->id, $media, $quality)) {
+            if ($isAjax) {
+                $this->json(['error' => 'invalid_video_quality'], 400);
+            }
+            $this->flash('error', 'invalid_video_quality');
+            $this->redirect('/settings');
+        }
+        if ($isAjax) {
+            $this->json(['success' => true, 'quality' => $quality]);
+        }
+        $this->flash('success', 'call_video_quality_saved');
+        $this->redirect('/settings');
+    }
+
     public function saveDisplayPreferences(): void {
         Auth::requireAuth();
         $user = Auth::user();
@@ -187,6 +212,7 @@ class SettingsController extends Controller {
                 'pendingReportCount' => $pendingReportCount,
                 'announcement_message' => (string)(Setting::get('announcement_message') ?? ''),
                 'announcement_style' => (string)(Setting::get('announcement_style') ?? 'orange'),
+                'mail_transport' => MailDelivery::transport(),
                 'mail_host' => Setting::get('mail_host') ?? '',
                 'mail_port' => Setting::get('mail_port') ?? '587',
                 'mail_user' => Setting::get('mail_user') ?? '',
@@ -198,6 +224,8 @@ class SettingsController extends Controller {
                 'email_verification_required' => (string)(Setting::get('email_verification_required') ?? '1') === '1',
                 'attachments_accepted_file_types' => (string)(Setting::get('attachments_accepted_file_types') ?? 'png,jpg'),
                 'attachments_maximum_file_size_mb' => (int)(Setting::get('attachments_maximum_file_size_mb') ?? 10),
+                'attachments_expiry_enabled' => Setting::get('attachments_expiry_enabled') !== '0',
+                'attachments_expiry_hours' => Attachment::expiryHoursSetting(),
                 'error_display' => (string)(Setting::get('error_display') ?? '0') === '1',
                 'attachment_logging' => (string)(Setting::get('attachment_logging') ?? '0') === '1',
                 'new_user_notification' => (string)(Setting::get('new_user_notification') ?? '0') === '1',

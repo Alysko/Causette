@@ -11,6 +11,10 @@ $pdo = new PDO('mysql:host=localhost;dbname=causette_recovery_fixture;charset=ut
 $pdo->exec("UPDATE users SET user_number = '1111222233334444' WHERE id = 1");
 $create = $pdo->prepare("INSERT INTO users (id, username, email, password, user_number, email_verified_at) VALUES (2, 'fixturepeer', 'peer@example.test', ?, '0111222233334444', NOW())");
 $create->execute([password_hash('fixture-only-peer-password', PASSWORD_DEFAULT)]);
+$createSessionUser = $pdo->prepare('INSERT INTO users (username, email, password, user_number, email_verified_at) VALUES (?, ?, ?, ?, NOW())');
+$sessionPassword = password_hash('fixture-only-sessions-password', PASSWORD_DEFAULT);
+$createSessionUser->execute(['fixturesessions', 'sessions@example.test', $sessionPassword, '2111222233334444']);
+$createSessionUser->execute(['fixturesessionspeer', 'sessions-peer@example.test', $sessionPassword, '3111222233334444']);
 $pdo->exec("INSERT INTO chats (id, chat_number, type, title, non_member_visibility, created_by) VALUES (8, '1010202030304040', 'group', 'Private fixture', 'none', 1), (9, '1010202030304041', 'group', 'Public fixture', 'public', 1)");
 $pdo->exec("INSERT INTO chat_members (chat_id, user_id, role) VALUES (8, 1, 'moderator'), (9, 1, 'moderator'), (8, 2, 'member'), (9, 2, 'member')");
 $message = $pdo->prepare("INSERT INTO messages (id, chat_id, user_id, content, created_at) VALUES (50, 8, 1, ?, '2025-11-19 15:05:00')");
@@ -34,6 +38,8 @@ PHP
 test -S /run/mysqld/mysqld.sock
 
 mode=${1:-source}
+prefix=${2:-/community}
+case "$prefix" in /community|/api) ;; *) exit 2 ;; esac
 if [ "$mode" = seed ]; then
     seed_fixture
     exit 0
@@ -56,7 +62,7 @@ test ! -e /case/storage/causette.json
 printf '%s\n' 'pdo_mysql.default_socket=/run/mysqld/mysqld.sock' >/usr/local/etc/php/conf.d/fixture-socket.ini
 mkdir -p /case
 case "$mode" in
-    package)
+    package|package-prefix)
         unzip -q /artifact.zip -d /case
         test -f /case/MANIFEST.json
         test -f /case/public_html/.htaccess
@@ -76,6 +82,9 @@ case "$mode" in
     }
 }
 JSON
+        if [ "$mode" = package-prefix ]; then
+            sed -i "s|https://fixture.example.test:9443\"|https://fixture.example.test:9443$prefix\"|" /case/storage/setup.json
+        fi
         chmod 600 /case/storage/setup.json
         printf '%s\n' 'fixture-private-storage-canary' >/case/storage/f01-fixture.txt
         ;;
@@ -104,13 +113,21 @@ esac
 
 chmod 700 /case/storage
 chown -R www-data:www-data /case/storage
+mount_rules=
+if [ "$mode" = package-prefix ]; then
+    mount_rules="Alias $prefix/ /case/public_html/
+    RewriteEngine On
+    RewriteCond %{THE_REQUEST} !\s$prefix(?:[/\s?])
+    RewriteRule ^ - [F]"
+fi
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=fixture.example.test' -addext 'subjectAltName=DNS:fixture.example.test' -keyout /tmp/fixture.key -out /tmp/fixture.crt >/dev/null 2>&1
 a2enmod rewrite ssl >/dev/null
-cat >/etc/apache2/sites-enabled/001-test.conf <<'APACHE'
+cat >/etc/apache2/sites-enabled/001-test.conf <<APACHE
 Listen 9443
 <VirtualHost *:9443>
     ServerName fixture.example.test
     DocumentRoot /case/public_html
+    $mount_rules
     SSLEngine on
     SSLCertificateFile /tmp/fixture.crt
     SSLCertificateKeyFile /tmp/fixture.key

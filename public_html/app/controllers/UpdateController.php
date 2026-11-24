@@ -14,7 +14,7 @@ class UpdateController extends Controller
     public static function supportsVersion(string $version): bool
     {
         return defined('CAUSETTE_UPDATE_SOURCES')
-            && version_compare($version, APP_VERSION, '<')
+            && version_compare($version, CAUSETTE_DATABASE_VERSION, '<')
             && in_array($version, CAUSETTE_UPDATE_SOURCES, true);
     }
 
@@ -42,6 +42,11 @@ class UpdateController extends Controller
             'appVersion' => APP_VERSION,
             'recentAuthentication' => $this->hasRecentPasswordAuthentication(),
             'reactionSteps' => $this->reactionUpgradeProgress(),
+            'apiLimitsUpgrade' => version_compare(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::API_LIMIT_TARGET, '>=')
+                && version_compare($version, ReactionSchemaUpgrade::API_LIMIT_TARGET, '<'),
+            'groupNotificationsUpgrade' => version_compare(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::GROUP_NOTIFICATIONS_TARGET, '>=')
+                && version_compare($version, ReactionSchemaUpgrade::GROUP_NOTIFICATIONS_TARGET, '<'),
+            'openMojiUpgrade' => CAUSETTE_DATABASE_VERSION === ReactionSchemaUpgrade::OPENMOJI_TARGET,
         ]);
     }
 
@@ -60,7 +65,7 @@ class UpdateController extends Controller
         try {
             $advanced = $this->advanceVersion($version);
         } catch (Throwable) {
-            error_log('[Causette] The database update could not complete. Check the reaction table constraints and ALTER permissions.');
+            error_log('[Causette] The database update could not complete. Check the schema, CREATE and ALTER permissions.');
             ErrorHandler::abort(503);
         }
         if (!$advanced) {
@@ -73,14 +78,14 @@ class UpdateController extends Controller
 
     protected function advanceVersion(string $version): bool
     {
-        return APP_VERSION === ReactionSchemaUpgrade::TARGET
-            ? ReactionSchemaUpgrade::apply($version)
-            : Setting::advanceDatabaseVersion($version, APP_VERSION);
+        return in_array(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::TARGETS, true)
+            ? ReactionSchemaUpgrade::apply($version, CAUSETTE_DATABASE_VERSION)
+            : Setting::advanceDatabaseVersion($version, CAUSETTE_DATABASE_VERSION);
     }
 
     protected function reactionUpgradeProgress(): ?int
     {
-        return APP_VERSION === ReactionSchemaUpgrade::TARGET
+        return in_array(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::TARGETS, true)
             ? (int)Setting::get(ReactionSchemaUpgrade::PROGRESS_KEY)
             : null;
     }
@@ -123,7 +128,7 @@ class UpdateController extends Controller
     private function requireSupportedVersion(): string
     {
         $version = Setting::get('database_version');
-        if ($version === APP_VERSION) {
+        if ($version === CAUSETTE_DATABASE_VERSION) {
             ErrorHandler::abort(404);
         }
         if ($version === null || !self::supportsVersion($version)) {
