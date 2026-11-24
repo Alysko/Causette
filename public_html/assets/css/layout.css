@@ -29,9 +29,17 @@ body.app-font-large { font-size: 1.125rem; }
 :root:is([data-theme="dark"], :not([data-theme])) input:is([type="checkbox"], [type="radio"]) {
     accent-color: rgb(var(--color-emerald-400));
 }
-.message-send-preview { margin: .75rem 0 .5rem 3.25rem; }
-.message-send-preview-content { color: rgb(var(--color-zinc-200, 228 228 231)); white-space: pre-wrap; }
-.message-send-preview-files, .message-send-preview-status { color: rgb(var(--color-zinc-500, 113 113 122)); font-size: .875rem; }
+.message-send-preview .message-body-actions { position: relative; opacity: 1; }
+.message-send-preview .message-body-actions > button { visibility: hidden; }
+.message-send-preview-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    color: rgb(var(--color-zinc-500, 113 113 122));
+    white-space: nowrap;
+}
 #message-form:has(> #message-send-error:not(.hidden)) { flex-wrap: wrap; }
 #message-send-error.message-send-timeout {
     background: rgb(var(--color-amber-950, 69 26 3));

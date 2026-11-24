@@ -117,9 +117,14 @@ test('sending previews the draft immediately, delays the status, and keeps the d
     context.uiText = (key) => key;
     context.uiActionError = (_error, fallback) => fallback;
     context.isCurrentChatView = () => true;
-    context.document.createElement = (name) => Object.assign(node(name), {
-        remove() { this.removed = true; },
-    });
+    context.createOutgoingMessagePreview = (_timeline, content) => {
+        const preview = node('div');
+        const status = node('span');
+        preview.append(content, status);
+        preview.querySelector = (selector) => selector === '.message-send-preview-status' ? status : null;
+        preview.remove = () => { preview.removed = true; };
+        return preview;
+    };
     const notices = [];
     let finish;
     let requests = 0;

@@ -5,6 +5,7 @@ let openReactionPickerMessageId = 0;
 const renderedMessageTimelines = new WeakMap();
 const outgoingMessagePreviews = new WeakMap();
 const submittingMessageForms = new WeakSet();
+const quotedMessageDrafts = new WeakMap();
 const expandedSystemEventGroupsByChat = new Map();
 let pendingPinReplaceMessageId = 0;
 let pinnedBannerLastScrollTop = 0;
@@ -734,6 +735,7 @@ function setQuoteDraft(quoteData) {
 
     const messageId = Number(quoteData?.messageId || 0);
     if (!Number.isFinite(messageId) || messageId <= 0) {
+        quotedMessageDrafts.delete(hiddenInput);
         hiddenInput.value = '';
         preview.classList.add('hidden');
         previewUsername.textContent = '';
@@ -746,6 +748,7 @@ function setQuoteDraft(quoteData) {
     const content = String(quoteData?.content || '');
     const mentionMap = normalizeMentionMap(quoteData?.mentionMap || {});
 
+    quotedMessageDrafts.set(hiddenInput, { quoted_username: username, quoted_content: content, quote_mention_map: mentionMap });
     hiddenInput.value = String(messageId);
     previewUsername.textContent = username;
     previewContent.replaceChildren(createMessageContent(getQuotedPreviewText(content, mentionMap), mentionMap));
@@ -4085,6 +4088,25 @@ function bindRenameChatModal() {
 
 const backgroundMessagePolls = new WeakSet();
 
+function createOutgoingMessagePreview(timeline, content, attachments, quote) {
+    const previous = timeline.lastElementChild;
+    const userId = Number(currentUserId);
+    const isNewGroup = Number(previous?.dataset.messageUserId) !== userId || !!previous?.querySelector('[data-bot-badge]');
+    const earlierTimelineTimestamp = previous?.querySelector('[data-timeline-time]')?.dataset.utc || '';
+    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const markup = renderChatMessage({
+        ...quote,
+        user_id: userId,
+        user_number: window.CURRENT_USER_NUMBER,
+        username: localUsername || window.CURRENT_USERNAME,
+        avatar_url: window.CURRENT_USER_AVATAR_URL,
+        created_at: createdAt,
+        content,
+        attachments,
+    }, { isNewGroup, earlierTimelineTimestamp, pending: true });
+    return document.createRange().createContextualFragment(markup).firstElementChild;
+}
+
 async function submitChatMessage(form) {
     const chat = currentChat;
     const input = document.getElementById('message-input');
@@ -4113,21 +4135,8 @@ async function submitChatMessage(form) {
         errorBox.classList.remove('message-send-timeout');
     }
 
-    const preview = document.createElement('div');
-    preview.className = 'message-send-preview';
-    const body = document.createElement('div');
-    body.className = 'message-text message-send-preview-content';
-    body.textContent = content;
-    if (attachments.length) {
-        const files = document.createElement('div');
-        files.className = 'message-send-preview-files';
-        files.textContent = attachments.map(item => item.original_name || uiText('attachment_label')).join(', ');
-        body.append(files);
-    }
-    const status = document.createElement('div');
-    status.className = 'message-send-preview-status';
-    status.setAttribute('role', 'status');
-    preview.append(body, status);
+    const preview = createOutgoingMessagePreview(timeline, content, attachments, quotedMessageDrafts.get(quoteInput));
+    const status = preview.querySelector('.message-send-preview-status');
     const entry = { preview, messageId: null };
     const previews = outgoingMessagePreviews.get(timeline) ?? new Set();
     previews.add(entry);
@@ -4192,7 +4201,7 @@ async function submitChatMessage(form) {
     pendingAttachments = pendingAttachments.filter(item => !ids.has(item.id));
     renderPendingAttachmentList();
     if (String(quoteInput?.value || '') === quoteId) clearQuoteDraft();
-    void pollMessages({ scrollMode: 'bottom' }).catch(() => {});
+    void pollMessages().catch(() => {});
     void loadSidebarChats().catch(() => {});
 }
 
@@ -4792,6 +4801,82 @@ function renderTimelineTimestamp(timestamp, previous) {
     return `<span class="text-zinc-500" data-timeline-time data-utc="${utc}" data-previous-utc="${escapeHtml(previous)}" title="${utc}"${label === '' ? ' hidden' : ''}>${escapeHtml(label)}</span>`;
 }
 
+function renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStatus = false, pending = false }) {
+    const messageId = Number(msg.id || 0);
+    const messageUserId = Number(msg.user_id);
+    const botName = bannerText(msg.bot_name);
+    const fullTimestamp = String(msg.created_at || '');
+    const profileUrl = botName ? '' : getProfileUrlForUser(msg);
+    const username = escapeHtml(bannerText(msg.username));
+    const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
+    const authorMarkup = botName
+        ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
+        : profileUrl
+            ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
+            : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
+    const avatarMarkup = botName
+        ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
+        : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '';
+    const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
+    const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
+    const mentionMap = normalizeMentionMap(msg?.mention_map || {});
+    const mentionMapJson = escapeHtml(JSON.stringify(mentionMap));
+    const reactionBadgesMarkup = renderReactionBadgesMarkup(messageId, Array.isArray(msg?.reactions) ? msg.reactions : []);
+    const editedAt = String(msg?.edited_at || '');
+    const isQuoted = !!(msg?.is_quoted);
+    const hasAttachments = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
+    const attachmentMarkup = renderMessageAttachments(msg.attachments, canDeleteAttachmentFromMessage(msg));
+    const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
+    const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
+    const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
+    const pinLabel = escapeHtml(chatLabel('pin'));
+
+    let editButton = '';
+    let deleteButton = '';
+    if (canEditMessage(msg, isQuoted)) {
+        editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="${escapeHtml(uiText('edit'))}" aria-label="${escapeHtml(uiText('edit'))}" data-edit-message-id="${messageId}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
+    }
+    if (canDeleteMessage(msg)) {
+        deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="${escapeHtml(uiText('delete'))}" aria-label="${escapeHtml(uiText('delete'))}" data-delete-message-id="${messageId}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
+    }
+
+    const interactionControlsMarkup = isGroupReadOnlyViewer && !pending
+        ? ''
+        : `<div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+                            ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${messageId}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
+                            ${editButton}
+                            ${deleteButton}
+                            ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${messageId}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
+                            <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${messageId}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
+                            ${pending ? '<span class="message-send-preview-status" role="status"></span>' : ''}
+                        </div>`;
+
+    return `
+        <div class="flex gap-3 ${isNewGroup ? 'mt-4' : 'mt-1'} group${pending ? ' message-send-preview' : ''}"${pending ? '' : ` data-message-id="${messageId}"`} data-message-user-id="${messageUserId}" data-message-created-at="${escapeHtml(fullTimestamp)}" data-message-is-quoted="${isQuoted ? '1' : '0'}" data-message-has-attachments="${hasAttachments ? '1' : '0'}" data-message-edited-at="${escapeHtml(editedAt)}">
+            <div class="w-10 shrink-0">
+                ${avatarMarkup}
+            </div>
+            <div class="min-w-0 flex-1">
+                ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
+                ${renderQuotedMessageBlock(msg)}
+                <div class="message-body">
+                    <div class="message-text text-zinc-200 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
+                    ${interactionControlsMarkup}
+                </div>
+                ${pending && attachmentMarkup ? `<div inert>${attachmentMarkup}</div>` : attachmentMarkup}
+                <div class="relative">
+                    ${pending ? '' : renderReactionPickerMarkup(messageId)}
+                    <div class="message-meta text-xs flex items-center gap-3">
+                        ${renderTimelineTimestamp(fullTimestamp, earlierTimelineTimestamp)}
+                        ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
+                        ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderMessages(messages, options = {}) {
     const box = document.getElementById('messages');
     if (!box) return;
@@ -4948,74 +5033,7 @@ function renderMessages(messages, options = {}) {
         const fullTimestamp = String(msg.created_at || '');
         const earlierTimelineTimestamp = previousTimelineTimestamp;
         previousTimelineTimestamp = fullTimestamp;
-        const profileUrl = botName ? '' : getProfileUrlForUser(msg);
-        const username = escapeHtml(bannerText(msg.username));
-        const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
-        const authorMarkup = botName
-            ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
-            : profileUrl
-                ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
-                : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
-        const avatarMarkup = botName
-            ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
-            : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '';
-        const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
-        const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
-        const mentionMap = normalizeMentionMap(msg?.mention_map || {});
-        const mentionMapJson = escapeHtml(JSON.stringify(mentionMap));
-        const reactionBadgesMarkup = renderReactionBadgesMarkup(msg.id, Array.isArray(msg?.reactions) ? msg.reactions : []);
-        const editedAt = String(msg?.edited_at || '');
-        const isQuoted = !!(msg?.is_quoted);
-        const hasAttachments = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
-        const canDeleteAttachments = canDeleteAttachmentFromMessage(msg);
-        const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
-        const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
-        const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
-        const pinLabel = escapeHtml(chatLabel('pin'));
-
-        let editButton = '';
-        let deleteButton = '';
-        if (canEditMessage(msg, isQuoted)) {
-            editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="${escapeHtml(uiText('edit'))}" aria-label="${escapeHtml(uiText('edit'))}" data-edit-message-id="${Number(msg.id)}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
-        }
-        if (canDeleteMessage(msg)) {
-            deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="${escapeHtml(uiText('delete'))}" aria-label="${escapeHtml(uiText('delete'))}" data-delete-message-id="${Number(msg.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
-        }
-
-        const interactionControlsMarkup = isGroupReadOnlyViewer
-            ? ''
-            : `<div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
-                                ${editButton}
-                                ${deleteButton}
-                                ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
-                            </div>`;
-
-        chunks.push(`
-            <div class="flex gap-3 ${isNewGroup ? 'mt-4' : 'mt-1'} group" data-message-id="${Number(msg.id)}" data-message-user-id="${messageUserId}" data-message-created-at="${escapeHtml(fullTimestamp)}" data-message-is-quoted="${isQuoted ? '1' : '0'}" data-message-has-attachments="${hasAttachments ? '1' : '0'}" data-message-edited-at="${escapeHtml(editedAt)}">
-                <div class="w-10 shrink-0">
-                    ${avatarMarkup}
-                </div>
-                <div class="min-w-0 flex-1">
-                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
-                    ${renderQuotedMessageBlock(msg)}
-                    <div class="message-body">
-                        <div class="message-text text-zinc-200 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
-                        ${interactionControlsMarkup}
-                    </div>
-                    ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
-                    <div class="relative">
-                        ${renderReactionPickerMarkup(msg.id)}
-                        <div class="message-meta text-xs flex items-center gap-3">
-                            ${renderTimelineTimestamp(fullTimestamp, earlierTimelineTimestamp)}
-                            ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
-                            ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `);
+        chunks.push(renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStatus }));
 
         previousUserId = botName ? null : messageUserId;
         previousWasSystemEvent = false;
