@@ -20,12 +20,25 @@ body.app-font-large { font-size: 1.125rem; }
     min-width: 1.5rem;
     min-height: 1.5rem;
 }
+.message-body { display: flex; align-items: flex-start; gap: .5rem; }
+.message-body-actions { flex: none; }
+.message-text { min-width: 0; font-size: 1rem; font-weight: 300; line-height: 1.5rem; overflow-wrap: anywhere; }
+.message-body:has(.js-edit-input) > .message-text { flex: 1; }
+.message-body:has(.js-edit-input) > .message-body-actions { display: none; }
+.message-meta:has(> :not([hidden])) { margin-top: .125rem; }
 :root:is([data-theme="dark"], :not([data-theme])) input:is([type="checkbox"], [type="radio"]) {
     accent-color: rgb(var(--color-emerald-400));
 }
 .message-send-preview { margin: .75rem 0 .5rem 3.25rem; }
-.message-send-preview-content { color: rgb(var(--color-zinc-200, 228 228 231)); font-size: 1.0625rem; line-height: 1.5rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-send-preview-content { color: rgb(var(--color-zinc-200, 228 228 231)); white-space: pre-wrap; }
 .message-send-preview-files, .message-send-preview-status { color: rgb(var(--color-zinc-500, 113 113 122)); font-size: .875rem; }
+#message-form:has(> #message-send-error:not(.hidden)) { flex-wrap: wrap; }
+#message-send-error.message-send-timeout {
+    background: rgb(var(--color-amber-950, 69 26 3));
+    color: rgb(var(--color-amber-200, 253 230 138));
+    padding: .5rem .75rem;
+    border-radius: .75rem;
+}
 .language-links { display: flex; gap: 0.75rem; }
 .language-links a:hover, .language-links [aria-current="true"] { text-decoration: underline; }
 #app-top-progress {

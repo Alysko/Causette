@@ -765,7 +765,7 @@ function normalizeChatType(type) {
     return value === 'group' ? 'group' : 'personal';
 }
 
-async function postForm(route, data) {
+async function postForm(route, data, { timeoutMs } = {}) {
     if (versionUpdateDetected) return { success: false };
 
     const formData = new URLSearchParams();
@@ -778,9 +778,13 @@ async function postForm(route, data) {
             'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
         },
-        body: formData.toString()
+        body: formData.toString(),
+        signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     });
 
+    if (timeoutMs && (res.status === 408 || res.status === 504)) {
+        throw new DOMException('The request timed out.', 'TimeoutError');
+    }
     const text = await res.text();
     try {
         return JSON.parse(text);

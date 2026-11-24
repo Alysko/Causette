@@ -4110,12 +4110,13 @@ async function submitChatMessage(form) {
     if (errorBox) {
         errorBox.textContent = '';
         errorBox.classList.add('hidden');
+        errorBox.classList.remove('message-send-timeout');
     }
 
     const preview = document.createElement('div');
     preview.className = 'message-send-preview';
     const body = document.createElement('div');
-    body.className = 'message-send-preview-content';
+    body.className = 'message-text message-send-preview-content';
     body.textContent = content;
     if (attachments.length) {
         const files = document.createElement('div');
@@ -4126,7 +4127,6 @@ async function submitChatMessage(form) {
     const status = document.createElement('div');
     status.className = 'message-send-preview-status';
     status.setAttribute('role', 'status');
-    status.textContent = uiText('message_sending');
     preview.append(body, status);
     const entry = { preview, messageId: null };
     const previews = outgoingMessagePreviews.get(timeline) ?? new Set();
@@ -4140,15 +4140,20 @@ async function submitChatMessage(form) {
     input.readOnly = true;
     const quoteId = String(quoteInput?.value || '');
     const ids = new Set(attachments.map(item => item.id));
+    const statusTimer = setTimeout(() => {
+        if (isCurrentChatView(chat, form)) status.textContent = uiText('message_sending');
+    }, 1000);
     let result;
+    let timedOut = false;
     try {
         result = await postForm('/api/messages', {
             csrf_token: getCsrfToken(), chat_id: String(chat.id), content,
             quoted_message_id: quoteId, attachment_ids: [...ids].join(','),
-        });
-    } catch {
-        result = null;
+        }, { timeoutMs: 15000 });
+    } catch (error) {
+        timedOut = error?.name === 'TimeoutError';
     } finally {
+        clearTimeout(statusTimer);
         input.readOnly = wasReadOnly;
         submittingMessageForms.delete(form);
     }
@@ -4157,7 +4162,11 @@ async function submitChatMessage(form) {
     if (result?.success !== true || Object.hasOwn(result, 'raw')) {
         previews.delete(entry);
         preview.remove();
-        if (errorBox && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result?.error)) {
+        if (timedOut && errorBox) {
+            errorBox.classList.add('message-send-timeout');
+            errorBox.classList.remove('hidden');
+            errorBox.textContent = uiText('message_send_timeout');
+        } else if (errorBox && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result?.error)) {
             errorBox.textContent = uiText(result.error);
             errorBox.classList.remove('hidden');
         } else {
@@ -4949,7 +4958,7 @@ function renderMessages(messages, options = {}) {
                 : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
         const avatarMarkup = botName
             ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
-            : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>';
+            : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '';
         const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
         const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
         const mentionMap = normalizeMentionMap(msg?.mention_map || {});
@@ -4975,7 +4984,7 @@ function renderMessages(messages, options = {}) {
 
         const interactionControlsMarkup = isGroupReadOnlyViewer
             ? ''
-            : `<div class="message-actions flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+            : `<div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
                                 ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
                                 ${editButton}
                                 ${deleteButton}
@@ -4991,14 +5000,16 @@ function renderMessages(messages, options = {}) {
                 <div class="min-w-0 flex-1">
                     ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
                     ${renderQuotedMessageBlock(msg)}
-                    <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
+                    <div class="message-body">
+                        <div class="message-text text-zinc-200 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
+                        ${interactionControlsMarkup}
+                    </div>
                     ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
-                    <div class="relative mt-0.5">
+                    <div class="relative">
                         ${renderReactionPickerMarkup(msg.id)}
-                        <div class="text-xs flex items-center gap-3">
+                        <div class="message-meta text-xs flex items-center gap-3">
                             ${renderTimelineTimestamp(fullTimestamp, earlierTimelineTimestamp)}
                             ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
-                            ${interactionControlsMarkup}
                             ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
                         </div>
                     </div>
