@@ -83,6 +83,28 @@ function fixture(i18n = {}) {
     return { context, element };
 }
 
+test('renaming a group and removing a pin update the view without duplicate success toasts', async () => {
+    const { context, element } = fixture();
+    element('rename-chat-input').value = 'Nouveau groupe';
+    const updates = [];
+    const notices = [];
+    context.getCsrfToken = () => 'fixture';
+    context.uiText = (key) => key;
+    context.uiActionError = (_error, fallback) => fallback;
+    context.showToast = (text, type) => notices.push([text, type]);
+    context.reloadCurrentView = async () => updates.push('title');
+    context.renderPinnedMessageBanner = (pin) => updates.push(pin);
+    context.postForm = async () => ({ success: true });
+    await context.renameCurrentChat();
+    await context.unpinCurrentChatMessage();
+    assert.deepEqual(updates, ['title', null]);
+    assert.deepEqual(notices, []);
+
+    context.postForm = async () => ({ success: false });
+    await context.renameCurrentChat();
+    assert.deepEqual(notices, [['unable_to_rename_chat', 'error']]);
+});
+
 test('pinned messages use text nodes and preserve supported rich content', () => {
     const { context, element } = fixture();
     context.renderPinnedMessageBanner({

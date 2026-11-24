@@ -1134,7 +1134,6 @@ async function createCurrentGroupPoll(form) {
     chatBannerRevision++;
     chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast(chatLabel('poll_created'), 'success');
     return true;
 }
 
@@ -1181,7 +1180,6 @@ async function expireActivePoll(pollId) {
     chatBannerRevision++;
     chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast(chatLabel('poll_expired'), 'success');
 }
 
 function bindActivePollBannerActions() {
@@ -1383,7 +1381,6 @@ async function unpinCurrentChatMessage() {
     chatBannerRevision++;
     chat.pinned_message = null;
     renderPinnedMessageBanner(null);
-    showToast(chatLabel('pin_removed'), 'success');
 }
 
 function bindPinnedMessageBannerActions() {
@@ -1539,7 +1536,6 @@ async function pinMessageInCurrentChat(messageId, forceReplace = false) {
         chatBannerRevision++;
         chat.pinned_message = pinnedMessage;
         renderPinnedMessageBanner(pinnedMessage);
-        showToast(chatLabel(result.replaced ? 'pin_replaced' : 'pinned_success'), 'success');
         return;
     }
 
@@ -2765,7 +2761,6 @@ function bindSidebarCustomRenameModal() {
         if (submit.disabled) return;
 
         const submitted = String(input.value || '').trim();
-        const isReset = submitted === '';
 
         submit.disabled = true;
         submit.textContent = uiText('saving');
@@ -2777,7 +2772,6 @@ function bindSidebarCustomRenameModal() {
                 renderSidebarList();
             }
             closeModal();
-            showToast(isReset ? uiText('category_reset') : uiText('category_renamed'), 'success');
         } catch {
             showToast(uiText('unable_to_rename_category'), 'error');
         } finally {
@@ -3982,8 +3976,9 @@ function bindDeleteGroupModal() {
 }
 
 async function renameCurrentChat() {
-    if (!currentChat) return;
-    if (normalizeChatType(currentChat.type) !== 'group') {
+    const chat = currentChat;
+    if (!chat) return;
+    if (normalizeChatType(chat.type) !== 'group') {
         showToast(uiText('only_group_chats_can_be_renamed'), 'error');
         return;
     }
@@ -3996,12 +3991,12 @@ async function renameCurrentChat() {
 
     const result = await postForm('/api/chats/rename', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         title: safeTitle
     });
+    if (currentChat !== chat) return;
 
     if (result.success) {
-        showToast(result.reset ? uiText('chat_name_reset') : uiText('chat_renamed'), 'success');
         await reloadCurrentView({ source: 'rename-chat' });
         return;
     }
