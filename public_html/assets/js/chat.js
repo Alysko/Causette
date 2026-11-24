@@ -3,6 +3,8 @@
 let messageInteractionHandlersBound = false;
 let openReactionPickerMessageId = 0;
 const renderedMessageTimelines = new WeakMap();
+const outgoingMessagePreviews = new WeakMap();
+const submittingMessageForms = new WeakSet();
 const expandedSystemEventGroupsByChat = new Map();
 let pendingPinReplaceMessageId = 0;
 let pinnedBannerLastScrollTop = 0;
@@ -4083,6 +4085,108 @@ function bindRenameChatModal() {
 
 const backgroundMessagePolls = new WeakSet();
 
+async function submitChatMessage(form) {
+    const chat = currentChat;
+    const input = document.getElementById('message-input');
+    const timeline = document.getElementById('messages');
+    const errorBox = document.getElementById('message-send-error');
+    const quoteInput = document.getElementById('quoted-message-id');
+    const draft = input?.value ?? '';
+    const content = draft.trim();
+    const attachments = [...pendingAttachments];
+    if (!input || !chat || !timeline || submittingMessageForms.has(form) || (!content && !attachments.length)) return;
+    if (!isCurrentChatView(chat, form)) {
+        showToast(uiText('chat_context_changed'), 'error');
+        return;
+    }
+    if (content.length > 16384) {
+        showToast(uiText('message_exceeds_the_maximum_length_of_16_384'), 'error');
+        return;
+    }
+    if (chat.can_send_messages === false) {
+        showToast(getPersonalChatMessageRestrictionToast(chat.message_restriction_reason), 'error');
+        return;
+    }
+    if (errorBox) {
+        errorBox.textContent = '';
+        errorBox.classList.add('hidden');
+    }
+
+    const preview = document.createElement('div');
+    preview.className = 'message-send-preview';
+    const body = document.createElement('div');
+    body.className = 'message-send-preview-content';
+    body.textContent = content;
+    if (attachments.length) {
+        const files = document.createElement('div');
+        files.className = 'message-send-preview-files';
+        files.textContent = attachments.map(item => item.original_name || uiText('attachment_label')).join(', ');
+        body.append(files);
+    }
+    const status = document.createElement('div');
+    status.className = 'message-send-preview-status';
+    status.setAttribute('role', 'status');
+    status.textContent = uiText('message_sending');
+    preview.append(body, status);
+    const entry = { preview, messageId: null };
+    const previews = outgoingMessagePreviews.get(timeline) ?? new Set();
+    previews.add(entry);
+    outgoingMessagePreviews.set(timeline, previews);
+    timeline.append(preview);
+    timeline.scrollTop = timeline.scrollHeight;
+
+    submittingMessageForms.add(form);
+    const wasReadOnly = input.readOnly;
+    input.readOnly = true;
+    const quoteId = String(quoteInput?.value || '');
+    const ids = new Set(attachments.map(item => item.id));
+    let result;
+    try {
+        result = await postForm('/api/messages', {
+            csrf_token: getCsrfToken(), chat_id: String(chat.id), content,
+            quoted_message_id: quoteId, attachment_ids: [...ids].join(','),
+        });
+    } catch {
+        result = null;
+    } finally {
+        input.readOnly = wasReadOnly;
+        submittingMessageForms.delete(form);
+    }
+    if (!isCurrentChatView(chat, form)) return;
+
+    if (result?.success !== true || Object.hasOwn(result, 'raw')) {
+        previews.delete(entry);
+        preview.remove();
+        if (errorBox && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result?.error)) {
+            errorBox.textContent = uiText(result.error);
+            errorBox.classList.remove('hidden');
+        } else {
+            showToast(uiActionError(result?.error, 'failed_to_send_message'), 'error');
+        }
+        return;
+    }
+
+    const messageId = Number(result.message_id);
+    if (Number.isSafeInteger(messageId) && messageId > 0) {
+        entry.messageId = messageId;
+        status.remove();
+    } else {
+        previews.delete(entry);
+        preview.remove();
+    }
+    if (input.value === draft) {
+        input.value = '';
+        typingActive = false;
+        clearTypingStopTimer();
+        void sendTypingStatus(false).catch(() => {});
+    }
+    pendingAttachments = pendingAttachments.filter(item => !ids.has(item.id));
+    renderPendingAttachmentList();
+    if (String(quoteInput?.value || '') === quoteId) clearQuoteDraft();
+    void pollMessages({ scrollMode: 'bottom' }).catch(() => {});
+    void loadSidebarChats().catch(() => {});
+}
+
 async function pollMessages(options = {}) {
     const chat = currentChat;
     const messagesList = document.getElementById('messages');
@@ -4132,7 +4236,8 @@ async function pollMessages(options = {}) {
         const signature = revision ?? buildMessagesSignature(messages);
         const changed = options.forceRender || latestRendered?.chat !== chat || latestRendered.signature !== signature;
         // A revision can be reused only once the matching timeline is visible.
-        if (changed && !messagesList.querySelector('.js-edit-input')) {
+        const awaitingSend = [...(outgoingMessagePreviews.get(messagesList) || [])].some(entry => entry.messageId === null);
+        if (changed && !awaitingSend && !messagesList.querySelector('.js-edit-input')) {
             renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
             renderedMessageTimelines.set(messagesList, { chat, signature, revision });
         }
@@ -4898,6 +5003,14 @@ function renderMessages(messages, options = {}) {
 
     const messagesMarkup = chunks.join('');
     const fragment = document.createRange().createContextualFragment(messagesMarkup);
+    const previews = outgoingMessagePreviews.get(box);
+    if (previews?.size) {
+        const displayedIds = new Set(messages.filter(message => !message.is_system_event).map(message => Number(message.id)));
+        for (const entry of previews) {
+            if (displayedIds.has(entry.messageId)) previews.delete(entry);
+            else fragment.append(entry.preview);
+        }
+    }
     box.replaceChildren(fragment);
     if (typeof window.refreshUtcTimestamps === 'function') {
         window.refreshUtcTimestamps(box);

@@ -1206,29 +1206,31 @@ class ChatController extends Controller {
             return (int)Database::getInstance()->lastInsertId();
         };
         if ($attachmentIds === []) {
-            $insert();
+            $messageId = $insert();
         } else {
-            $failure = AttachmentBudget::locked(function () use ($chatId, $userId, $attachmentIds, $insert): ?array {
+            $submitted = AttachmentBudget::locked(function () use ($chatId, $userId, $attachmentIds, $insert): array {
                 if (($denial = $this->attachmentUploadDenial($chatId, (int)$userId)) !== null) {
                     return $denial;
                 }
                 $connection = Database::getInstance();
                 $connection->beginTransaction();
                 try {
-                    if (!Attachment::markPendingSubmitted($chatId, (int)$userId, $insert(), $attachmentIds)) {
+                    $messageId = $insert();
+                    if (!Attachment::markPendingSubmitted($chatId, (int)$userId, $messageId, $attachmentIds)) {
                         return ['error' => 'attachment_unavailable', 'status' => 409];
                     }
                     $connection->commit();
-                    return null;
+                    return ['message_id' => $messageId];
                 } finally {
                     if ($connection->inTransaction()) {
                         $connection->rollBack();
                     }
                 }
             }, ['error' => 'attachment_upload_busy', 'status' => 503]);
-            if ($failure !== null) {
-                $this->json(['error' => $failure['error']], $failure['status']);
+            if (!isset($submitted['message_id'])) {
+                $this->json(['error' => $submitted['error']], $submitted['status']);
             }
+            $messageId = $submitted['message_id'];
         }
 
         // Notify other members
@@ -1249,7 +1251,7 @@ class ChatController extends Controller {
             Notification::create($m->user_id, 'message', $locale->text($notificationTitleKey, $titleParameters), $preview, $chatPath);
         }
 
-        $this->json(['success' => true]);
+        $this->json(['success' => true, 'message_id' => $messageId]);
     }
 
     public function uploadAttachment() {

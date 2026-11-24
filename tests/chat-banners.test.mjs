@@ -105,6 +105,36 @@ test('renaming a group and removing a pin update the view without duplicate succ
     assert.deepEqual(notices, [['unable_to_rename_chat', 'error']]);
 });
 
+test('sending previews the draft before the server responds and retains it on failure', async () => {
+    const { context, element } = fixture();
+    const timeline = element('messages');
+    const input = element('message-input');
+    input.value = '   Hello & goodbye   ';
+    context.pendingAttachments = [];
+    context.getCsrfToken = () => 'fixture';
+    context.uiText = (key) => key;
+    context.uiActionError = (_error, fallback) => fallback;
+    context.isCurrentChatView = () => true;
+    context.document.createElement = (name) => Object.assign(node(name), {
+        remove() { this.removed = true; },
+    });
+    const notices = [];
+    let finish;
+    let requests = 0;
+    context.showToast = (text, type) => notices.push([text, type]);
+    context.postForm = async () => { requests++; return new Promise(resolve => { finish = resolve; }); };
+    const sending = context.submitChatMessage(element('message-form'));
+    assert.equal(timeline.children[0].textContent, 'Hello & goodbyemessage_sending');
+    assert.equal(input.readOnly, true);
+    await context.submitChatMessage(element('message-form'));
+    assert.equal(requests, 1);
+    finish({ success: true, raw: '<title>Sign in</title>' });
+    await sending;
+    assert.equal(timeline.children[0].removed, true);
+    assert.equal(input.value, '   Hello & goodbye   ');
+    assert.deepEqual(notices, [['failed_to_send_message', 'error']]);
+});
+
 test('pinned messages use text nodes and preserve supported rich content', () => {
     const { context, element } = fixture();
     context.renderPinnedMessageBanner({

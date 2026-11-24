@@ -1292,63 +1292,9 @@ function init() {
 
     const messageForm = document.getElementById('message-form');
     if (messageForm) {
-        const attachmentError = document.getElementById('message-send-error');
-        messageForm.addEventListener('submit', async (event) => {
+        messageForm.addEventListener('submit', (event) => {
             event.preventDefault();
-            const input = document.getElementById('message-input');
-            const quotedMessageInput = document.getElementById('quoted-message-id');
-            const content = input?.value?.trim() ?? '';
-            const chat = currentChat;
-            if (!input || !chat || (!content && pendingAttachments.length === 0)) return;
-            if (!isCurrentChatView(chat, messageForm)) {
-                if (attachmentError) {
-                    attachmentError.textContent = uiText('chat_context_changed');
-                    attachmentError.classList.remove('hidden');
-                }
-                return;
-            }
-            if (content.length > 16384) {
-                showToast(uiText('message_exceeds_the_maximum_length_of_16_384'), 'error');
-                return;
-            }
-            if (normalizeChatType(currentChat.type) === 'personal' && currentChat.can_send_messages === false) {
-                showToast(getPersonalChatMessageRestrictionToast(currentChat.message_restriction_reason), 'error');
-                return;
-            }
-            if (normalizeChatType(currentChat.type) === 'group' && currentChat.can_send_messages === false) {
-                showToast(getPersonalChatMessageRestrictionToast(currentChat.message_restriction_reason), 'error');
-                return;
-            }
-
-            if (attachmentError) {
-                attachmentError.textContent = '';
-                attachmentError.classList.add('hidden');
-            }
-            const result = await postForm('/api/messages', {
-                csrf_token: getCsrfToken(),
-                chat_id: String(chat.id),
-                content,
-                quoted_message_id: String(quotedMessageInput?.value || ''),
-                attachment_ids: pendingAttachments.map((attachment) => attachment.id).join(',')
-            });
-            if (!isCurrentChatView(chat, messageForm)) return;
-
-            if (result.success) {
-                input.value = '';
-                pendingAttachments = [];
-                renderPendingAttachmentList();
-                clearQuoteDraft();
-                typingActive = false;
-                clearTypingStopTimer();
-                sendTypingStatus(false).catch(() => {});
-                await pollMessages({ scrollMode: 'bottom' });
-                await loadSidebarChats();
-            } else if (attachmentError && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result.error)) {
-                attachmentError.textContent = uiText(result.error);
-                attachmentError.classList.remove('hidden');
-            } else {
-                showToast(uiActionError(result.error, 'failed_to_send_message'), 'error');
-            }
+            void submitChatMessage(messageForm);
         });
     }
 

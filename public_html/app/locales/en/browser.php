@@ -205,6 +205,7 @@ return [
     'failed_to_edit_message' => 'Failed to edit message',
     'failed_to_save_settings' => 'Failed to save settings',
     'failed_to_send_message' => 'Failed to send message',
+    'message_sending' => 'Sending…',
     'failed_to_submit_report' => 'Failed to submit report',
     'favorite' => 'Favorite',
     'friend_removed' => 'Friend removed',

@@ -205,6 +205,7 @@ return [
     'failed_to_edit_message' => 'La modification du message a échoué',
     'failed_to_save_settings' => 'L’enregistrement des paramètres a échoué',
     'failed_to_send_message' => 'L’envoi du message a échoué',
+    'message_sending' => 'Envoi…',
     'failed_to_submit_report' => 'L’envoi du signalement a échoué',
     'favorite' => 'Favori',
     'friend_removed' => 'Ami retiré',
