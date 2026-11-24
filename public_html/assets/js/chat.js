@@ -12,6 +12,8 @@ let messageFormLastScrollTop = 0;
 let messageRefreshSequence = 0;
 let lastAppliedMessageRefresh = 0;
 let chatBannerRevision = 0;
+let emojiAnnotations = null;
+let emojiAnnotationsRequest = null;
 
 const PINNED_BANNER_MOBILE_BREAKPOINT_QUERY = '(max-width: 767.98px)';
 const MESSAGE_FORM_MOBILE_BREAKPOINT_QUERY = '(max-width: 639.98px)';
@@ -163,6 +165,8 @@ function bindMessageFormScrollBehavior(messagesBox) {
 }
 
 const MESSAGE_REACTION_LABEL_BY_CODE = new Map(Object.entries(window.CAUSETTE_REACTION_LABELS || {}));
+let legacyEmojiFiles;
+let emojiSegmenter;
 
 function normalizeEmojiKey(value) {
     return String(value || '').replace(/\.svg$/i, '').trim().toUpperCase();
@@ -188,17 +192,41 @@ function emojiKeyToChar(key) {
 function splitEmojiKeywordList(value) {
     return String(value || '')
         .split(',')
-        .map((keyword) => keyword.trim().toLowerCase())
+        .map(normalizeEmojiSearchText)
         .filter(Boolean);
 }
 
+function normalizeEmojiSearchText(value) {
+    return String(value || '').trim().toLowerCase().normalize('NFD')
+        .replace(/\p{M}/gu, '').replaceAll('œ', 'oe').replaceAll('æ', 'ae');
+}
+
 function tokenizeEmojiText(value) {
-    return String(value || '')
-        .toLowerCase()
+    return normalizeEmojiSearchText(value)
         .replace(/[\-_]/g, ' ')
         .split(/[^\p{L}\p{N}]+/u)
         .map((token) => token.trim())
         .filter(Boolean);
+}
+
+function loadEmojiAnnotations() {
+    const url = window.CAUSETTE_EMOJI_ANNOTATIONS_URL;
+    if (!url || emojiAnnotations) return Promise.resolve(false);
+    return emojiAnnotationsRequest ??= (async () => {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) return false;
+            const { annotations } = await response.json();
+            if (!annotations || typeof annotations !== 'object' || Array.isArray(annotations)) return false;
+            emojiAnnotations = annotations;
+            openMojiCatalog = [];
+            return true;
+        } catch {
+            return false;
+        } finally {
+            emojiAnnotationsRequest = null;
+        }
+    })();
 }
 
 function normalizeOpenMojiMetadataByKey() {
@@ -256,45 +284,63 @@ function getEmojiKeywordsForKey(key) {
 function initializeOpenMojiCatalog() {
     if (openMojiCatalog.length > 0) return;
 
-    const files = Array.isArray(window.OPENMOJI_FILES) ? window.OPENMOJI_FILES : [];
     const metadataByKey = normalizeOpenMojiMetadataByKey();
+    const codes = Object.values(window.CAUSETTE_REACTION_GROUPS || {}).flat();
 
-    openMojiByKey = new Map();
-    openMojiCatalog = files.map((fileName) => {
-        const key = normalizeEmojiKey(fileName);
+    openMojiByKey.clear();
+    openMojiCatalog = codes.flatMap((key) => {
+        const url = get3dEmojiUrl(key);
         const character = emojiKeyToChar(key);
-        const keywords = getEmojiKeywordsForKey(key);
+        if (!url || !character) return [];
         const metadata = metadataByKey[key] || metadataByKey[key.replace(/(?:-)?FE0F/gi, '')] || {};
-        const annotation = String(metadata.annotation || '').toLowerCase();
+        const localized = emojiAnnotations?.[key];
+        const originalAnnotation = String(metadata.annotation || '');
+        const annotation = (window.CAUSETTE_EMOJI_ANNOTATIONS_URL ? localized?.name : originalAnnotation)
+            || MESSAGE_REACTION_LABEL_BY_CODE.get(key) || '';
+        const keywords = getEmojiKeywordsForKey(key);
+        if (Array.isArray(localized?.keywords)) keywords.push(...localized.keywords.map(normalizeEmojiSearchText));
         const item = {
             key,
             keyLower: key.toLowerCase(),
-            fileName,
             character,
-            url: `/emojis/${fileName}`,
+            url,
             keywords,
             annotation,
-            searchText: [key.toLowerCase(), character, annotation, ...keywords].join(' ')
+            searchText: [key.toLowerCase(), character, normalizeEmojiSearchText(originalAnnotation),
+                normalizeEmojiSearchText(annotation), ...keywords].join(' ')
         };
 
         openMojiByKey.set(key, item);
         return item;
-    }).filter((item) => item.key);
+    });
+}
+
+function get3dEmojiUrl(code) {
+    const artwork = window.CAUSETTE_EMOJI_ARTWORK?.[code];
+    return typeof artwork === 'string' && /^[0-9A-F]{4,6}(?:-[0-9A-F]{4,6})*$/.test(artwork)
+        ? appPath(`/assets/img/emoji-3d/${artwork}.webp`) : '';
+}
+
+function getLegacyEmojiUrl(code) {
+    const file = `${code}.svg`;
+    legacyEmojiFiles ??= new Set(window.OPENMOJI_FILES || []);
+    return legacyEmojiFiles.has(file) ? appPath(`/emojis/${file}`) : '';
 }
 
 function getGraphemeClusters(text) {
     const value = String(text ?? '');
 
     if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
-        const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-        return Array.from(segmenter.segment(value), (segment) => segment.segment);
+        emojiSegmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+        return Array.from(emojiSegmenter.segment(value), (segment) => segment.segment);
     }
 
     return Array.from(value);
 }
 
 function buildEmojiCandidateKeys(grapheme) {
-    const codePoints = Array.from(grapheme).map((char) => char.codePointAt(0).toString(16).toUpperCase());
+    if (grapheme.length === 1 && grapheme.charCodeAt(0) < 0x80) return [];
+    const codePoints = Array.from(grapheme).map((char) => char.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'));
     if (codePoints.length === 0) return [];
 
     const exact = codePoints.join('-');
@@ -310,13 +356,9 @@ function buildEmojiCandidateKeys(grapheme) {
 }
 
 function findOpenMojiForGrapheme(grapheme) {
-    initializeOpenMojiCatalog();
-    if (openMojiByKey.size === 0) return null;
-
-    const candidates = buildEmojiCandidateKeys(grapheme);
-    for (const candidate of candidates) {
-        const match = openMojiByKey.get(candidate);
-        if (match) return match;
+    for (const candidate of buildEmojiCandidateKeys(grapheme)) {
+        const url = get3dEmojiUrl(candidate) || getLegacyEmojiUrl(candidate);
+        if (url) return { url };
     }
 
     return null;
@@ -324,12 +366,14 @@ function findOpenMojiForGrapheme(grapheme) {
 
 function appendTextWithEmoji(container, content) {
     if (!content) return;
+    if (!/[^\x00-\x7F]|\n/.test(content)) {
+        container.append(content);
+        return;
+    }
     let text = '';
     for (const grapheme of getGraphemeClusters(content)) {
         const emoji = findOpenMojiForGrapheme(grapheme);
-        const isLocalEmoji = emoji && /^\/emojis\/[0-9a-f]+(?:-[0-9a-f]+)*\.svg$/i.test(emoji.url);
-
-        if (grapheme !== '\n' && !isLocalEmoji) {
+        if (grapheme !== '\n' && !emoji) {
             text += grapheme;
             continue;
         }
@@ -449,15 +493,14 @@ function renderMessageContent(content, mentionMap = null) {
 }
 
 function normalizeReactionCode(value) {
-    const normalized = String(value || '').toUpperCase().replace(/[^0-9A-F]/g, '');
-    if (!normalized) return '';
-    return MESSAGE_REACTION_LABEL_BY_CODE.has(normalized) ? normalized : '';
+    const normalized = String(value || '').trim().toUpperCase();
+    if (!/^[0-9A-F]{2,6}(?:-[0-9A-F]{2,6})*$/.test(normalized) || normalized.length > 128) return '';
+    return MESSAGE_REACTION_LABEL_BY_CODE.has(normalized) || getLegacyEmojiUrl(normalized) ? normalized : '';
 }
 
 function getReactionImageUrlByCode(reactionCode) {
     const code = normalizeReactionCode(reactionCode);
-    const base = window.CAUSETTE_REACTION_ASSET_BASE;
-    return code && base ? base + code.toLowerCase() + '.png' : '';
+    return code ? get3dEmojiUrl(code) || getLegacyEmojiUrl(code) : '';
 }
 
 function reactionCodeToChar(reactionCode) {
@@ -472,7 +515,7 @@ function renderReactionEmojiMarkup(reactionCode, sizeClass = 'w-4 h-4') {
 
     const charValue = reactionCodeToChar(code);
     const imageUrl = getReactionImageUrlByCode(code);
-    const fallbackLabel = MESSAGE_REACTION_LABEL_BY_CODE.get(code) || 'Reaction';
+    const fallbackLabel = MESSAGE_REACTION_LABEL_BY_CODE.get(code) || uiText('reaction_label');
 
     if (imageUrl) {
         return `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(charValue || fallbackLabel)}" class="${escapeHtml(sizeClass)}" loading="lazy" decoding="async">`;
@@ -536,8 +579,8 @@ function renderReactionBadgesMarkup(messageId, reactions) {
             if (reactionCount <= 0) return '';
 
             const users = Array.isArray(reaction?.users) ? reaction.users.map((user) => String(user || '').trim()).filter(Boolean) : [];
-            const reactionLabel = MESSAGE_REACTION_LABEL_BY_CODE.get(reactionCode) || 'Reaction';
-            const tooltip = `${reactionLabel}: ${users.length ? users.join(', ') : 'No users'}`;
+            const reactionLabel = MESSAGE_REACTION_LABEL_BY_CODE.get(reactionCode) || uiText('reaction_label');
+            const tooltip = `${reactionLabel}: ${users.length ? users.join(', ') : uiText('reaction_no_users')}`;
             const reactedByCurrentUser = reaction?.reacted_by_current_user === true || Number(reaction?.reacted_by_current_user || 0) === 1;
             const badgeClass = reactedByCurrentUser
                 ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
@@ -574,54 +617,83 @@ function showReactionPalette(picker, targetId, kind) {
         const grid = document.createElement('div');
         grid.className = 'reaction-palette__grid';
 
-        for (const [code, label] of MESSAGE_REACTION_LABEL_BY_CODE) {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'reaction-palette__option';
-            if (kind === 'post') {
-                button.classList.add('js-profile-post-reaction-option');
-                button.dataset.postId = String(targetId);
-            } else {
-                button.classList.add('js-reaction-option');
-                button.dataset.reactionMessageId = String(targetId);
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.maxLength = 80;
+        search.className = 'w-full bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-sm';
+        search.placeholder = uiText('reaction_search');
+        search.setAttribute('aria-label', search.placeholder);
+        let selectedCategory = 'all';
+        const draw = () => {
+            initializeOpenMojiCatalog();
+            const query = search.value.trim();
+            const category = window.CAUSETTE_REACTION_GROUPS?.[selectedCategory] || [];
+            const choices = query || selectedCategory === 'all'
+                ? findEmojiTypeaheadMatches(query).map(item => item.key)
+                : category.filter(code => openMojiByKey.has(code));
+            grid.replaceChildren();
+            if (choices.length === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'col-span-full py-4 text-center text-xs text-zinc-400';
+                empty.textContent = uiText('no_emoji_found');
+                grid.appendChild(empty);
             }
-            button.dataset.reactionCode = code;
-            button.title = label;
-            button.setAttribute('aria-label', label);
+            for (const code of choices) {
+                const label = openMojiByKey.get(code)?.annotation || MESSAGE_REACTION_LABEL_BY_CODE.get(code)
+                    || uiText('emoji_catalog_fallback', { code });
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'reaction-palette__option';
+                if (kind === 'post') {
+                    button.classList.add('js-profile-post-reaction-option');
+                    button.dataset.postId = String(targetId);
+                } else {
+                    button.classList.add('js-reaction-option');
+                    button.dataset.reactionMessageId = String(targetId);
+                }
+                button.dataset.reactionCode = code;
+                button.title = label;
+                button.setAttribute('aria-label', label);
 
-            const imageUrl = getReactionImageUrlByCode(code);
-            if (imageUrl) {
-                const image = document.createElement('img');
-                image.src = imageUrl;
-                image.alt = '';
-                image.loading = 'lazy';
-                image.decoding = 'async';
-                button.appendChild(image);
-            } else {
-                button.textContent = reactionCodeToChar(code);
+                const imageUrl = getReactionImageUrlByCode(code);
+                if (imageUrl) {
+                    const image = document.createElement('img');
+                    image.src = imageUrl;
+                    image.alt = '';
+                    image.loading = 'lazy';
+                    image.decoding = 'async';
+                    button.appendChild(image);
+                } else {
+                    button.textContent = reactionCodeToChar(code);
+                }
+                grid.appendChild(button);
             }
-            grid.appendChild(button);
-        }
-        const categories = { all: [...MESSAGE_REACTION_LABEL_BY_CODE.keys()], ...window.CAUSETTE_REACTION_GROUPS };
-        for (const [category, codes] of Object.entries(categories)) {
+            grid.scrollTop = 0;
+        };
+        const categories = ['all', ...Object.keys(window.CAUSETTE_REACTION_GROUPS || {})];
+        for (const category of categories) {
             const filter = document.createElement('button');
             filter.type = 'button';
             filter.className = 'reaction-palette__filter';
             filter.textContent = uiText('reaction_group_' + category);
             filter.setAttribute('aria-pressed', String(category === 'all'));
             filter.addEventListener('click', () => {
+                selectedCategory = category;
+                search.value = '';
                 for (const other of filters.children) {
                     other.setAttribute('aria-pressed', String(filter === other));
                 }
-                const allowed = new Set(codes);
-                for (const option of grid.children) {
-                    option.hidden = !allowed.has(option.dataset.reactionCode);
-                }
-                grid.scrollTop = 0;
+                draw();
             });
             filters.appendChild(filter);
         }
-        palette.append(filters, grid);
+        search.addEventListener('input', draw);
+        search.addEventListener('keydown', event => {
+            if (event.key === 'Enter') event.preventDefault();
+        });
+        draw();
+        void loadEmojiAnnotations().then(loaded => { if (loaded && grid.isConnected) draw(); });
+        palette.append(search, filters, grid);
         picker.appendChild(palette);
     }
     picker.classList.remove('hidden');
@@ -668,7 +740,8 @@ function setQuoteDraft(quoteData) {
         return;
     }
 
-    const username = String(quoteData?.username || 'Unknown user').trim() || 'Unknown user';
+    const unknownUser = chatLabel('unknown_user');
+    const username = String(quoteData?.username || unknownUser).trim() || unknownUser;
     const content = String(quoteData?.content || '');
     const mentionMap = normalizeMentionMap(quoteData?.mentionMap || {});
 
@@ -1178,6 +1251,7 @@ function bindCreatePollModal() {
     const { minOptions, maxOptions, maxHours, maxDays } = window.CAUSETTE_POLL_LIMITS;
     const duration = form.elements.duration;
     const unit = form.elements.duration_unit;
+    let previousUnit = unit.value;
 
     const refreshOptions = () => {
         add.disabled = options.childElementCount >= maxOptions;
@@ -1213,13 +1287,22 @@ function bindCreatePollModal() {
         refreshOptions();
         next.querySelector('input').focus();
     });
-    unit.addEventListener('change', refreshDurationLimit);
+    unit.addEventListener('change', () => {
+        refreshDurationLimit();
+        const amount = duration.valueAsNumber;
+        if (unit.value !== previousUnit && Number.isInteger(amount) && amount > 0) {
+            const converted = unit.value === 'd' ? Math.ceil(amount / 24) : amount * 24;
+            duration.value = String(Math.min(converted, Number(duration.max)));
+        }
+        previousUnit = unit.value;
+    });
 
     const setOpenState = (isOpen) => {
         modal.classList.toggle('hidden', !isOpen);
         modal.setAttribute('aria-hidden', String(!isOpen));
         if (isOpen) {
             form.reset();
+            previousUnit = unit.value;
             options.replaceChildren();
             for (let index = 0; index < minOptions; index++) {
                 options.append(template.content.cloneNode(true));
@@ -1518,9 +1601,7 @@ function bindMessageQuotesAndReactions() {
             systemEventsToggleButton.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
             const toggleLabel = systemEventsToggleButton.querySelector('.js-system-events-toggle-label');
             if (toggleLabel) {
-                toggleLabel.textContent = nextExpanded
-                    ? `Hide ${hiddenCount} ${hiddenCount === 1 ? 'event' : 'events'}`
-                    : `Show ${hiddenCount} more ${hiddenCount === 1 ? 'event' : 'events'}`;
+                toggleLabel.textContent = systemEventToggleLabel(hiddenCount, nextExpanded);
             }
 
             return;
@@ -1655,21 +1736,9 @@ function applyEmojiRenderingToExistingMessages() {
     });
 }
 
-function getDefaultEmojiItems() {
-    initializeOpenMojiCatalog();
-
-    const defaults = DEFAULT_EMOJI_KEYS
-        .map((key) => openMojiByKey.get(normalizeEmojiKey(key)))
-        .filter(Boolean);
-
-    if (defaults.length > 0) return defaults;
-
-    return openMojiCatalog.filter((item) => item.character).slice(0, 80);
-}
-
 function getEmojiSearchScore(item, normalizedQuery, queryTokens, rawQuery) {
     let score = 0;
-    const annotation = String(item.annotation || '');
+    const annotation = normalizeEmojiSearchText(item.annotation);
     const keywords = Array.isArray(item.keywords) ? item.keywords : [];
 
     if (item.character && item.character === rawQuery) {
@@ -1751,8 +1820,8 @@ function getEmojiSearchScore(item, normalizedQuery, queryTokens, rawQuery) {
 
 function findEmojiTypeaheadMatches(query) {
     initializeOpenMojiCatalog();
-    const normalizedQuery = String(query || '').trim().toLowerCase();
-    if (!normalizedQuery) return getDefaultEmojiItems();
+    const normalizedQuery = normalizeEmojiSearchText(query);
+    if (!normalizedQuery) return openMojiCatalog;
     const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
     const rawQuery = String(query || '').trim();
 
@@ -1760,15 +1829,12 @@ function findEmojiTypeaheadMatches(query) {
 
     for (const item of openMojiCatalog) {
         const matchesAllTokens = queryTokens.every((token) => item.searchText.includes(token));
-        const matchesChar = item.character.includes(query);
+        const matchesChar = item.character.includes(rawQuery);
         if (!matchesAllTokens && !matchesChar) continue;
 
         const score = getEmojiSearchScore(item, normalizedQuery, queryTokens, rawQuery);
         rankedMatches.push({ item, score });
 
-        if (rankedMatches.length >= 260) {
-            break;
-        }
     }
 
     rankedMatches.sort((a, b) => {
@@ -1776,7 +1842,7 @@ function findEmojiTypeaheadMatches(query) {
         return a.item.key.localeCompare(b.item.key);
     });
 
-    return rankedMatches.map((entry) => entry.item).slice(0, 120);
+    return rankedMatches.map((entry) => entry.item);
 }
 
 function insertTextAtCursor(input, text) {
@@ -1812,11 +1878,14 @@ function bindEmojiDrawer() {
 
     const renderGrid = (items) => {
         const safeItems = items.filter((item) => item.character);
-        grid.innerHTML = safeItems.map((item) => `
-            <button type="button" class="w-12 h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 flex items-center justify-center" data-emoji="${escapeHtml(item.character)}" data-url="${escapeHtml(item.url)}" data-annotation="${escapeHtml(item.annotation || item.key)}" title="${escapeHtml(item.key)}">
-                <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.character)}" class="w-9 h-9" loading="lazy" decoding="async">
-            </button>
-        `).join('') || '<div class="col-span-full text-xs text-zinc-400 py-4 text-center">No emoji found</div>';
+        grid.innerHTML = safeItems.map((item) => {
+            const label = escapeHtml(item.annotation || uiText('emoji_catalog_fallback', { code: item.key }));
+            return `
+                <button type="button" class="w-12 h-12 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 flex items-center justify-center" data-emoji="${escapeHtml(item.character)}" data-url="${escapeHtml(item.url)}" data-annotation="${label}" title="${label}" aria-label="${label}">
+                    <img src="${escapeHtml(item.url)}" alt="" class="w-9 h-9" loading="lazy" decoding="async">
+                </button>
+            `;
+        }).join('') || `<div class="col-span-full text-xs text-zinc-400 py-4 text-center">${escapeHtml(uiText('no_emoji_found'))}</div>`;
     };
 
     const closeBtn = document.getElementById('emoji-drawer-close');
@@ -1825,11 +1894,15 @@ function bindEmojiDrawer() {
         drawer.classList.toggle('hidden', !isOpen);
         toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         if (isOpen) {
+            renderGrid(findEmojiTypeaheadMatches(search.value));
             search.focus();
+            void loadEmojiAnnotations().then((loaded) => {
+                if (loaded && grid.isConnected && !drawer.classList.contains('hidden')) {
+                    renderGrid(findEmojiTypeaheadMatches(search.value));
+                }
+            });
         }
     };
-
-    renderGrid(getDefaultEmojiItems());
 
     toggle.addEventListener('click', (event) => {
         event.preventDefault();
@@ -1841,7 +1914,6 @@ function bindEmojiDrawer() {
         }
         if (!willOpen) {
             search.value = '';
-            renderGrid(getDefaultEmojiItems());
         }
     });
 
@@ -1850,7 +1922,6 @@ function bindEmojiDrawer() {
             event.preventDefault();
             setOpenState(false);
             search.value = '';
-            renderGrid(getDefaultEmojiItems());
         });
     }
 
@@ -1870,7 +1941,6 @@ function bindEmojiDrawer() {
         if (isMessageFormMobileViewport()) {
             setOpenState(false);
             search.value = '';
-            renderGrid(getDefaultEmojiItems());
         }
     });
 
@@ -1943,16 +2013,21 @@ function renderPendingAttachmentList() {
                    <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
                </div>`;
 
+        const currentExpiry = Number(attachment.expiry_seconds || 0);
+        const expiryChoices = window.CAUSETTE_ATTACHMENT_EXPIRY_OPTIONS || [];
+        const expiryOptions = [0, ...expiryChoices].map(seconds =>
+            `<option value="${seconds}" ${currentExpiry === seconds ? 'selected' : ''}>${escapeHtml(formatAttachmentExpiryLabel(seconds))}</option>`
+        ).join('');
+        const legacyOption = currentExpiry > 0 && !expiryChoices.includes(currentExpiry)
+            ? `<option selected disabled>${escapeHtml(formatAttachmentExpiryLabel(currentExpiry))}</option>` : '';
         return `
             <div class="bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
                 ${preview}
                 <div class="mt-2 text-xs text-zinc-400 truncate" title="${escapeHtml(attachment.original_name)}">${escapeHtml(attachment.original_name)}</div>
-                <div class="mt-1.5 flex items-center justify-between gap-2">
-                    <label class="text-[11px] text-zinc-500" for="pending-attachment-expiry-${attachment.id}">Expiry</label>
+                <div class="mt-1.5 flex items-center justify-between gap-2 ${expiryChoices.length ? '' : 'hidden'}">
+                    <label class="text-[11px] text-zinc-500" for="pending-attachment-expiry-${attachment.id}">${escapeHtml(uiText('attachment_expiry'))}</label>
                     <select id="pending-attachment-expiry-${attachment.id}" class="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[11px] text-zinc-200" data-attachment-expiry="${attachment.id}">
-                        <option value="0" ${Number(attachment.expiry_seconds || 0) === 0 ? 'selected' : ''}>None</option>
-                        <option value="3600" ${Number(attachment.expiry_seconds || 0) === 3600 ? 'selected' : ''}>1 hour</option>
-                        <option value="86400" ${Number(attachment.expiry_seconds || 0) === 86400 ? 'selected' : ''}>24 hours</option>
+                        ${expiryOptions}${legacyOption}
                     </select>
                 </div>
                 <div class="mt-1 text-xs text-zinc-500 flex items-center justify-between gap-2">
@@ -1992,7 +2067,7 @@ async function uploadAttachmentFile(file, chat, sourceInput) {
     formData.append('attachment', file);
     formData.append('expiry_seconds', '0');
 
-    const response = await fetch('/api/attachments/upload', {
+    const response = await fetch(appPath('/api/attachments/upload'), {
         method: 'POST',
         body: formData
     });
@@ -2050,7 +2125,7 @@ async function updatePendingAttachmentExpiry(attachmentId, expirySeconds) {
     const id = Number(attachmentId || 0);
     const seconds = Number(expirySeconds || 0);
     if (!Number.isFinite(id) || id <= 0) return;
-    if (![0, 3600, 86400].includes(seconds)) return;
+    if (![0, ...(window.CAUSETTE_ATTACHMENT_EXPIRY_OPTIONS || [])].includes(seconds)) return;
 
     const result = await postForm('/api/attachments/expiry', {
         csrf_token: getCsrfToken(),
@@ -2153,7 +2228,7 @@ function bindAttachmentsDrawer() {
     });
 }
 
-function openAttachmentLightbox(url, title = 'Attachment') {
+function openAttachmentLightbox(url, title = uiText('attachment_label')) {
     const overlay = document.getElementById('attachment-lightbox');
     const image = document.getElementById('attachment-lightbox-image');
     if (!overlay || !image || !url) return;
@@ -2177,7 +2252,7 @@ function bindAttachmentLightbox() {
         if (!trigger) return;
 
         const imageUrl = String(trigger.getAttribute('data-image-url') || '');
-        const imageTitle = String(trigger.getAttribute('data-image-title') || 'Attachment');
+        const imageTitle = String(trigger.getAttribute('data-image-title') || uiText('attachment_label'));
         if (!imageUrl) return;
 
         event.preventDefault();
@@ -2205,6 +2280,7 @@ const SIDEBAR_CUSTOM_DEFAULT_LABEL = 'Custom';
 const SIDEBAR_CUSTOM_MAX_LABEL_LENGTH = 10;
 
 let sidebarChatsCache = [];
+let sidebarRenderSignature = '';
 let sidebarCustomChatNumbers = [];
 let sidebarCustomLabel = SIDEBAR_CUSTOM_DEFAULT_LABEL;
 let sidebarCustomConfigLoaded = false;
@@ -2214,7 +2290,7 @@ let sidebarIsDraggingCustom = false;
 let sidebarCustomContextChatNumber = '';
 
 function navigateWithFallback(url, options = {}) {
-    const targetUrl = String(url || '').trim();
+    const targetUrl = appPath(String(url || '').trim());
     if (!targetUrl) return;
 
     if (typeof window.navigateApp === 'function') {
@@ -2238,7 +2314,7 @@ async function reloadCurrentView(options = {}) {
 
 function normalizeSidebarMode(value) {
     const mode = String(value || '').trim().toLowerCase();
-    if (mode === 'pm' || mode === 'group' || mode === 'custom' || mode === 'all') {
+    if (mode === 'pm' || mode === 'group' || mode === 'custom' || mode === 'unread' || mode === 'all') {
         return mode;
     }
     return 'all';
@@ -2282,8 +2358,13 @@ function getSidebarCustomLabel() {
     return normalizeSidebarCustomLabel(sidebarCustomLabel);
 }
 
-function applySidebarCustomLabel() {
+function getSidebarCustomDisplayLabel() {
     const label = getSidebarCustomLabel();
+    return label === SIDEBAR_CUSTOM_DEFAULT_LABEL ? uiText('sidebar_custom') : label;
+}
+
+function applySidebarCustomLabel() {
+    const label = getSidebarCustomDisplayLabel();
 
     const modeLabel = document.getElementById('chat-sidebar-custom-mode-label');
     if (modeLabel) {
@@ -2292,14 +2373,15 @@ function applySidebarCustomLabel() {
 
     const { customHelp } = getSidebarElements();
     if (customHelp) {
-        customHelp.textContent = `Add a chat to ${label} by right clicking on it`;
+        customHelp.textContent = uiText('sidebar_add_category_help', { category: label });
     }
 }
 
 function updateSidebarCustomCount() {
     const { customCount } = getSidebarElements();
     if (!customCount) return;
-    customCount.textContent = `${getSidebarCustomLabel()} (${sidebarCustomChatNumbers.length}/${SIDEBAR_CUSTOM_MAX_ITEMS})`;
+    const label = getSidebarCustomDisplayLabel();
+    customCount.textContent = `${label} (${sidebarCustomChatNumbers.length}/${SIDEBAR_CUSTOM_MAX_ITEMS})`;
 }
 
 function getSidebarUnreadFlags() {
@@ -2318,7 +2400,7 @@ function getChatSidebarTitle(chat) {
     if (type === 'group') {
         return chat?.chat_title || formatNumber(chat?.chat_number || '');
     }
-    return chat?.chat_title || `Chat ${formatNumber(chat?.chat_number || '')}`;
+    return chat?.chat_title || uiText('sidebar_chat_number', { number: formatNumber(chat?.chat_number || '') });
 }
 
 function hideSidebarCustomTypeahead() {
@@ -2353,7 +2435,7 @@ async function fetchSidebarCustomConfig() {
     if (sidebarCustomConfigLoaded) return;
 
     try {
-        const response = await fetch('/api/chats/sidebar-custom');
+        const response = await fetch(appPath('/api/chats/sidebar-custom'));
         if (!response.ok) {
             throw new Error('Unable to load custom sidebar config');
         }
@@ -2365,7 +2447,7 @@ async function fetchSidebarCustomConfig() {
     }
 
     try {
-        const response = await fetch('/api/chats/sidebar-custom-label');
+        const response = await fetch(appPath('/api/chats/sidebar-custom-label'));
         if (!response.ok) {
             throw new Error('Unable to load custom sidebar label');
         }
@@ -2418,8 +2500,23 @@ async function syncSidebarCustomChatNumbers(chats) {
     }
 }
 
+function updateSidebarLinkCurrent(item, pathname) {
+    const current = pathname === item.getAttribute('href');
+    item.classList.toggle('bg-zinc-800/80', current);
+    if (current) {
+        item.setAttribute('aria-current', 'page');
+    } else {
+        item.removeAttribute('aria-current');
+    }
+}
+
+function updateSidebarCurrentPage(pathname) {
+    const { list } = getSidebarElements();
+    list?.querySelectorAll('a[data-sidebar-chat-number]').forEach((item) => updateSidebarLinkCurrent(item, pathname));
+}
+
 function buildSidebarChatNode(chat, options = {}) {
-    const { customMode = false } = options;
+    const { customMode = false, showTypeBadge = true } = options;
     const type = normalizeChatType(chat.type);
     const unreadCount = Math.max(0, Number(chat.unread_count || 0));
     const activeCallParticipantCount = Math.max(0, Number(chat.active_call_participant_count || 0));
@@ -2434,13 +2531,13 @@ function buildSidebarChatNode(chat, options = {}) {
         if (botName) return `${uiText('bot_name', { name: botName })}: ${rawMessage}`;
         const senderId = Number(chat.last_message_user_id || 0);
         const prefix = senderId && senderId === Number(currentUserId || 0)
-            ? 'You'
+            ? uiText('you')
             : (chat.last_message_sender_username || '');
         return prefix ? `${prefix}: ${rawMessage}` : rawMessage;
     })();
 
     const item = document.createElement('a');
-    item.href = `/c/${formatNumber(chat.chat_number)}`;
+    item.href = appPath(`/c/${formatNumber(chat.chat_number)}`);
     item.className = 'block py-2 px-3 rounded-xl hover:bg-zinc-800 mb-1';
     item.dataset.sidebarChatNumber = String(chat.chat_number || '');
     item.dataset.sidebarChatType = type;
@@ -2449,9 +2546,7 @@ function buildSidebarChatNode(chat, options = {}) {
         item.classList.add('border-b-2', 'border-b-emerald-400');
     }
 
-    if (window.location.pathname === item.getAttribute('href')) {
-        item.classList.add('bg-zinc-800/80');
-    }
+    updateSidebarLinkCurrent(item, window.location.pathname);
 
     if (customMode) {
         item.draggable = true;
@@ -2467,12 +2562,14 @@ function buildSidebarChatNode(chat, options = {}) {
     title.textContent = String(sidebarTitle);
     primaryLine.appendChild(title);
 
-    const typeBadge = document.createElement('span');
-    typeBadge.className = type === 'group'
-        ? 'shrink-0 px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide border border-sky-500/30 bg-sky-500/10 text-sky-200'
-        : 'shrink-0 px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide border border-violet-500/30 bg-violet-500/10 text-violet-200';
-    typeBadge.textContent = type === 'group' ? 'Group' : 'PM';
-    primaryLine.appendChild(typeBadge);
+    if (showTypeBadge) {
+        const typeBadge = document.createElement('span');
+        typeBadge.className = type === 'group'
+            ? 'shrink-0 px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide border border-sky-500/30 bg-sky-500/10 text-sky-200'
+            : 'shrink-0 px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide border border-violet-500/30 bg-violet-500/10 text-violet-200';
+        typeBadge.textContent = uiText(type === 'group' ? 'sidebar_group' : 'sidebar_direct');
+        primaryLine.appendChild(typeBadge);
+    }
 
     if (showFavoriteStar) {
         const star = document.createElement('i');
@@ -2483,15 +2580,15 @@ function buildSidebarChatNode(chat, options = {}) {
 
     if (hasPersonalStatus) {
         const statusDot = document.createElement('span');
-        statusDot.className = `inline-block w-2 h-2 rounded-full ${String(chat.effective_status_dot_class || 'bg-zinc-500')}`;
-        statusDot.title = String(chat.effective_status_label || 'Offline');
+        statusDot.className = `presence-dot inline-block w-2 h-2 rounded-full ${String(chat.effective_status_dot_class || 'bg-zinc-500')}`;
+        statusDot.title = presenceLabel(chat.effective_status);
         primaryLine.appendChild(statusDot);
     }
 
     if (customMode) {
         const dragIcon = document.createElement('i');
         dragIcon.className = 'fa-solid fa-grip-vertical text-zinc-500 text-[10px]';
-        dragIcon.title = 'Drag to reorder';
+        dragIcon.title = uiText('drag_to_reorder');
         primaryLine.appendChild(dragIcon);
     }
 
@@ -2512,6 +2609,10 @@ function buildSidebarChatNode(chat, options = {}) {
 }
 
 function getVisibleSidebarChats() {
+    if (sidebarMode === 'unread') {
+        return sidebarChatsCache.filter((chat) => Number(chat.unread_count) > 0);
+    }
+
     if (sidebarMode === 'pm') {
         return sidebarChatsCache.filter((chat) => normalizeChatType(chat.type) === 'personal');
     }
@@ -2540,7 +2641,8 @@ function updateSidebarModeButtons() {
         if (!(button instanceof HTMLElement)) return;
         const mode = normalizeSidebarMode(button.dataset.chatSidebarMode);
         const isActive = mode === sidebarMode;
-        const shouldHighlightUnread = mode !== 'all' && unreadFlags[mode] === true;
+        const shouldHighlightUnread = unreadFlags[mode] === true;
+        button.setAttribute('aria-pressed', String(isActive));
 
         button.classList.remove('bg-emerald-600', 'bg-emerald-600/25', 'text-emerald-100', 'text-emerald-200');
         button.classList.toggle('bg-zinc-700', isActive);
@@ -2573,25 +2675,41 @@ function clearSidebarDragIndicators() {
 }
 
 function renderSidebarList() {
-    const { list } = getSidebarElements();
+    const { list, modeToggle } = getSidebarElements();
     if (!list) return;
     updateSidebarCustomCount();
     updateSidebarModeButtons();
 
     const chats = getVisibleSidebarChats();
-    const nodes = chats.map((chat) => buildSidebarChatNode(chat, { customMode: sidebarMode === 'custom' }));
+    const customLabel = sidebarMode === 'custom' ? getSidebarCustomDisplayLabel() : null;
+    const signature = JSON.stringify([sidebarMode, customLabel, chats]);
+    if (signature === sidebarRenderSignature) return;
 
-    if (nodes.length > 0) {
-        list.replaceChildren(...nodes);
-        return;
+    const focusedChatNumber = list.contains(document.activeElement)
+        ? document.activeElement.dataset.sidebarChatNumber
+        : '';
+    const options = { customMode: sidebarMode === 'custom', showTypeBadge: !['group', 'pm'].includes(sidebarMode) };
+    const nodes = chats.map((chat) => buildSidebarChatNode(chat, options));
+
+    if (nodes.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-zinc-500 text-sm px-3 py-1';
+        if (sidebarMode === 'unread') {
+            empty.textContent = uiText('no_unread_chats');
+        } else if (customLabel !== null) {
+            empty.textContent = uiText('sidebar_custom_empty', { category: customLabel });
+        } else {
+            empty.textContent = uiText('no_chats_yet');
+        }
+        nodes.push(empty);
     }
-
-    const empty = document.createElement('div');
-    empty.className = 'text-zinc-500 text-sm px-3 py-1';
-    empty.textContent = sidebarMode === 'custom'
-        ? `${getSidebarCustomLabel()} list is empty`
-        : uiText('no_chats_yet');
-    list.replaceChildren(empty);
+    list.replaceChildren(...nodes);
+    sidebarRenderSignature = signature;
+    if (focusedChatNumber) {
+        const focusedChat = nodes.find(node => node.dataset.sidebarChatNumber === focusedChatNumber);
+        const focusTarget = focusedChat ?? modeToggle?.querySelector('[aria-pressed="true"]');
+        focusTarget?.focus({ preventScroll: true });
+    }
 }
 
 function bindSidebarCustomRenameModal() {
@@ -2659,7 +2777,7 @@ function bindSidebarCustomRenameModal() {
                 renderSidebarList();
             }
             closeModal();
-            showToast(isReset ? 'Category reset to Custom' : 'Category renamed', 'success');
+            showToast(isReset ? uiText('category_reset') : uiText('category_renamed'), 'success');
         } catch {
             showToast(uiText('unable_to_rename_category'), 'error');
         } finally {
@@ -2715,7 +2833,7 @@ function renderSidebarCustomTypeahead() {
 
         const badge = document.createElement('span');
         badge.className = 'text-[10px] uppercase tracking-wide text-zinc-400 shrink-0';
-        badge.textContent = normalizeChatType(chat.type) === 'group' ? 'Group' : 'PM';
+        badge.textContent = uiText(normalizeChatType(chat.type) === 'group' ? 'sidebar_group' : 'sidebar_direct');
 
         button.appendChild(title);
         button.appendChild(badge);
@@ -2891,11 +3009,12 @@ function bindSidebarCustomMenu() {
 
         try {
             if (action === 'open') {
-                window.open(`/c/${formatNumber(chatNumber)}`, '_blank', 'noopener');
+                window.open(appPath(`/c/${formatNumber(chatNumber)}`), '_blank', 'noopener');
             } else if (action === 'add') {
                 await addChatToCustomSidebar(chatNumber);
             } else if (action === 'copy-link') {
-                await copyTextFallback(`${window.location.origin}/c/${formatNumber(chatNumber)}`);
+                const chatPath = appPath(`/c/${formatNumber(chatNumber)}`);
+                await copyTextFallback(new URL(chatPath, window.location.origin).href);
                 showToast(uiText('group_link_copied'), 'success');
             } else if (action === 'copy-number') {
                 await copyTextFallback(formatNumber(chatNumber));
@@ -3088,7 +3207,7 @@ async function loadSidebarChats() {
         sidebarModeInitialized = true;
     }
 
-    const res = await fetch('/api/chats');
+    const res = await fetch(appPath('/api/chats'));
     const data = await res.json();
     const chats = Array.isArray(data.chats) ? data.chats : [];
 
@@ -3105,17 +3224,26 @@ async function loadSidebarChats() {
     renderSidebarCustomTypeahead();
 }
 
+let groupCreationInFlight = false;
+
 async function createGroupChat() {
-    const result = await postForm('/api/chats/group/create', {
-        csrf_token: getCsrfToken()
-    });
+    if (groupCreationInFlight) return;
+    groupCreationInFlight = true;
 
-    if (result.success && result.chat_number) {
-        navigateWithFallback(`/c/${formatNumber(result.chat_number)}?prompt_group_name=1`, { source: 'create-group', updateHistory: true });
-        return;
+    try {
+        const result = await postForm('/api/chats/group/create', {
+            csrf_token: getCsrfToken()
+        });
+        if (result.success && result.chat_number) {
+            navigateWithFallback(`/c/${formatNumber(result.chat_number)}?prompt_group_name=1`, { source: 'create-group', updateHistory: true });
+            return;
+        }
+        showToast(uiActionError(result.error, 'unable_to_create_group_chat'), 'error');
+    } catch {
+        showToast(uiText('unable_to_create_group_chat'), 'error');
+    } finally {
+        groupCreationInFlight = false;
     }
-
-    showToast(uiActionError(result.error, 'unable_to_create_group_chat'), 'error');
 }
 
 async function addGroupMemberByUsername(event, usernameOverride = null) {
@@ -3168,7 +3296,7 @@ function bindAddUserModal() {
     async function loadFriends() {
         if (friendsCache) return friendsCache;
         try {
-            const res = await fetch('/api/friends');
+            const res = await fetch(appPath('/api/friends'));
             const data = await res.json();
             friendsCache = Array.isArray(data.friends) ? data.friends : [];
         } catch {
@@ -3371,7 +3499,7 @@ async function promoteGroupModerator(userId, username) {
     });
 
     if (result.success) {
-        showToast(`${String(username || 'User')} is now a moderator`, 'success');
+        showToast(uiText('group_moderator_promoted', { name: username || uiText('group_user_default') }), 'success');
         await reloadCurrentView({ source: 'promote-group-moderator' });
         return;
     }
@@ -3388,7 +3516,7 @@ async function demoteGroupModerator(userId, username) {
     });
 
     if (result.success) {
-        showToast(`${String(username || 'User')} is no longer a moderator`, 'success');
+        showToast(uiText('group_moderator_demoted', { name: username || uiText('group_user_default') }), 'success');
         await reloadCurrentView({ source: 'demote-group-moderator' });
         return;
     }
@@ -3405,7 +3533,7 @@ async function muteGroupMember(userId, username) {
     });
 
     if (result.success) {
-        showToast(`${String(username || 'User')} was muted`, 'success');
+        showToast(uiText('group_member_muted', { name: username || uiText('group_user_default') }), 'success');
         await reloadCurrentView({ source: 'mute-group-member' });
         return;
     }
@@ -3422,7 +3550,7 @@ async function unmuteGroupMember(userId, username) {
     });
 
     if (result.success) {
-        showToast(`${String(username || 'User')} was unmuted`, 'success');
+        showToast(uiText('group_member_unmuted', { name: username || uiText('group_user_default') }), 'success');
         await reloadCurrentView({ source: 'unmute-group-member' });
         return;
     }
@@ -3746,18 +3874,18 @@ function bindLeaveGroupModal() {
 
         if (ownerFlow) {
             const options = getEligibleNewOwners();
-            ownerSelect.innerHTML = '<option value="">Select member</option>'
+            ownerSelect.innerHTML = `<option value="">${escapeHtml(uiText('select_member'))}</option>`
                 + options.map((option) => `<option value="${option.userId}">${escapeHtml(option.username)}</option>`).join('');
 
             description.textContent = options.length > 0
-                ? 'Choose a new owner, then leave the group.'
-                : 'You cannot leave this group because there are no other members to transfer ownership to.';
+                ? uiText('group_owner_choose')
+                : uiText('group_owner_none');
             submit.disabled = options.length === 0;
-            submit.textContent = options.length > 0 ? 'Transfer & Leave' : 'Leave Group';
+            submit.textContent = options.length > 0 ? uiText('group_owner_transfer_and_leave') : uiText('leave_group');
             return;
         }
 
-        ownerSelect.innerHTML = '<option value="">Select member</option>';
+        ownerSelect.innerHTML = `<option value="">${escapeHtml(uiText('select_member'))}</option>`;
         description.textContent = uiText('are_you_sure_you_want_to_leave_this');
     };
 
@@ -3873,7 +4001,7 @@ async function renameCurrentChat() {
     });
 
     if (result.success) {
-        showToast(result.reset ? 'Chat name reset to chat number' : 'Chat renamed', 'success');
+        showToast(result.reset ? uiText('chat_name_reset') : uiText('chat_renamed'), 'success');
         await reloadCurrentView({ source: 'rename-chat' });
         return;
     }
@@ -3889,7 +4017,7 @@ function bindRenameChatModal() {
     const submit = document.getElementById('rename-chat-submit');
     if (!modal || !form || !input || !cancel || !submit) return;
 
-    const defaultCancelLabel = 'Cancel';
+    const defaultCancelLabel = uiText('cancel');
 
     const setOpenState = (isOpen, options = {}) => {
         modal.classList.toggle('hidden', !isOpen);
@@ -3898,7 +4026,7 @@ function bindRenameChatModal() {
             const preferGroupNumber = options && options.preferGroupNumber === true;
             const currentTitle = String(document.getElementById('chat-title')?.textContent || '').trim();
             input.value = currentTitle;
-            cancel.textContent = preferGroupNumber ? 'Use Group Number' : defaultCancelLabel;
+            cancel.textContent = preferGroupNumber ? uiText('use_group_number') : defaultCancelLabel;
             modal.dataset.preferGroupNumberPrompt = preferGroupNumber ? '1' : '0';
             setTimeout(() => {
                 input.focus();
@@ -3959,15 +4087,26 @@ function bindRenameChatModal() {
     window.openRenameChatModal = (options = {}) => setOpenState(true, options);
 }
 
+const backgroundMessagePolls = new WeakSet();
+
 async function pollMessages(options = {}) {
     const chat = currentChat;
-    if (!chat) return;
+    const messagesList = document.getElementById('messages');
+    if (!chat || !messagesList) return;
+    if (options.background && backgroundMessagePolls.has(chat)) return;
+    if (options.background) backgroundMessagePolls.add(chat);
     const sequence = ++messageRefreshSequence;
     const bannerRevision = chatBannerRevision;
-    const res = await fetch(`/api/messages/${chat.id}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (currentChat !== chat || sequence < lastAppliedMessageRefresh || !Array.isArray(data?.messages)) return;
+    let data;
+    try {
+        const res = await fetch(appPath(`/api/messages/${chat.id}`));
+        if (!res.ok) return;
+        data = await res.json();
+    } finally {
+        if (options.background) backgroundMessagePolls.delete(chat);
+    }
+    if (currentChat !== chat || document.getElementById('messages') !== messagesList
+        || sequence < lastAppliedMessageRefresh || !Array.isArray(data?.messages)) return;
     lastAppliedMessageRefresh = sequence;
     const messages = data.messages;
     const typingUsers = Array.isArray(data.typing_users) ? data.typing_users : [];
@@ -3996,7 +4135,8 @@ async function pollMessages(options = {}) {
         || nextMessagesSignature !== lastRenderedMessagesSignature
     );
 
-    if (hasNewMessageState) {
+    // Keep the active editor in place until the user saves or cancels.
+    if (hasNewMessageState && !document.getElementById('messages')?.querySelector('.js-edit-input')) {
         renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
         lastRenderedChatId = activeChatId;
         lastRenderedMessagesSignature = nextMessagesSignature;
@@ -4139,6 +4279,12 @@ function isSystemMessagesAutoCombineEnabled() {
     return window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED !== false;
 }
 
+function systemEventToggleLabel(count, expanded) {
+    const action = expanded ? 'hide' : 'show';
+    const plural = count === 1 ? 'one' : 'other';
+    return chatLabel(`system_events_${action}_${plural}`, { count });
+}
+
 function buildRenderableMessageEntries(messages, chatId) {
     const entries = [];
     const visibleSystemGroupKeys = new Set();
@@ -4231,42 +4377,42 @@ function buildRenderableMessageEntries(messages, chatId) {
 
 function getPersonalChatMessageRestrictionText(reason) {
     if (String(reason || '') === 'group_muted') {
-        return 'You are muted in this group.';
+        return uiText('messaging_muted');
     }
 
     if (String(reason || '') === 'group_members_only') {
-        return 'Join this group to send messages.';
+        return uiText('messaging_join_required');
     }
 
     if (String(reason || '') === 'group_read_only_public') {
-        return 'This is a public read-only view. Join the group to participate.';
+        return uiText('messaging_public_read_only');
     }
 
     if (String(reason || '') === 'banned_user') {
-        return "You can't send messages to a banned user.";
+        return uiText('messaging_target_banned');
     }
 
-    return 'Messaging is disabled in this private chat until you add each other as friends again.';
+    return uiText('messaging_friend_required');
 }
 
 function getPersonalChatMessageRestrictionToast(reason) {
     if (String(reason || '') === 'group_muted') {
-        return 'You are muted in this group';
+        return uiText('messaging_muted');
     }
 
     if (String(reason || '') === 'group_members_only') {
-        return 'Join this group to send messages';
+        return uiText('messaging_join_required');
     }
 
     if (String(reason || '') === 'group_read_only_public') {
-        return 'This public group view is read-only';
+        return uiText('messaging_public_read_only');
     }
 
     if (String(reason || '') === 'banned_user') {
-        return "You can't send messages to a banned user";
+        return uiText('messaging_target_banned');
     }
 
-    return 'You can only message friends in personal chats';
+    return uiText('messaging_friend_required');
 }
 
 
@@ -4324,7 +4470,7 @@ function applyPersonalChatHeaderStatus(statusDotClass, statusLabel) {
 
     dot.classList.remove(...CHAT_STATUS_DOT_CLASSES);
     dot.classList.add(String(statusDotClass || 'bg-zinc-500'));
-    dot.setAttribute('title', String(statusLabel || 'Offline'));
+    dot.setAttribute('title', statusLabel || presenceLabel('offline'));
 }
 
 function updatePersonalChatHeaderStatusFromMessages(messages) {
@@ -4342,7 +4488,7 @@ function updatePersonalChatHeaderStatusFromMessages(messages) {
             continue;
         }
 
-        applyPersonalChatHeaderStatus(message?.effective_status_dot_class, message?.effective_status_label);
+        applyPersonalChatHeaderStatus(message?.effective_status_dot_class, presenceLabel(message?.effective_status));
         return;
     }
 
@@ -4362,7 +4508,7 @@ async function refreshPersonalChatHeaderStatusFallback() {
     lastPersonalStatusFallbackAt = now;
 
     try {
-        const response = await fetch('/api/chats');
+        const response = await fetch(appPath('/api/chats'));
         const payload = await response.json();
         const chats = Array.isArray(payload?.chats) ? payload.chats : [];
         const currentChatNumber = String(currentChat?.chat_number || '').replace(/\D/g, '');
@@ -4381,7 +4527,7 @@ async function refreshPersonalChatHeaderStatusFallback() {
             return;
         }
 
-        applyPersonalChatHeaderStatus(chat.effective_status_dot_class, chat.effective_status_label);
+        applyPersonalChatHeaderStatus(chat.effective_status_dot_class, presenceLabel(chat.effective_status));
     } catch {
     } finally {
         personalStatusFallbackInFlight = false;
@@ -4462,8 +4608,8 @@ function renderTypingIndicator(typingUsers) {
     }
 
     const subject = names.length === 1
-        ? `${names[0]} is typing`
-        : `${names.join(', ')} are typing`;
+        ? uiText('typing_one', { name: names[0] })
+        : uiText('typing_many', { names: new Intl.ListFormat(uiLanguage()).format(names) });
 
     box.classList.remove('hidden');
     const subjectNode = document.createTextNode(subject);
@@ -4587,9 +4733,7 @@ function renderMessages(messages, options = {}) {
             const groupKey = String(entry.groupKey || '');
             const hiddenCount = Math.max(0, Number(entry.hiddenCount || 0));
             const isExpanded = Boolean(entry.expanded);
-            const toggleLabel = isExpanded
-                ? `Hide ${hiddenCount} ${hiddenCount === 1 ? 'event' : 'events'}`
-                : `Show ${hiddenCount} more ${hiddenCount === 1 ? 'event' : 'events'}`;
+            const toggleLabel = systemEventToggleLabel(hiddenCount, isExpanded);
 
             chunks.push(`
                 <div class="flex gap-3 mt-1">
@@ -4691,12 +4835,12 @@ function renderMessages(messages, options = {}) {
         const authorMarkup = botName
             ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
             : profileUrl
-                ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-semibold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
-                : `<div class="text-sm font-semibold leading-5 inline-block causette-accent">${username}</div>`;
+                ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
+                : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
         const avatarMarkup = botName
             ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
             : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>';
-        const statusLabel = String(msg?.effective_status_label || 'Offline');
+        const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
         const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
         const mentionMap = normalizeMentionMap(msg?.mention_map || {});
         const mentionMapJson = escapeHtml(JSON.stringify(mentionMap));
@@ -4735,7 +4879,7 @@ function renderMessages(messages, options = {}) {
                     ${avatarMarkup}
                 </div>
                 <div class="min-w-0 flex-1">
-                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
+                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
                     ${renderQuotedMessageBlock(msg)}
                     <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
                     ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
@@ -4856,7 +5000,31 @@ function canDeleteAttachmentFromMessage(msg) {
 
 function bindMessageEditAndDelete() {
     const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
+    if (!messagesContainer || messagesContainer.dataset.editActionsBound === '1') return;
+    messagesContainer.dataset.editActionsBound = '1';
+
+    const composer = document.getElementById('message-input');
+    composer?.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowUp' || event.defaultPrevented || event.isComposing || event.repeat ||
+            event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || composer.value !== '' ||
+            composer.disabled || composer.readOnly || messagesContainer.querySelector('.js-edit-input')) {
+            return;
+        }
+
+        const messages = messagesContainer.querySelectorAll('[data-message-id][data-message-user-id]');
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            if (Number(message.dataset.messageUserId) !== Number(currentUserId) || message.querySelector('[data-bot-badge]')) {
+                continue;
+            }
+            const editButton = message.querySelector('.js-edit-link');
+            if (editButton) {
+                event.preventDefault();
+                editButton.click();
+            }
+            return;
+        }
+    });
 
     messagesContainer.addEventListener('click', (event) => {
         const editBtn = event.target.closest('.js-edit-link');
@@ -4922,6 +5090,11 @@ async function deleteSubmittedAttachment(attachmentId) {
 function startEditMessage(messageId) {
     const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!messageDiv) return;
+    const existingInput = messageDiv.querySelector('.js-edit-input');
+    if (existingInput) {
+        existingInput.focus();
+        return;
+    }
     const contentDiv = messageDiv.querySelector('.js-message-content');
     if (!contentDiv) return;
 
@@ -4931,8 +5104,8 @@ function startEditMessage(messageId) {
         <div class="flex flex-col gap-2">
             <input type="text" class="js-edit-input w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-zinc-100 text-[15px]" value="${escapeHtml(rawContent)}" maxlength="16384">
             <div class="flex gap-2">
-                <button type="button" class="js-edit-save text-xs px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white" data-edit-message-id="${messageId}">Save</button>
-                <button type="button" class="js-edit-cancel text-xs px-3 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200" data-edit-message-id="${messageId}">Cancel</button>
+                <button type="button" class="js-edit-save text-xs px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white" data-edit-message-id="${messageId}">${escapeHtml(uiText('save'))}</button>
+                <button type="button" class="js-edit-cancel text-xs px-3 py-1 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-200" data-edit-message-id="${messageId}">${escapeHtml(uiText('cancel'))}</button>
             </div>
         </div>
     `;
@@ -4941,6 +5114,7 @@ function startEditMessage(messageId) {
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
         input.addEventListener('keydown', (e) => {
+            if (e.isComposing) return;
             if (e.key === 'Enter') { e.preventDefault(); submitEditMessage(messageId); }
             if (e.key === 'Escape') { e.preventDefault(); cancelEditMessage(messageId); }
         });
@@ -4951,36 +5125,43 @@ async function submitEditMessage(messageId) {
     const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!messageDiv) return;
     const input = messageDiv.querySelector('.js-edit-input');
-    if (!input) return;
+    if (!input || input.readOnly) return;
     const newContent = input.value.trim();
     if (!newContent) {
         showToast(uiText('message_cannot_be_empty'), 'error');
         return;
     }
 
+    let result;
+    input.readOnly = true;
     try {
-        const result = await postForm('/api/messages/edit', {
+        result = await postForm('/api/messages/edit', {
             csrf_token: getCsrfToken(),
             message_id: messageId,
             content: newContent
         });
-        if (result.error) {
-            showToast(result.error, 'error');
-            cancelEditMessage(messageId);
-            return;
-        }
-        await pollMessages({ scrollMode: 'preserve', forceRender: true });
-    } catch (e) {
-        showToast(uiText('failed_to_edit_message'), 'error');
-        cancelEditMessage(messageId);
+    } catch {
+        // The common error path below keeps the draft available for another attempt.
+    } finally {
+        input.readOnly = false;
     }
+    if (!input.isConnected) return;
+    if (result?.success !== true || typeof result.raw === 'string') {
+        showToast(result?.error || uiText('failed_to_edit_message'), 'error');
+        input.focus();
+        return;
+    }
+    cancelEditMessage(messageId);
+    await pollMessages({ scrollMode: 'preserve', forceRender: true }).catch(() => {
+        // The save succeeded. The next scheduled refresh can update the timeline.
+    });
 }
 
 function cancelEditMessage(messageId) {
     const messageDiv = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (!messageDiv) return;
+    if (!messageDiv || messageDiv.querySelector('.js-edit-input')?.readOnly) return;
     const contentDiv = messageDiv.querySelector('.js-message-content');
-    if (!contentDiv || !contentDiv.dataset.originalContent) return;
+    if (!contentDiv || contentDiv.dataset.originalContent === undefined) return;
     contentDiv.innerHTML = contentDiv.dataset.originalContent;
     delete contentDiv.dataset.originalContent;
 }
@@ -5099,7 +5280,13 @@ function bindGroupMemberActionMenus() {
             }
 
             const shouldOpen = menu.classList.contains('hidden');
-            closeGroupMemberActionMenus(shouldOpen ? menuId : '');
+            const poke = menu.querySelector('[data-app-action="poke-group-member"]');
+            if (poke) {
+                const member = toggle.closest('[data-group-member-in-call]');
+                poke.classList.toggle('hidden', !canPokeInCurrentGroup() || member?.dataset.groupMemberInCall === '1');
+            }
+            const hasActions = menu.querySelector('[data-group-member-action]:not(.hidden)');
+            closeGroupMemberActionMenus(shouldOpen && hasActions ? menuId : '');
             return;
         }
 

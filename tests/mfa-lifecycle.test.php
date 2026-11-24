@@ -172,6 +172,34 @@ if ($mode === 'trust') {
     exit;
 }
 
+if ($mode === 'maintenance') {
+    define('CAUSETTE_DATABASE_VERSION', '1.0.7');
+    define('CAUSETTE_UPDATE_SOURCES', ['1.0.6']);
+    session_start();
+    $controller = new MfaFixtureController();
+    $mail = new MfaFixtureMailFactor();
+    (new ReflectionProperty(TwoFAManager::class, 'providers'))->setValue(null, [$mail]);
+    foreach ([
+        ['admin', '1.0.6', '/update', 'An administrator must reach the pending update immediately after email MFA'],
+        ['user', '1.0.6', '/', 'A regular account must remain behind the maintenance gate'],
+        ['admin', '1.0.7', '/', 'An administrator on the current schema must reach the dashboard'],
+    ] as $index => [$role, $version, $destination, $description]) {
+        Database::query('UPDATE users SET role = ? WHERE id = 2', [$role]);
+        Setting::set('database_version', $version);
+        $_SERVER['REMOTE_ADDR'] = '198.51.100.' . (10 + $index);
+        $_SESSION = ['csrf_token' => 'fixture-csrf'];
+        $_COOKIE = [];
+        $_POST = ['csrf_token' => 'fixture-csrf', 'identifier' => 'fixturepeer', 'password' => FIXTURE_PASSWORD];
+        expectMfa(mfaFixtureAction($controller->login(...)) === '/2fa'
+            && !isset($_SESSION['user_id']) && $mail->deliveredCode !== null, 'Password validation must leave the second factor pending');
+        $_POST = ['csrf_token' => 'fixture-csrf', 'code' => $mail->deliveredCode];
+        expectMfa(mfaFixtureAction($controller->verify2FA(...)) === $destination && (int)Auth::user()?->id === 2, $description);
+    }
+    session_write_close();
+    echo "Pending update destinations verified after email MFA.\n";
+    exit;
+}
+
 if ($mode === 'email') {
     session_start();
     DisplayPreferences::save(['language' => 'fr', 'date_format' => '', 'time_format' => ''], 2);

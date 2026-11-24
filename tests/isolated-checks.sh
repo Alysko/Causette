@@ -3,11 +3,13 @@ set -eu
 
 run_php_checks() {
     for name in chat-bootstrap mfa-delivery installer-authorization installer-keys \
-        update-authorization message-response reaction-catalog attachment-access \
-        request-origin web-push-delivery push-subscription-policy localization notification-localization \
-        smtp-test-localization; do
+        update-authorization password-reset-request message-response message-mutation reaction-catalog attachment-access poll-draft call-video-preferences \
+        request-origin web-push-delivery push-subscription-policy localization localization-surfaces display-theme error-localization notification-localization \
+        smtp-test-localization call-history-localization; do
         php -d session.save_path=/tmp "/tmp/project/tests/$name.test.php"
     done
+    php /tmp/project/tests/message-mutation.test.php --legacy
+    sh /tmp/project/tests/smtp-transport-fixture.sh
 }
 
 run_database_checks() {
@@ -35,8 +37,12 @@ CREATE USER 'causette_fixture'@'localhost' IDENTIFIED BY 'fixture-only-database-
 GRANT ALL PRIVILEGES ON causette_recovery_fixture.* TO 'causette_fixture'@'localhost';
 SQL
     export CAUSETTE_RECOVERY_FIXTURE=1
-    for entry in mfa-lifecycle:email mfa-lifecycle:invitation mfa-lifecycle:registration-mail mfa-lifecycle:settings \
-        password-recovery:link password-recovery:change reaction-upgrade:reactions attachment-upload:upload; do
+    for entry in mfa-lifecycle:email mfa-lifecycle:maintenance mfa-lifecycle:invitation mfa-lifecycle:registration-mail mfa-lifecycle:settings \
+        password-recovery:link password-recovery:change reaction-upgrade:reactions attachment-upload:upload \
+        call-signal-boundary:signals installer-database-recovery:recovery \
+        session-lifecycle:idle session-lifecycle:storage session-lifecycle:absolute session-lifecycle:remember \
+        session-lifecycle:remember-expiry session-lifecycle:rotation credential-storage:reset credential-storage:api \
+        credential-storage:smtp credential-storage:vapid credential-storage:upgrade; do
         mariadb --no-defaults --socket="$socket" -u root <<'SQL'
 DROP DATABASE IF EXISTS causette_recovery_fixture;
 CREATE DATABASE causette_recovery_fixture CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -61,5 +67,6 @@ exec bwrap --unshare-all --die-with-parent --new-session --clearenv \
     --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run --dir /run/mysqld \
     --ro-bind "$root/public_html" /tmp/project/public_html \
     --ro-bind "$root/tests" /tmp/project/tests --perms 0700 --tmpfs /tmp/project/storage \
+    --ro-bind "$root/storage/emojis" /tmp/project/storage/emojis \
     --setenv PATH "$PATH" --setenv HOME /tmp --setenv LANG C.UTF-8 \
     --chdir /tmp/project -- sh /tmp/project/tests/isolated-checks.sh "$1-in-fixture"

@@ -151,11 +151,12 @@ test('a push notification without server content identifies Causette', async () 
     const self = {
         addEventListener: (event, handler) => handlers.set(event, handler),
         registration: {
+            scope: 'https://fixture.example.test/',
             showNotification: (title, { body }) => messages.push({ title, body }),
         },
     };
     const source = readFileSync(new URL('public_html/service-worker.js', root), 'utf8');
-    runInNewContext(source, { self, fetch: async () => ({ ok: false }) }, { timeout: 1000 });
+    runInNewContext(source, { self, URL, fetch: async () => ({ ok: false }) }, { timeout: 1000 });
     let notification;
     handlers.get('push')({ waitUntil: promise => { notification = promise; } });
     await notification;

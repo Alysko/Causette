@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'example_message' => 'Hello from the bot!',
+    'example_error_message' => 'Description of the error',
     'back' => 'Back to API Keys',
     'title' => 'Bot API Documentation',
     'intro' => 'Use Bot API keys to send messages to group chats you own from external applications, scripts, or services. User keys will have more access but will come later.',
@@ -20,6 +22,7 @@ return [
     'chat_parameter' => 'The 16-digit chat number of the target group chat. Dashes are optional (e.g. {formatted} or {digits}).',
     'text_parameter' => 'The message content. Maximum 16,384 characters.',
     'example' => 'Example Request',
+    'example_environment' => 'Set the {variable} environment variable to your bot key before running an example.',
     'example_header' => 'Or using the header for authentication:',
     'success_response' => 'Success Response',
     'error_response' => 'Error Response',

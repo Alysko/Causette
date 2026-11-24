@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../core/BrowserSession.php';
+require_once __DIR__ . '/../core/Locale.php';
 
+use Causette\Localization\Locale;
 use Causette\Security\BrowserSession;
 
 class User extends Model {
@@ -16,14 +18,14 @@ class User extends Model {
     public static function decorateDeletedRetainedUsername($username, $email): string {
         $base = trim((string)$username);
         if ($base === '') {
-            return 'Unknown user';
+            return Locale::current()->text('chat.unknown_user');
         }
 
         if (!self::isDeletedRetainedEmail($email)) {
             return $base;
         }
 
-        return $base . ' (deleted user)';
+        return Locale::current()->text('chat.deleted_user_label', ['name' => $base]);
     }
 
     public static function isUsernameFormatValid($username) {
@@ -48,6 +50,10 @@ class User extends Model {
     public static function findByEmail($email) {
         $stmt = self::query("SELECT * FROM users WHERE email = ?", [trim((string)$email)]);
         return $stmt->fetch();
+    }
+
+    public static function findByLoginIdentifier(string $identifier) {
+        return str_contains($identifier, '@') ? self::findByEmail($identifier) : self::findByUsername($identifier);
     }
 
     public static function isBanned($user) {
@@ -158,7 +164,9 @@ class User extends Model {
     }
 
     public static function normalizePresenceStatus($status) {
+        if (!is_string($status)) return null;
         $normalized = strtolower(trim((string)$status));
+        if ($normalized === 'paused') return 'paused';
         if ($normalized === 'busy') {
             return 'busy';
         }
@@ -176,6 +184,7 @@ class User extends Model {
 
     public static function presenceStatusLabel($status) {
         $normalized = strtolower(trim((string)$status));
+        if ($normalized === 'paused') return 'Away';
         if ($normalized === 'busy') {
             return 'Busy';
         }
@@ -189,6 +198,7 @@ class User extends Model {
 
     public static function presenceStatusTextClass($status) {
         $normalized = strtolower(trim((string)$status));
+        if ($normalized === 'paused') return 'text-sky-300';
         if ($normalized === 'busy') {
             return 'text-amber-400';
         }
@@ -202,6 +212,7 @@ class User extends Model {
 
     public static function presenceStatusDotClass($status) {
         $normalized = strtolower(trim((string)$status));
+        if ($normalized === 'paused') return 'bg-sky-500';
         if ($normalized === 'busy') {
             return 'bg-amber-500';
         }
@@ -252,7 +263,8 @@ class User extends Model {
             return 'offline';
         }
 
-        return self::normalizePresenceStatus($user->presence_status ?? null) ?? 'online';
+        $status = self::normalizePresenceStatus($user->presence_status ?? null) ?? 'online';
+        return $status === 'online' && $lastActiveTimestamp < time() - 180 ? 'paused' : $status;
     }
 
     public static function attachEffectiveStatus($user) {
@@ -346,7 +358,7 @@ class User extends Model {
 
     public static function setPresenceStatus($userId, $status) {
         $normalized = self::normalizePresenceStatus($status);
-        if ($normalized === null) {
+        if ($normalized === null || $normalized === 'paused') {
             return false;
         }
 

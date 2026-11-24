@@ -6,15 +6,18 @@ require_once __DIR__ . '/../../core/HtmlJson.php';
 require_once __DIR__ . '/../../core/ContentSecurityPolicy.php';
 require_once __DIR__ . '/../../core/AssetUrl.php';
 require_once __DIR__ . '/../../core/ReactionCatalog.php';
+require_once __DIR__ . '/../../core/CallIceServers.php';
+require_once __DIR__ . '/../../core/CallVideoPreferences.php';
 $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
+$brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
-<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>" class="dark">
+<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>" data-theme="<?= htmlspecialchars($displayFormats['theme'], ENT_QUOTES, 'UTF-8') ?>"<?= $displayFormats['theme'] === 'light' ? '' : ' class="dark"' ?>>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-    <link rel="icon" type="image/png" href="<?= htmlspecialchars(base_url('/assets/img/favicon.png'), ENT_QUOTES, 'UTF-8') ?>">
+    <link rel="icon" type="image/png" sizes="64x64" href="<?= \Causette\View\AssetUrl::html('/assets/img/favicon.png') ?>">
     <title>Causette</title>
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
@@ -101,7 +104,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
 
         $openMojiDir = '';
         $openMojiFiles = [];
-        foreach ($openMojiDirs as $candidateDir) {
+        foreach ($currentUser ? $openMojiDirs : [] as $candidateDir) {
             $candidateFiles = glob(rtrim($candidateDir, '/') . '/*.svg') ?: [];
             if (count($candidateFiles) > 0) {
                 $openMojiDir = $candidateDir;
@@ -118,13 +121,10 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         sort($openMojiFileNames, SORT_STRING);
 
         $openMojiMetadata = [];
-        $openMojiFileKeys = [];
-        foreach ($openMojiFileNames as $openMojiFileName) {
-            $openMojiFileKeys[strtoupper((string)preg_replace('/\.svg$/i', '', $openMojiFileName))] = true;
-        }
+        $pickerKeys = array_fill_keys(\Causette\Chat\ReactionCatalog::CODES, true);
 
         $openMojiCsvPath = $openMojiDir . '/openmoji.csv';
-        if (is_readable($openMojiCsvPath)) {
+        if ($openMojiFiles && is_readable($openMojiCsvPath)) {
             $openMojiHandle = fopen($openMojiCsvPath, 'rb');
             if ($openMojiHandle !== false) {
                 $header = fgetcsv($openMojiHandle, 0, ',', '"', '\\');
@@ -148,8 +148,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                         }
 
                         $hexWithoutFe0f = preg_replace('/(?:-)?FE0F/i', '', $hex);
-                        $hasSvg = isset($openMojiFileKeys[$hex]) || isset($openMojiFileKeys[$hexWithoutFe0f]);
-                        if (!$hasSvg) {
+                        if (!isset($pickerKeys[$hex]) && !isset($pickerKeys[$hexWithoutFe0f])) {
                             continue;
                         }
 
@@ -161,8 +160,10 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                             'subgroups' => ($subgroupsIdx !== null && isset($row[$subgroupsIdx])) ? trim((string)$row[$subgroupsIdx]) : '',
                         ];
 
-                        $openMojiMetadata[$hex] = $meta;
-                        if ($hexWithoutFe0f !== '' && !isset($openMojiMetadata[$hexWithoutFe0f])) {
+                        if (isset($pickerKeys[$hex])) {
+                            $openMojiMetadata[$hex] = $meta;
+                        }
+                        if (isset($pickerKeys[$hexWithoutFe0f]) && !isset($openMojiMetadata[$hexWithoutFe0f])) {
                             $openMojiMetadata[$hexWithoutFe0f] = $meta;
                         }
                     }
@@ -199,8 +200,9 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         </div>
 
     <div id="mobile-top-bar" role="banner" class="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 py-4 bg-zinc-900/95 backdrop-blur border-b border-zinc-800">
-        <button id="sidebar-toggle-mobile" class="flex items-center gap-3" aria-label="<?= $tr('ui.open_menu') ?>">
-            <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+        <button id="sidebar-toggle-mobile" type="button" class="flex items-center gap-3" title="<?= $brandTitle ?>" aria-label="Causette – <?= $tr('ui.chats') ?>" aria-controls="app-sidebar" aria-expanded="false">
+            <i class="fa-solid fa-bars text-zinc-300" aria-hidden="true"></i>
+            <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="32" height="32" alt="" class="shrink-0">
             <span class="text-2xl font-bold text-zinc-100">Causette</span>
         </button>
         <button type="button" id="notification-history-button-mobile" class="relative w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
@@ -210,22 +212,35 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         </button>
     </div>
 
+    <div id="app-route-status" role="status"
+         data-chat-label="<?= $tr('ui.opening_conversation') ?>"
+         data-page-label="<?= $tr('ui.loading_page') ?>"
+         data-error-label="<?= $tr('ui.could_not_open_page') ?>"></div>
+
     <div id="app-layout" class="flex flex-1 min-h-0">
-        <aside id="app-sidebar" role="complementary" class="w-72 sidebar border-r border-zinc-800 flex flex-col">
-            <a href="<?= htmlspecialchars(base_url('/'), ENT_QUOTES, 'UTF-8') ?>" class="p-4 border-b border-zinc-700 flex items-center gap-3 hover:bg-zinc-800/40 transition">
-                <i class="fa-solid fa-comments text-2xl causette-accent"></i>
+        <aside id="app-sidebar" role="complementary" tabindex="-1" class="sidebar border-r border-zinc-800 flex flex-col">
+            <a id="app-brand" href="<?= htmlspecialchars(base_url('/'), ENT_QUOTES, 'UTF-8') ?>" title="<?= $brandTitle ?>" class="p-4 border-b border-zinc-700 flex items-center gap-3 hover:bg-zinc-800/40 transition">
+                <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="32" height="32" alt="" class="shrink-0">
                 <span class="text-2xl font-bold">Causette</span>
             </a>
+            <div id="sidebar-resize-handle" role="separator" tabindex="0" aria-orientation="vertical"
+                 aria-controls="app-sidebar" aria-label="<?= $tr('ui.resize_sidebar') ?>"></div>
             <div class="flex-1 min-h-0 p-4 flex flex-col gap-3">
-                <div class="inline-flex self-start w-fit items-center rounded-lg border border-zinc-700 p-1 text-xs" id="chat-sidebar-mode-toggle">
-                    <button type="button" data-chat-sidebar-mode="all" class="px-2.5 py-1 rounded-md transition bg-zinc-700 text-zinc-100"><?= $tr('ui.all') ?></button>
-                    <button type="button" data-chat-sidebar-mode="pm" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.pm') ?></button>
-                    <button type="button" data-chat-sidebar-mode="group" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.group') ?></button>
-                    <button type="button" data-chat-sidebar-mode="custom" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200" title="<?= $tr('ui.right_click_to_rename') ?>" aria-label="<?= $tr('ui.custom_category_right_click_to_rename') ?>"><span id="chat-sidebar-custom-mode-label"><?= $tr('ui.custom') ?></span></button>
+                <div class="inline-flex flex-wrap self-start max-w-full items-center rounded-lg border border-zinc-700 p-1 text-xs" id="chat-sidebar-mode-toggle">
+                    <button type="button" data-chat-sidebar-mode="all" aria-pressed="true" class="px-2.5 py-1 rounded-md transition bg-zinc-700 text-zinc-100"><?= $tr('ui.all') ?></button>
+                    <button type="button" data-chat-sidebar-mode="unread" aria-pressed="false" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.unread') ?></button>
+                    <button type="button" data-chat-sidebar-mode="pm" aria-pressed="false" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.pm') ?></button>
+                    <button type="button" data-chat-sidebar-mode="group" aria-pressed="false" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.group') ?></button>
+                    <button type="button" data-chat-sidebar-mode="custom" aria-pressed="false" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200" title="<?= $tr('ui.right_click_to_rename') ?>" aria-label="<?= $tr('ui.custom_category_right_click_to_rename') ?>"><span id="chat-sidebar-custom-mode-label"><?= $tr('ui.custom') ?></span></button>
                 </div>
 
                 <nav class="flex-1 min-h-0 flex flex-col">
-                    <div class="px-3 pb-2 text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.chats') ?></div>
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-2">
+                        <span class="text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.chats') ?></span>
+                        <button type="button" data-app-action="create-group-chat" class="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-100 hover:bg-zinc-800">
+                            <i class="fa-solid fa-plus" aria-hidden="true"></i> <?= $tr('ui.new_group') ?>
+                        </button>
+                    </div>
                     <div id="chat-sidebar-list" class="space-y-1 overflow-y-auto min-h-0"></div>
                 </nav>
                 <div id="chat-sidebar-custom-controls" class="hidden space-y-2">
@@ -275,27 +290,32 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                     <div class="relative">
                         <button type="button" id="status-menu-toggle" class="text-zinc-300 hover:text-zinc-100 inline-flex items-center gap-2">
                             <span class="flex items-center gap-2 <?= htmlspecialchars($currentUser->effective_status_text_class ?? User::presenceStatusTextClass($currentUser->effective_status ?? 'online'), ENT_QUOTES, 'UTF-8') ?>" id="sidebar-user-status">
-                                <span class="inline-block w-2 h-2 rounded-full <?= htmlspecialchars($currentUser->effective_status_dot_class ?? User::presenceStatusDotClass($currentUser->effective_status ?? 'online'), ENT_QUOTES, 'UTF-8') ?>" id="sidebar-user-status-dot"></span>
-                                <span id="sidebar-user-status-label"><?= htmlspecialchars($currentUser->effective_status_label ?? User::presenceStatusLabel($currentUser->effective_status ?? 'online'), ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="presence-dot inline-block w-2 h-2 rounded-full <?= htmlspecialchars($currentUser->effective_status_dot_class ?? User::presenceStatusDotClass($currentUser->effective_status ?? 'online'), ENT_QUOTES, 'UTF-8') ?>" id="sidebar-user-status-dot"></span>
+                                <span id="sidebar-user-status-label"><?= $tr('ui.' . (User::normalizePresenceStatus($currentUser->effective_status ?? null) ?? 'online')) ?></span>
                             </span>
                             <i class="fa fa-chevron-up text-[10px] text-zinc-500"></i>
                         </button>
                         <div id="status-menu" class="hidden absolute bottom-full mb-2 left-0 w-44 bg-zinc-900 border border-zinc-700 rounded-xl p-2 space-y-1 z-30">
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="online">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span><?= $tr('ui.online') ?></span>
+                                <span class="flex items-center gap-2"><span class="presence-dot inline-block w-2 h-2 rounded-full bg-emerald-500"></span><?= $tr('ui.online') ?></span>
                                 <i class="fa fa-check text-xs text-emerald-400 hidden" data-status-check="online"></i>
                             </button>
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="busy">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-amber-500"></span><?= $tr('ui.busy') ?></span>
+                                <span class="flex items-center gap-2"><span class="presence-dot inline-block w-2 h-2 rounded-full bg-amber-500"></span><?= $tr('ui.busy') ?></span>
                                 <i class="fa fa-check text-xs text-amber-400 hidden" data-status-check="busy"></i>
                             </button>
                             <button type="button" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 flex items-center justify-between" data-status-choice="offline">
-                                <span class="flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full bg-red-500"></span><?= $tr('ui.offline') ?></span>
+                                <span class="flex items-center gap-2"><span class="presence-dot inline-block w-2 h-2 rounded-full bg-red-500"></span><?= $tr('ui.offline') ?></span>
                                 <i class="fa fa-check text-xs text-red-400 hidden" data-status-check="offline"></i>
                             </button>
+                            <button type="button" id="enable-system-pause" class="hidden w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 text-sm"><?= $tr('ui.enable_system_pause') ?></button>
                         </div>
                     </div>
                     <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="text-zinc-300 hover:text-zinc-100"><i class="fa fa-cog"></i> <?= $tr('ui.settings') ?></a>
+                    <button type="button" id="notification-history-launcher" class="ml-auto h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-300 hover:bg-zinc-800"
+                            aria-label="<?= $tr('ui.toggle_notification_history') ?>" aria-controls="notification-history-list" aria-expanded="false">
+                        <i class="fa-regular fa-bell" aria-hidden="true"></i>
+                    </button>
                 </div>
             </div>
         </aside>
@@ -321,8 +341,8 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             </div>
         </div>
 
-        <aside id="notification-history-panel" class="w-20 shrink-0 border-l border-zinc-800 bg-zinc-900/90 flex flex-col transition-all duration-200 ease-out"
-               aria-label="<?= $tr('ui.notifications') ?>">
+        <aside id="notification-history-panel" class="notification-history-empty w-20 shrink-0 border-l border-zinc-800 bg-zinc-900/90 flex flex-col"
+               aria-label="<?= $tr('ui.notifications') ?>" inert>
             <div class="p-4 border-b border-zinc-700 flex items-center justify-center" id="notification-history-header">
                 <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3"><?= $tr('ui.notifications') ?></div>
                 <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" data-app-action="clear-notifications"><?= $tr('ui.clear_all') ?></button>
@@ -353,6 +373,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             </div>
             <div class="flex items-center gap-1.5">
                 <button data-app-action="toggle-call-participants" id="call-participants-toggle-btn" class="hidden h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs px-2.5" title="<?= $tr('ui.show_participants_panel') ?>" aria-label="<?= $tr('ui.toggle_participants_panel') ?>" aria-expanded="false"><i class="fa-solid fa-users"></i></button>
+                <button type="button" id="toggle-call-self-view" data-app-action="toggle-call-self-view" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.call_hide_self_view') ?>" aria-label="<?= $tr('ui.call_hide_self_view') ?>" aria-pressed="false"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i></button>
                 <button data-app-action="open-call-settings" id="call-settings-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.call_settings') ?>"><i class="fa-solid fa-gear"></i></button>
                 <button data-app-action="set-call-overlay" data-mode="hidden" id="call-overlay-hidden-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.hide_call_window_reopen_from_call') ?>"><i class="fa-solid fa-chevron-up"></i></button>
                 <button data-app-action="set-call-overlay" data-mode="half" id="call-overlay-half-btn" class="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 text-xs" title="<?= $tr('ui.split_screen') ?>"><i class="fa-solid fa-down-left-and-up-right-to-center"></i></button>
@@ -416,8 +437,8 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
             <h3 class="text-lg font-semibold text-zinc-100 mb-1"><?= $tr('ui.share_your_screen') ?></h3>
             <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.choose_a_quality_setting_your_browser') ?></p>
             <div class="space-y-3">
-                <button data-app-action="start-screen-share" data-quality="720p-10fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
-                    <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.720p_10_fps') ?></div>
+                <button data-app-action="start-screen-share" data-quality="eco" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
+                    <div class="font-medium text-zinc-100 text-sm"><?= $tr('ui.video_quality_eco') ?></div>
                     <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.low_bandwidth_ideal_for_slow_connections') ?></div>
                 </button>
                 <button data-app-action="start-screen-share" data-quality="1080p-30fps" class="w-full text-left bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-xl px-4 py-3 transition-colors">
@@ -429,12 +450,16 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                     <div class="text-xs text-zinc-400 mt-0.5"><?= $tr('ui.highest_quality_requires_fast_connection') ?></div>
                 </button>
             </div>
+            <label class="mt-4 flex items-center gap-2 text-sm text-zinc-300">
+                <input type="checkbox" id="remember-screenshare-quality" class="accent-emerald-500">
+                <?= $tr('ui.remember_video_quality') ?>
+            </label>
             <button data-app-action="close-screen-share" class="mt-4 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.cancel') ?></button>
         </div>
     </div>
 
     <div id="call-settings-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-        <div class="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6">
+        <div class="max-h-[90vh] w-full max-w-sm overflow-y-auto bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6">
             <h3 class="text-lg font-semibold text-zinc-100 mb-1"><?= $tr('ui.call_settings_2') ?></h3>
             <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.select_your_audio_and_video_devices') ?></p>
             <div class="space-y-4">
@@ -451,6 +476,10 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                         <div id="call-settings-level" class="h-full bg-emerald-500 rounded-full transition-none"></div>
                     </div>
                 </div>
+                <label class="flex items-center gap-2 text-sm text-zinc-300">
+                    <input type="checkbox" id="call-noise-suppression" class="accent-emerald-500">
+                    <?= $tr('ui.call_noise_suppression') ?>
+                </label>
                 <div>
                     <label class="block text-sm font-medium text-zinc-300 mb-1.5"><?= $tr('ui.speaker_volume') ?></label>
                     <input id="call-settings-speaker-volume" type="range" min="0" max="100" value="100" class="w-full accent-emerald-500 h-1.5 bg-zinc-700 rounded-full appearance-none cursor-pointer">
@@ -461,6 +490,19 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
                         <option value=""><?= $tr('ui.loading_devices') ?></option>
                     </select>
                 </div>
+                <form id="call-camera-quality-form" class="space-y-3">
+                    <label for="call-camera-quality" class="block text-sm font-medium text-zinc-300"><?= $tr('ui.webcam_quality') ?></label>
+                    <select id="call-camera-quality" class="w-full rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-sm text-zinc-100">
+                        <?php foreach (\Causette\Calls\CallVideoPreferences::labels('camera') as $quality => $qualityLabel): ?>
+                            <option value="<?= $quality ?>"><?= $tr($qualityLabel) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label class="flex items-center gap-2 text-sm text-zinc-300">
+                        <input type="checkbox" id="remember-camera-quality" class="accent-emerald-500">
+                        <?= $tr('ui.remember_video_quality') ?>
+                    </label>
+                    <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-50"><?= $tr('ui.apply_video_quality') ?></button>
+                </form>
             </div>
             <button data-app-action="close-call-settings" class="mt-5 w-full text-center text-sm text-zinc-400 hover:text-zinc-200 py-2"><?= $tr('ui.close') ?></button>
         </div>
@@ -507,7 +549,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         <div class="w-full max-w-md">
             <div class="text-center mb-6">
                 <div class="inline-flex items-center gap-2 text-2xl font-bold">
-                    <i class="fa-solid fa-comments causette-accent"></i>
+                    <img src="<?= \Causette\View\AssetUrl::html('/assets/img/logo.png') ?>" width="40" height="40" alt="" class="shrink-0">
                     <span>Causette</span>
                 </div>
             </div>
@@ -515,7 +557,7 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
         </div>
     </div>
     <?php endif; ?>
-    <div id="toast-host" class="fixed top-20 right-5 space-y-2 z-40"></div>
+    <div id="toast-host" class="fixed top-20 right-5 max-w-[calc(100%-2.5rem)] space-y-2 z-40" role="status" aria-live="polite"></div>
 
     <div id="new-post-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
         <div class="h-full w-full flex items-center justify-center">
@@ -577,9 +619,16 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     </div>
 </body>
 <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
+    window.CAUSETTE_BASE_PATH = <?= \Causette\View\HtmlJson::encode(defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '') ?>;
     window.CAUSETTE_UI = <?= \Causette\View\HtmlJson::encode([
         'language' => $locale->language(),
         'labels' => $locale->catalog('browser'),
+    ]) ?>;
+    window.CAUSETTE_CALLS = <?= \Causette\View\HtmlJson::encode([
+        'labels' => $locale->catalog('calls'),
+        'basePath' => defined('CAUSETTE_PUBLIC_PATH') ? CAUSETTE_PUBLIC_PATH : '',
+        'iceServers' => \Causette\Calls\CallIceServers::configured($currentUser ? Setting::get('webrtc_stun_servers') : null),
+        'videoQuality' => $currentUser ? ($callVideoDefaults ?? \Causette\Calls\CallVideoPreferences::read((int)$currentUser->id)) : [],
     ]) ?>;
     window.APP_VERSION = <?= \Causette\View\HtmlJson::encode(APP_VERSION) ?>;
     window.CSRF_TOKEN = <?= \Causette\View\HtmlJson::encode($csrf) ?>;
@@ -598,9 +647,10 @@ $scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
     window.CURRENT_USER_PRESENCE_STATUS = <?= \Causette\View\HtmlJson::encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
     window.CAUSETTE_REACTION_LABELS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::labels($locale)) ?>;
     window.CAUSETTE_REACTION_GROUPS = <?= \Causette\View\HtmlJson::encode(\Causette\Chat\ReactionCatalog::GROUPS) ?>;
-    window.CAUSETTE_REACTION_ASSET_BASE = <?= \Causette\View\HtmlJson::encode(base_url(\Causette\Chat\ReactionCatalog::IMAGE_DIRECTORY)) ?>;
+    window.CAUSETTE_EMOJI_ARTWORK = <?= \Causette\View\HtmlJson::encode($currentUser ? \Causette\Chat\ReactionCatalog::artwork() : []) ?>;
     window.OPENMOJI_FILES = <?= \Causette\View\HtmlJson::encode($openMojiFileNames) ?>;
     window.OPENMOJI_METADATA = <?= \Causette\View\HtmlJson::encode($openMojiMetadata) ?>;
+    window.CAUSETTE_EMOJI_ANNOTATIONS_URL = <?= \Causette\View\HtmlJson::encode($locale->language() === 'fr' ? base_path('/assets/locales/emoji-fr.json') : null) ?>;
 </script>
 <?php foreach ($scripts as $script): ?>
     <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" data-app-script="<?= $script ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/' . $script) ?>"></script>

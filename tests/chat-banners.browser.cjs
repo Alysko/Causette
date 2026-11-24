@@ -3,6 +3,7 @@ const { createHmac } = require('node:crypto');
 const { chromium } = require('playwright');
 
 const origin = 'https://fixture.example.test:9443';
+const mountedPath = process.env.CAUSETTE_FIXTURE_MOUNT || '/community';
 const firstChat = '/c/1010-2020-3030-4040';
 const secondChat = '/c/1010-2020-3030-4041';
 const question = 'Thé <mark>chaud</mark> & café ?';
@@ -55,9 +56,9 @@ async function submitForm(page, path, button) {
     return response.status();
 }
 
-async function installPackage(browser, errors) {
+async function installPackage(browser, errors, prefix = '') {
     const english = await newPage(browser, errors);
-    const setupPath = '/install';
+    const setupPath = prefix + '/install';
     const installerForm = (page, stage) => page.locator(`form:has(input[name="stage"][value="${stage}"])`);
     const submitSetup = (page, stage) => submitForm(page, setupPath, installerForm(page, stage).locator('button[type=submit]'));
 
@@ -111,18 +112,23 @@ async function installPackage(browser, errors) {
     assert.equal((await english.goto(origin + setupPath)).status(), 404);
     assert.equal(await english.locator('form').count(), 0);
     for (const path of ['/storage/f01-fixture.txt', '/app/install/schema-v1.sql']) {
-        const response = await english.goto(origin + path);
+        const response = await english.goto(origin + prefix + path);
         assert.ok([403, 404].includes(response.status()), path);
         assert.doesNotMatch(await response.text(), /fixture-private-storage-canary|CREATE TABLE/i);
     }
     console.log('The completed installer, private storage canary and packaged schema were denied over HTTPS.');
 }
 
-async function signIn(page, username, password, language) {
-    await page.goto(origin + '/login?lang=' + language);
+async function submitSignIn(page, username, password, language, prefix = '') {
+    const loginPath = prefix + '/login';
+    await page.goto(origin + loginPath + '?lang=' + language);
     await page.locator('input[name=identifier]').fill(username);
     await page.locator('input[name=password]').fill(password);
-    assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name="identifier"]) button[type=submit]')), 302);
+    assert.equal(await submitForm(page, loginPath, page.locator('form:has(input[name="identifier"]) button[type=submit]')), 302);
+}
+
+async function signIn(page, username, password, language) {
+    await submitSignIn(page, username, password, language);
     await page.goto(origin + firstChat);
     await page.locator('#chat-view[data-chat-id="8"]').waitFor();
 }
@@ -292,6 +298,11 @@ async function checkLocalization(browser, errors) {
         if (language === 'fr') {
             assert.match(poll, /^Se termine le \d{1,2} \p{L}/u, 'The poll expiry should use a French date');
             assert.match(poll, / · 1 vote · par fixtureadmin$/);
+            const emojiData = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/assets/locales/emoji-fr.json'));
+            await page.locator('#emoji-toggle').click();
+            assert.equal((await emojiData).status(), 200, 'French emoji metadata must ship as a local static asset');
+            await page.locator('#emoji-search').fill('cafe');
+            await page.locator('#emoji-grid').getByRole('button', { name: 'boisson chaude', exact: true }).waitFor();
         } else {
             assert.match(poll, /^Expires \p{L}+ \d{1,2},/u);
             assert.match(poll, / · 1 vote · by fixtureadmin$/);
@@ -324,7 +335,7 @@ async function checkLocalization(browser, errors) {
         assert.equal((await page.goto(origin + path + '?lang=fr')).status(), 200);
         await page.getByRole('heading', { name: title, exact: true }).waitFor();
     }
-    console.log('Both languages render localized poll expiry and one vote, and French applies to the dashboard and account forms.');
+    console.log('Both languages render localized poll expiry and vote counts, including French emoji search, the dashboard and account forms.');
 }
 
 async function checkLocalAssets(browser, errors) {
@@ -650,7 +661,14 @@ async function checkPollComposer(browser, errors) {
     await waitForText(owner, '#active-poll-question', 'Fixture de durée');
     await close();
 
-    for (const expiry of ['0h', '169h', '8d', '1.5h', '1w']) {
+    const sixtyDays = await create(['Premier', 'Second'], '60d');
+    assert.equal(sixtyDays.status, 200);
+    checkDuration(sixtyDays.data.active_poll, 60 * 24);
+    await owner.reload();
+    await waitForText(owner, '#active-poll-question', 'Fixture de durée');
+    await close();
+
+    for (const expiry of ['0h', '25h', '61d', '1.5h', '1w']) {
         assert.equal((await create(['Premier', 'Second'], expiry)).status, 400, expiry);
     }
     assert.equal((await create([...options, 'Option 11'], '1d')).status, 400);
@@ -672,9 +690,16 @@ async function checkPollComposer(browser, errors) {
     await owner.locator('#create-poll-question').fill('Quel choix préférez-vous ?');
     const choices = [...options.slice(0, -1), 'Été <mark> & café ☕'];
     for (let index = 0; index < choices.length; index++) await fields.nth(index).fill(choices[index]);
-    await owner.getByLabel('Unité de durée').selectOption('d');
+    const unit = owner.getByLabel('Unité de durée');
     const duration = owner.getByLabel('Durée du sondage', { exact: true });
-    assert.equal(await duration.getAttribute('max'), '7');
+    await unit.selectOption('d');
+    assert.equal(await duration.getAttribute('max'), '60');
+    assert.equal(await duration.inputValue(), '1');
+    await duration.fill('60');
+    await unit.selectOption('h');
+    assert.equal(await duration.getAttribute('max'), '24');
+    assert.equal(await duration.inputValue(), '24');
+    await unit.selectOption('d');
     await duration.fill('2');
     const published = await post(owner, '/api/chats/group/poll/create', () => owner.locator('#create-poll-submit').click());
     checkDuration(published.active_poll, 48);
@@ -702,21 +727,22 @@ async function checkNotificationHistory(browser, errors) {
     const panel = owner.locator('#notification-history-panel');
     const list = owner.locator('#notification-history-list');
     const desktop = owner.locator('#notification-history-button');
+    const launcher = owner.locator('#notification-history-launcher');
     const mobile = owner.locator('#notification-history-button-mobile');
     const empty = 'No notifications yet';
     const setHistory = (action) => post(owner, '/api/notifications/sidebar-state', action);
 
     await owner.clock.install();
+    await panel.waitFor({ state: 'hidden' });
     await owner.evaluate(() => showToast('Fixture temporary notice', 'info', { temporary: true, durationMs: 30000 }));
     await setHistory(() => desktop.click());
     await waitForText(owner, '#notification-history-list', 'Fixture temporary notice');
-    await owner.clock.fastForward(31000);
+    await owner.clock.runFor(31000);
     await waitForText(owner, '#notification-history-list', empty);
-    assert.notEqual(await panel.getAttribute('aria-hidden'), 'true', 'Expiry of the final toast must keep history reachable');
     assert.equal(await desktop.getAttribute('aria-expanded'), 'true');
-    await setHistory(() => desktop.press('Enter'));
-    assert.equal(await list.isHidden(), true);
-    await setHistory(() => desktop.press('Space'));
+    await owner.clock.runFor(1100);
+    await panel.waitFor({ state: 'hidden' });
+    await setHistory(() => launcher.press('Space'));
     await list.getByText(empty).waitFor();
 
     assert.equal(await owner.evaluate(path => window.navigateApp(path), secondChat), true);
@@ -733,10 +759,8 @@ async function checkNotificationHistory(browser, errors) {
         const pollStarted = owner.waitForRequest(origin + '/notifications');
         await owner.reload({ waitUntil: 'domcontentloaded' });
         await pollStarted;
-        await list.getByText(empty).waitFor();
-        await setHistory(() => desktop.click());
-        assert.equal(await list.isHidden(), true);
-        await setHistory(() => desktop.click());
+        await panel.waitFor({ state: 'hidden' });
+        await setHistory(() => launcher.click());
         await list.getByText(empty).waitFor();
     } finally {
         releasePoll();
@@ -855,6 +879,234 @@ async function checkAccountMenu(browser, errors) {
     console.log('The account menu supports desktop keyboard and mobile touch, preserves profile access, and signs out only the current browser session.');
 }
 
+async function checkSessionManagement(browser, errors) {
+    const settingsPath = '/settings';
+    const loginForSessions = async (username) => {
+        const page = await newPage(browser, errors);
+        await submitSignIn(page, username, 'fixture-only-sessions-password', 'en');
+        return page;
+    };
+    const primary = await loginForSessions('fixturesessions');
+    const target = await loginForSessions('fixturesessions');
+    const survivor = await loginForSessions('fixturesessions');
+    const otherAccount = await loginForSessions('fixturesessionspeer');
+
+    async function openSettings(page) {
+        const response = await page.goto(origin + settingsPath);
+        assert.equal(response.status(), 200);
+        assert.equal(new URL(response.url()).pathname, settingsPath, 'The authorized browser must keep its Settings access');
+    }
+
+    async function openSessions(page) {
+        await openSettings(page);
+        await page.locator('button[data-modal-open=cp-sessions-modal]').click();
+        const panel = page.locator('#cp-sessions-modal');
+        await panel.waitFor({ state: 'visible' });
+        return panel;
+    }
+
+    const sessionId = async (page) => {
+        const panel = await openSessions(page);
+        return panel.getByText(/\bCurrent session\b/)
+            .locator('../..').locator('..').locator('input[name=session_id]').getAttribute('value');
+    };
+    const targetId = await sessionId(target);
+    const survivorId = await sessionId(survivor);
+    const otherId = await sessionId(otherAccount);
+    const panel = await openSessions(primary);
+    const rowForm = (id) => panel.locator('form:has(input[name=session_id][value="' + id + '"])');
+    const revocationPath = '/settings/sessions/exit';
+
+    const targetForm = rowForm(targetId);
+    const targetButton = targetForm.getByRole('button');
+    let cancelPrompt = '';
+    primary.once('dialog', async (dialog) => {
+        cancelPrompt = dialog.message();
+        await dialog.dismiss();
+    });
+    await targetButton.click();
+    assert.ok(cancelPrompt, 'The browser must ask before ending another session');
+    assert.equal(await targetButton.isVisible(), true, 'Cancel must leave the targeted session listed');
+    await openSettings(target);
+
+    primary.once('dialog', (dialog) => dialog.accept());
+    assert.equal(await submitForm(primary, revocationPath, targetButton), 302);
+    await targetForm.waitFor({ state: 'detached' });
+    await panel.waitFor({ state: 'visible', timeout: 5000 });
+    assert.equal(await rowForm(survivorId).isVisible(), true, 'An unrelated session of the same account must remain listed');
+    assert.equal(await panel.getByText(/\bCurrent session\b/).count(), 1);
+    await target.goto(origin + settingsPath);
+    await target.waitForURL(url => url.pathname === '/login');
+    await openSettings(survivor);
+
+    assert.equal(await saveDisplaySettings(primary, revocationPath, { session_id: otherId }, false), 403,
+        'CSRF must protect session revocation');
+    assert.equal(await saveDisplaySettings(primary, '/friends/request', {}, false), 403,
+        'An expired form must return a usable forbidden response through Apache.');
+    const foreignDenied = await primary.evaluate(async ({ revocationPath, otherId }) => {
+        const csrfToken = document.querySelector('meta[name=csrf-token]').content;
+        const response = await fetch(revocationPath, {
+            method: 'POST',
+            body: new URLSearchParams({ csrf_token: csrfToken, session_id: otherId }),
+        });
+        return response.redirected && (await response.text()).includes('Session no longer exists or cannot be ended.');
+    }, { revocationPath, otherId });
+    assert.equal(foreignDenied, true, 'A recorded session belonging to another account must be refused');
+    await openSettings(otherAccount);
+
+    const close = panel.getByRole('button', { name: 'Close', exact: true });
+    await close.waitFor();
+    assert.equal(await close.evaluate(button => button === document.activeElement), true);
+    await primary.keyboard.press('Shift+Tab');
+    assert.equal(await panel.locator('form button').last().evaluate(button => button === document.activeElement), true);
+    await primary.keyboard.press('Tab');
+    assert.equal(await close.evaluate(button => button === document.activeElement), true);
+    await primary.keyboard.press('Escape');
+    assert.equal(await panel.isHidden(), true);
+    const opener = primary.getByRole('button', { name: 'Sessions', exact: true });
+    assert.equal(await opener.evaluate(button => button === document.activeElement), true);
+    await opener.press('Enter');
+    const current = panel.getByRole('button', { name: 'Sign out', exact: true });
+    let currentPrompt = '';
+    primary.once('dialog', async (dialog) => {
+        currentPrompt = dialog.message();
+        await dialog.accept();
+    });
+    assert.equal(await submitForm(primary, revocationPath, current), 302);
+    assert.ok(currentPrompt && currentPrompt !== cancelPrompt, 'The current-browser warning must explain a different outcome');
+    await primary.waitForURL(url => url.pathname === '/login');
+    await openSettings(survivor);
+    console.log('Session management preserves the list after remote revocation, leaves other sessions active, and signs out the current browser on request.');
+}
+
+async function checkSidebarKeyboard(browser, errors) {
+    const desktop = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'en');
+    const conversation = desktop.locator('#chat-sidebar-list a[href="' + firstChat + '"]');
+    await conversation.waitFor();
+    await conversation.focus();
+    await desktop.evaluate(() => window.loadSidebarChats());
+    const focusSurvives = await conversation.evaluate(link => link === document.activeElement);
+    const currentPage = await conversation.getAttribute('aria-current');
+
+    const groupFilter = desktop.locator('[data-chat-sidebar-mode=group]');
+    await groupFilter.press('Enter');
+    const groupPressed = await groupFilter.getAttribute('aria-pressed');
+    const allPressed = await desktop.locator('[data-chat-sidebar-mode=all]').getAttribute('aria-pressed');
+
+    const mobile = await login(browser, 'fixturepeer', 'fixture-only-peer-password', errors, 'fr', {
+        viewport: { width: 390, height: 700 }, isMobile: true, hasTouch: true,
+    });
+    const opener = mobile.locator('#sidebar-toggle-mobile');
+    const sidebar = mobile.locator('#app-sidebar');
+    await opener.press('Enter');
+    const expanded = await opener.getAttribute('aria-expanded');
+    const focusInside = await sidebar.evaluate(panel => panel.contains(document.activeElement));
+    await mobile.keyboard.press('Escape');
+    const collapsed = await opener.getAttribute('aria-expanded');
+    const focusReturned = await opener.evaluate(button => button === document.activeElement);
+    assert.deepEqual(
+        { focusSurvives, currentPage, groupPressed, allPressed, expanded, focusInside, collapsed, focusReturned, hidden: await sidebar.isHidden() },
+        { focusSurvives: true, currentPage: 'page', groupPressed: 'true', allPressed: 'false', expanded: 'true', focusInside: true, collapsed: 'false', focusReturned: true, hidden: true },
+        'Conversation navigation must preserve keyboard focus through polling and expose current and expanded state',
+    );
+    console.log('The conversation sidebar preserves keyboard focus during refresh and exposes its active conversation, filter and mobile drawer states.');
+}
+
+async function checkMountedNavigation(browser, errors) {
+    const page = await newPage(browser, errors);
+    await submitSignIn(page, 'fixtureadmin', adminPassword, 'en', mountedPath);
+    assert.equal((await page.goto(origin + mountedPath + firstChat)).status(), 200);
+    await page.locator('#chat-view[data-chat-id="8"]').waitFor();
+
+    const [listResponse] = await Promise.all([
+        page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/api/chats')),
+        page.evaluate(() => window.loadSidebarChats().catch(() => {})),
+    ]);
+    assert.equal(new URL(listResponse.url()).pathname, mountedPath + '/api/chats',
+        'Conversation polling must stay under the configured public prefix');
+    assert.equal(listResponse.status(), 200);
+    const currentLink = page.locator('#chat-sidebar-list a[aria-current=page]');
+    assert.equal(await currentLink.getAttribute('href'), mountedPath + firstChat);
+
+    const [writeResponse, labelSaved] = await Promise.all([
+        page.waitForResponse((response) => response.request().method() === 'POST'
+            && new URL(response.url()).pathname.endsWith('/api/chats/sidebar-custom-label')),
+        page.evaluate(async () => {
+            const result = await window.postForm('/api/chats/sidebar-custom-label', {
+                csrf_token: window.CSRF_TOKEN,
+                label: 'Fixture',
+            });
+            return result?.success === true;
+        }),
+    ]);
+    assert.equal(new URL(writeResponse.url()).pathname, mountedPath + '/api/chats/sidebar-custom-label');
+    assert.equal(writeResponse.status(), 200);
+    assert.equal(labelSaved, true);
+
+    await page.evaluate(() => { window.fixtureClientState = 'retained'; });
+    await page.locator('#chat-sidebar-list a[href="' + mountedPath + secondChat + '"]').click();
+    await page.waitForURL(origin + mountedPath + secondChat);
+    await page.locator('#chat-view[data-chat-id="9"]').waitFor();
+    await page.waitForFunction(() => !clientNavigationInFlight);
+    assert.equal(await page.evaluate(() => window.fixtureClientState), 'retained', 'Conversation navigation must keep the same document');
+    assert.equal(await currentLink.getAttribute('href'), mountedPath + secondChat);
+    await page.goBack();
+    await page.waitForURL(origin + mountedPath + firstChat);
+    await page.locator('#chat-view[data-chat-id="8"]').waitFor();
+    assert.equal(await page.evaluate(() => window.fixtureClientState), 'retained', 'Back must restore the mounted view inside the app');
+    console.log('The mounted application preserved the public prefix through sidebar reads, settings writes, conversation links and browser Back.');
+}
+
+async function checkMountedWorker(browser, errors) {
+    const page = await newPage(browser, errors, null, 'en-US', { serviceWorkers: 'allow' });
+    await submitSignIn(page, 'fixtureadmin', adminPassword, 'en', mountedPath);
+    await page.waitForURL(origin + mountedPath + '/');
+
+    const registration = await page.evaluate(async () => {
+        const registration = await getServiceWorkerRegistration();
+        return { scope: registration.scope, script: registration.active?.scriptURL };
+    });
+    assert.deepEqual(registration, {
+        scope: origin + mountedPath + '/',
+        script: origin + mountedPath + '/service-worker.js',
+    });
+    const worker = page.context().serviceWorkers().find((worker) => worker.url() === registration.script);
+    assert.ok(worker, 'The mounted browser must have a service worker');
+
+    const result = await worker.evaluate(async () => {
+        const requests = [];
+        const notifications = [];
+        const realFetch = self.fetch;
+        const showNotification = self.registration.showNotification;
+        self.fetch = async (url, options) => {
+            const response = await realFetch(url, options);
+            requests.push({ url, status: response.status });
+            return response;
+        };
+        // The headless fixture can run the worker but cannot grant the desktop notification permission.
+        self.registration.showNotification = async (title, { body, icon }) => notifications.push({ title, body, icon });
+        try {
+            // Exercise the real active worker with a synthetic, empty push event and no external provider.
+            const event = new Event('push');
+            let completion;
+            event.waitUntil = (promise) => { completion = promise; };
+            self.dispatchEvent(event);
+            await completion;
+            return { requests, notifications };
+        } finally {
+            self.fetch = realFetch;
+            self.registration.showNotification = showNotification;
+        }
+    });
+    assert.deepEqual(result.requests, [{ url: origin + mountedPath + '/notifications', status: 200 }]);
+    assert.deepEqual(result.notifications, [{
+        title: 'New message',
+        body: 'You have a new notification in Causette.',
+        icon: origin + mountedPath + '/assets/img/favicon.png',
+    }]);
+    console.log('Chromium activated the mounted service worker and captured the scoped synthetic push delivery.');
+}
+
 async function checkPrologueImport(browser, errors) {
     const page = await newPage(browser, errors);
     assert.equal((await page.goto(origin + '/install?lang=en')).status(), 200);
@@ -887,7 +1139,8 @@ async function checkPrologueImport(browser, errors) {
     await page.locator('input[name=password]').fill(adminPassword);
     assert.equal(await submitForm(page, '/login', page.locator('form:has(input[name=identifier]) button[type=submit]')), 302);
     assert.equal((await page.goto(origin + '/update')).status(), 200);
-    assert.deepEqual(await page.locator('dl dd').allTextContents(), ['1.0.1', '1.0.4']);
+    assert.ok(process.env.CAUSETTE_PACKAGE_VERSION, 'The fixture needs the packaged application version');
+    assert.deepEqual(await page.locator('dl dd').allTextContents(), ['1.0.1', process.env.CAUSETTE_PACKAGE_VERSION]);
     const update = page.locator('form[action="/update"]');
     await update.getByRole('checkbox').check();
     assert.equal(await submitForm(page, '/update', update.getByRole('button', { name: 'Apply update' })), 302);
@@ -965,7 +1218,11 @@ async function checkBotLabels(browser, errors) {
 }
 
 async function run() {
-    const browser = await chromium.launch({ args: ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'] });
+    const browserArgs = ['--host-resolver-rules=MAP fixture.example.test 127.0.0.1'];
+    if (process.env.CAUSETTE_FIXTURE_CERT_PIN) {
+        browserArgs.push('--ignore-certificate-errors-spki-list=' + process.env.CAUSETTE_FIXTURE_CERT_PIN);
+    }
+    const browser = await chromium.launch({ args: browserArgs });
     const errors = [];
     try {
         if (process.argv.includes('--prologue-import')) {
@@ -983,6 +1240,17 @@ async function run() {
         if (process.argv.includes('--install')) {
             console.log(`Chromium ${browser.version()}`);
             await installPackage(browser, errors);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--mounted-install')) {
+            await installPackage(browser, errors, mountedPath);
+            assert.deepEqual(errors, []);
+            return;
+        }
+        if (process.argv.includes('--mounted-navigation')) {
+            await checkMountedNavigation(browser, errors);
+            await checkMountedWorker(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }
@@ -1032,7 +1300,9 @@ async function run() {
             return;
         }
         if (process.argv.includes('--account-menu')) {
+            await checkSidebarKeyboard(browser, errors);
             await checkAccountMenu(browser, errors);
+            await checkSessionManagement(browser, errors);
             assert.deepEqual(errors, []);
             return;
         }

@@ -8,6 +8,7 @@ $installPath = $setupBasePath . '/install';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= $locale->html('install.title') ?></title>
+    <link rel="icon" type="image/png" sizes="64x64" href="<?= $escape($setupBasePath) ?>/assets/img/favicon.png">
     <link rel="stylesheet" href="<?= $escape($setupBasePath) ?>/assets/css/install.css">
 </head>
 <body>

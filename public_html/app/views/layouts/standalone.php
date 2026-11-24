@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($title ?? 'Causette', ENT_QUOTES, 'UTF-8') ?></title>
+    <link rel="icon" type="image/png" sizes="64x64" href="<?= \Causette\View\AssetUrl::html('/assets/img/favicon.png') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
 </head>

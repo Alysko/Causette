@@ -22,6 +22,7 @@ function placeholders(string $message): array
 }
 
 $root = __DIR__ . '/../public_html/app/locales';
+$catalogs = [];
 foreach (glob($root . '/en/*.php') as $file) {
     $english = require $file;
     $french = require $root . '/fr/' . basename($file);
@@ -29,6 +30,36 @@ foreach (glob($root . '/en/*.php') as $file) {
     expectSame([], array_diff_key($french, $english), 'Missing English keys in ' . basename($file));
     foreach ($english as $key => $message) {
         expectSame(placeholders($message), placeholders($french[$key]), "Placeholder mismatch for $key");
+    }
+    $catalogs[basename($file, '.php')] = $english;
+}
+
+$runtime = __DIR__ . '/../public_html';
+$sources = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($runtime, FilesystemIterator::SKIP_DOTS));
+$browserCatalogs = ['uiText' => 'browser', 'chatLabel' => 'chat', 'callText' => 'calls'];
+foreach ($sources as $file) {
+    $path = str_replace('\\', '/', $file->getPathname());
+    if (!$file->isFile() || preg_match('~/(?:vendor|locales|config)/~', $path)) {
+        continue;
+    }
+    $extension = $file->getExtension();
+    if ($extension !== 'php' && $extension !== 'js') {
+        continue;
+    }
+    $source = file_get_contents($path);
+    if ($extension === 'php') {
+        preg_match_all('~(?:\$tr|->text|->html)\(\s*[\x27\x22]([a-z_]+)\.([a-z0-9_]+)[\x27\x22](?=\s*[,\)])~',
+            $source, $references, PREG_SET_ORDER);
+        foreach ($references as [, $catalog, $key]) {
+            expectSame(true, array_key_exists($key, $catalogs[$catalog] ?? []), "Missing $catalog.$key in $path");
+        }
+    }
+
+    preg_match_all('~(?<!\$)\b(uiText|chatLabel|callText)\(\s*[\x27\x22]([a-z0-9_]+)[\x27\x22](?=\s*[,\)])~',
+        $source, $references, PREG_SET_ORDER);
+    foreach ($references as [, $function, $key]) {
+        $catalog = $browserCatalogs[$function];
+        expectSame(true, array_key_exists($key, $catalogs[$catalog]), "Missing $catalog.$key in $path");
     }
 }
 
@@ -43,4 +74,4 @@ expectSame('Café &amp; thé (1 vote)', $fr->html('chat.option_vote_label', [
     'votes' => '1 vote',
 ]), 'Parameters are escaped at the HTML boundary');
 
-echo "Catalog keys, placeholders, language selection and HTML output verified.\n";
+echo "Catalog keys, source references, placeholders, language selection and HTML output verified.\n";

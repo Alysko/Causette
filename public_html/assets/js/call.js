@@ -8,7 +8,10 @@ const remoteAnalysers = new Map();
 const CALL_SESSION_STORAGE_KEY = 'prologue.activeCallSession';
 const CALL_OVERLAY_STORAGE_KEY = 'prologue.activeCallOverlayMode';
 const CALL_PREFERRED_MIC_KEY = 'prologue.preferredMicDeviceId';
+const CALL_NOISE_SUPPRESSION_KEY = 'causette.callNoiseSuppression';
+let hideCallSelfView = false;
 const CALL_PREFERRED_CAMERA_KEY = 'prologue.preferredCameraDeviceId';
+let currentCameraQuality = null;
 const CALL_MIC_VOLUME_KEY = 'prologue.micVolume';
 const CALL_SPEAKER_VOLUME_KEY = 'prologue.speakerVolume';
 const CALL_SELF_FOCUS_PEER_ID = -1;
@@ -27,6 +30,12 @@ let compactOutgoingRingingCallId = 0;
 let outgoingPrivateRingingLabelInterval = null;
 let outgoingPrivateRingingLabelElement = null;
 let outgoingPrivateRingingLabelQueue = [];
+let callSignalRequest = null;
+let callSignalGeneration = 0;
+let screenShareRequest = null;
+let startingVoiceCall = false;
+let callTurnServer = null;
+let callTurnRefreshAt = Infinity;
 const GROUP_MEMBER_CALL_INDICATOR_STICKY_MS = 6000;
 let groupMemberCallIndicatorSnapshot = {
     chatId: 0,
@@ -35,11 +44,47 @@ let groupMemberCallIndicatorSnapshot = {
 };
 const OUTGOING_PRIVATE_RINGING_LABEL_INTERVAL_MS = 3000;
 const OUTGOING_PRIVATE_RINGING_FUN_LABELS = [
-    'Wagging...',
-    'Barking...',
-    'Booping...',
-    'Pouncing...'
+    'ringing_wagging',
+    'ringing_barking',
+    'ringing_booping',
+    'ringing_pouncing'
 ];
+
+function callText(key, parameters = {}) {
+    const label = window.CAUSETTE_CALLS?.labels?.[key] ?? key;
+    return label.replace(/\{([a-z_]+)\}/g,
+        (token, name) => Object.hasOwn(parameters, name) ? String(parameters[name]) : token);
+}
+
+function callPath(path) {
+    return (window.CAUSETTE_CALLS?.basePath || '') + path;
+}
+
+function currentCallIceServers() {
+    const stun = window.CAUSETTE_CALLS?.iceServers || [];
+    return callTurnServer ? [...stun, callTurnServer] : stun;
+}
+
+function applyCallTurnTicket(ticket) {
+    const server = ticket?.server ?? null;
+    const delay = Number(ticket?.refresh_after_seconds);
+    if (server !== null && (!Array.isArray(server.urls) || typeof server.username !== 'string'
+        || typeof server.credential !== 'string' || !Number.isFinite(delay) || delay < 60 || delay > 1800)) {
+        return;
+    }
+
+    callTurnRefreshAt = server ? Date.now() + delay * 1000 : Infinity;
+    if (JSON.stringify(callTurnServer) === JSON.stringify(server)) return;
+
+    callTurnServer = server;
+    for (const connection of callPeerConnections.values()) {
+        try {
+            connection.setConfiguration({ ...connection.getConfiguration(), iceServers: currentCallIceServers() });
+        } catch {
+            // The next connection or ICE gathering can still use the new credentials.
+        }
+    }
+}
 
 function shuffleValues(values) {
     const shuffled = [...values];
@@ -64,10 +109,10 @@ function stopOutgoingPrivateRingingLabelCycle() {
 function getNextOutgoingPrivateRingingLabel() {
     if (outgoingPrivateRingingLabelQueue.length === 0) {
         outgoingPrivateRingingLabelQueue = shuffleValues(OUTGOING_PRIVATE_RINGING_FUN_LABELS);
-        return 'Ringing...';
+        return uiText('ringing');
     }
 
-    return outgoingPrivateRingingLabelQueue.shift();
+    return callText(outgoingPrivateRingingLabelQueue.shift());
 }
 
 function startOutgoingPrivateRingingLabelCycle(labelElement) {
@@ -102,7 +147,7 @@ function applyVoiceCallButtonState() {
     voiceCallButton.disabled = inActiveCall || !canStartCalls;
     voiceCallButton.classList.toggle('opacity-50', !inActiveCall && !canStartCalls);
     voiceCallButton.classList.toggle('cursor-not-allowed', !inActiveCall && !canStartCalls);
-    voiceCallButton.setAttribute('title', (!inActiveCall && !canStartCalls) ? "You can't call a banned user" : '');
+    voiceCallButton.setAttribute('title', callText(canStartCalls ? 'start_call' : 'cannot_call_banned_user'));
 }
 
 function setChatUserInActiveCall(inActiveCall) {
@@ -116,7 +161,13 @@ function setChatUserInActiveCall(inActiveCall) {
     applyVoiceCallButtonState();
 }
 
+function canPokeInCurrentGroup() {
+    return Boolean(currentCallId && localStream && currentChat?.type === 'group'
+        && Number(globalCallContext?.chat_id) === Number(currentChat.id));
+}
+
 async function pokeGroupMember(userId, username) {
+    if (!canPokeInCurrentGroup()) return;
     const targetUserId = Number(userId || 0);
 
     // Derive chat context from state first, then DOM as a safe fallback.
@@ -146,7 +197,7 @@ async function pokeGroupMember(userId, username) {
     const memberNode = document.querySelector(`[data-group-member-user-id="${targetUserId}"]`);
     const targetIsInCall = memberNode?.getAttribute('data-group-member-in-call') === '1';
     if (targetIsInCall) {
-        showToast(`${String(username || 'User')} is already in the call`, 'info');
+        showToast(callText('peer_already_joined', { name: username || callText('participant') }), 'info');
         return;
     }
 
@@ -157,11 +208,11 @@ async function pokeGroupMember(userId, username) {
     });
 
     if (result?.success) {
-        showToast(`Poked ${String(username || 'user')}`, 'success');
+        showToast(callText('poke_sent', { name: username || callText('participant') }), 'success');
         return;
     }
 
-    showToast(uiActionError(result?.error, 'unable_to_send_poke'), 'error');
+    showToast(result?.error || uiText('unable_to_send_poke'), 'error');
 }
 
 window.pokeGroupMember = pokeGroupMember;
@@ -210,7 +261,7 @@ async function maybeJoinGroupCallFromPokeIntent() {
 
     let activeCall = null;
     try {
-        const response = await fetch(`/api/calls/active/${Number(currentChat.id || 0)}`);
+        const response = await fetch(callPath(`/api/calls/active/${Number(currentChat.id || 0)}`));
         const payload = await response.json();
         activeCall = payload?.call || null;
     } catch {
@@ -267,7 +318,7 @@ function showCallConnectingOverlay(options = {}) {
     hideCallConnectingOverlay();
 
     const mode = String(options.mode || 'connecting').toLowerCase();
-    const overlayTitle = mode === 'reconnecting' ? 'Reconnecting call' : 'Connecting call';
+    const overlayTitle = mode === 'reconnecting' ? callText('reconnecting_call') : uiText('connecting_call');
     if (title) {
         title.textContent = overlayTitle;
     }
@@ -346,7 +397,7 @@ async function declineIncomingCallById(callId) {
     });
 
     if (!result.success) {
-        showToast(uiActionError(result.error, 'unable_to_decline_call'), 'error');
+        showToast(result.error || uiText('unable_to_decline_call'), 'error');
         return { success: false, ended: false };
     }
 
@@ -645,7 +696,7 @@ function setChatCallEnabled(enabled) {
 
 function getCallExitButtonLabel() {
     const callChatType = normalizeChatType(currentChat?.type || globalCallContext?.chat_type || 'personal');
-    return callChatType === 'group' ? 'Leave Group Call' : 'End Call';
+    return callText(callChatType === 'group' ? 'leave_group_call' : 'end_call');
 }
 
 
@@ -714,14 +765,14 @@ function setChatCallStatusBar(state, incomingAlert = false) {
     const isActiveCall = state === 'active' || state === 'muted';
     if (showHint) showHint.classList.toggle('hidden', !(overlayIsHidden && isActiveCall));
     bar.style.cursor = (overlayIsHidden && isActiveCall) ? 'pointer' : '';
-    bar.title = (overlayIsHidden && isActiveCall) ? 'Click to show call screen' : '';
+    bar.title = (overlayIsHidden && isActiveCall) ? callText('show_call_screen') : '';
 
     if (state === 'ringing') {
         const isPersonal = normalizeChatType(currentChat?.type || globalCallContext?.chat_type || 'personal') === 'personal';
         if (incomingAlert) {
             stopOutgoingPrivateRingingLabelCycle();
             const callerUsername = getIncomingCallerUsername();
-            label.textContent = callerUsername ? `Incoming call from ${callerUsername}...` : 'Incoming call...';
+            label.textContent = callerUsername ? callText('incoming_from', { name: callerUsername }) : uiText('incoming_call');
         } else if (isPersonal) {
             startOutgoingPrivateRingingLabelCycle(label);
         } else {
@@ -889,7 +940,7 @@ function getChatCallState(call) {
     if (!currentUserJoined) {
         if (isGroupCall) {
             return {
-                state: null,
+                state: participantCount > 0 ? 'joinable' : null,
                 callId,
                 ringingDirection: null,
                 incomingAlert: false
@@ -960,7 +1011,7 @@ function ensureCallRingingAudio() {
         return callRingingAudio;
     }
 
-    callRingingAudio = new Audio('/assets/sounds/callringing.wav');
+    callRingingAudio = new Audio(callPath('/assets/sounds/callringing.wav'));
     callRingingAudio.preload = 'auto';
     callRingingAudio.loop = true;
     return callRingingAudio;
@@ -1008,9 +1059,11 @@ function stopCallRingingAudio() {
 
 async function cleanupLocalCallSession(options = {}) {
     const restorePresence = options.restorePresence !== false;
+    currentCameraQuality = null;
     hideCallConnectingOverlay();
     hideIncomingCallWaitingOverlay();
 
+    screenShareRequest = null;
     if (screenStream) {
         screenStream.getTracks().forEach(track => track.stop());
         screenStream = null;
@@ -1031,6 +1084,8 @@ async function cleanupLocalCallSession(options = {}) {
     const callIdBeforeCleanup = Number(currentCallId || 0);
     localStream = null;
     currentCallId = null;
+    callTurnServer = null;
+    callTurnRefreshAt = Infinity;
     isMuted = false;
     isVideoEnabled = false;
     localCameraStartedAtMs = 0;
@@ -1047,15 +1102,7 @@ async function cleanupLocalCallSession(options = {}) {
     if (callIdBeforeCleanup > 0) {
         declinedCallId = callIdBeforeCleanup;
     }
-    if (callSignalPollInterval) {
-        clearInterval(callSignalPollInterval);
-        callSignalPollInterval = null;
-    }
-    if (callSignalPollFastModeTimeout) {
-        clearTimeout(callSignalPollFastModeTimeout);
-        callSignalPollFastModeTimeout = null;
-    }
-    callSignalPollFastMode = false;
+    stopCallSignalPolling();
     if (leftAloneCallEndTimeout) {
         clearTimeout(leftAloneCallEndTimeout);
         leftAloneCallEndTimeout = null;
@@ -1150,7 +1197,7 @@ function syncCallRingingState(callState) {
         lastIncomingCallAlertId = callState.callId;
         showToast(uiText('incoming_call'), 'info');
         if (window.BROWSER_NOTIFICATIONS_ENABLED && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            new Notification('Incoming call', { body: 'Someone is calling you.' });
+            new Notification(uiText('incoming_call'), { body: callText('incoming_notification_body') });
         }
     }
 }
@@ -1273,7 +1320,7 @@ async function applyActiveCallSnapshot(activeCall, options = {}) {
 }
 
 async function fetchCurrentActiveCall() {
-    const response = await fetch('/api/calls/current');
+    const response = await fetch(callPath('/api/calls/current'));
     const payload = await response.json();
     return {
         call: payload?.call || null,
@@ -1287,8 +1334,16 @@ async function refreshGlobalCallState(options = {}) {
     chatCallStatusInFlight = true;
     try {
         const snapshot = await fetchCurrentActiveCall();
-        const activeCall = snapshot?.call || null;
+        let activeCall = snapshot?.call || null;
         const incomingCall = snapshot?.incomingCall || null;
+        const chatId = Number(currentChat?.id || 0);
+        if (!activeCall && !currentCallId && chatId > 0 && normalizeChatType(currentChat?.type) === 'group') {
+            const response = await fetch(callPath(`/api/calls/active/${chatId}`));
+            const group = response.ok ? (await response.json())?.call : null;
+            if (group && chatId === Number(currentChat?.id || 0) && !currentCallId) {
+                activeCall = { ...group, chat_type: 'group' };
+            }
+        }
         if (activeCall && !currentChat) {
             ensureCurrentChatContext(activeCall);
         }
@@ -1341,7 +1396,7 @@ function initCallLeaveBeacon() {
             csrf_token: getCsrfToken(),
             call_id: String(callId)
         });
-        navigator.sendBeacon('/api/calls/leave', payload);
+        navigator.sendBeacon(callPath('/api/calls/leave'), payload);
     };
 
     window.addEventListener('pagehide', fireLeaveBeacon);
@@ -1372,7 +1427,8 @@ async function restoreCallSession(activeCall) {
 }
 
 async function refreshChatCallStatusBar(options = {}) {
-    if (!currentChat) {
+    const chat = currentChat;
+    if (!chat) {
         await refreshGlobalCallState(options);
         return;
     }
@@ -1380,17 +1436,19 @@ async function refreshChatCallStatusBar(options = {}) {
 
     chatCallStatusInFlight = true;
     try {
-        const response = await fetch(`/api/calls/active/${currentChat.id}`);
+        const response = await fetch(callPath(`/api/calls/active/${chat.id}`));
         const payload = await response.json();
+        if (currentChat !== chat) return;
         let activeCall = payload?.call || null;
         if (activeCall) {
-            activeCall.chat_id = Number(activeCall?.chat_id || currentChat.id || 0);
-            activeCall.chat_type = normalizeChatType(currentChat?.type || 'personal');
+            activeCall.chat_id = Number(activeCall?.chat_id || chat.id || 0);
+            activeCall.chat_type = normalizeChatType(chat.type || 'personal');
         }
 
         const hasLocalOrPersistedCall = Number(currentCallId || globalCallContext?.id || 0) > 0;
         if (!activeCall && hasLocalOrPersistedCall) {
             const globalSnapshot = await fetchCurrentActiveCall().catch(() => null);
+            if (currentChat !== chat) return;
             const globalActiveCall = globalSnapshot?.call || null;
             if (globalActiveCall) {
                 activeCall = globalActiveCall;
@@ -1399,7 +1457,7 @@ async function refreshChatCallStatusBar(options = {}) {
 
         await applyActiveCallSnapshot(activeCall, { allowRestore: false });
     } catch {
-        if (!currentCallId) {
+        if (currentChat === chat && !currentCallId) {
             setChatCallStatusBar(null);
             stopCallRingingAudio();
         }
@@ -1410,9 +1468,11 @@ async function refreshChatCallStatusBar(options = {}) {
 
 
 async function startVoiceCall(options = {}) {
-    if (!currentChat) return;
+    const chatId = Number(currentChat?.id || 0);
+    if (!chatId || startingVoiceCall) return;
     const chatType = normalizeChatType(currentChat?.type || 'personal');
-    if (currentChat.user_in_active_call === true || currentUserInActiveCall) {
+    const restoringThisCall = options.reconnecting && !localStream && Number(globalCallContext?.chat_id || 0) === chatId;
+    if (!restoringThisCall && (currentChat.user_in_active_call === true || currentUserInActiveCall)) {
         showToast(uiText('you_are_already_in_an_active_call'), 'error');
         return;
     }
@@ -1421,17 +1481,36 @@ async function startVoiceCall(options = {}) {
         return;
     }
 
-    const start = await postForm('/api/calls/start', {
-        csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id)
-    });
+    startingVoiceCall = true;
+    let rawMicStream;
+    let start;
+    try {
+        try {
+            rawMicStream = await navigator.mediaDevices.getUserMedia(getSavedAudioConstraints());
+        } catch {
+            showToast(callText('microphone_unavailable'), 'error');
+            return;
+        }
 
-    if (!start.call_id) {
-        showToast(uiActionError(start.error, 'unable_to_start_call'), 'error');
-        return;
+        if (chatId !== Number(currentChat?.id || 0) || !rawMicStream.getAudioTracks().length) {
+            rawMicStream.getTracks().forEach((track) => track.stop());
+            return;
+        }
+        start = await postForm('/api/calls/start', {
+            csrf_token: getCsrfToken(),
+            chat_id: String(chatId)
+        }).catch(() => null);
+        if (!start?.call_id) {
+            rawMicStream.getTracks().forEach((track) => track.stop());
+            showToast(start?.error || uiText('unable_to_start_call'), 'error');
+            return;
+        }
+    } finally {
+        startingVoiceCall = false;
     }
 
     currentCallId = start.call_id;
+    applyCallTurnTicket(start.turn ?? null);
     setChatUserInActiveCall(true);
     if (chatType === 'group') {
         stopCallDurationCounter();
@@ -1447,7 +1526,7 @@ async function startVoiceCall(options = {}) {
     hadCallPeerConnected = false;
     const persistedCall = {
         call_id: Number(start.call_id || 0),
-        chat_id: Number(currentChat?.id || 0),
+        chat_id: chatId,
         chat_type: chatType,
         started_at: new Date().toISOString(),
         started_by: Number(currentUserId || 0),
@@ -1479,15 +1558,12 @@ async function startVoiceCall(options = {}) {
             syncCallRingingState({ state: 'ringing', callId: Number(currentCallId || 0), ringingDirection: 'outgoing', incomingAlert: false });
         }
     }
-    const rawMicStream = await navigator.mediaDevices.getUserMedia(getSavedAudioConstraints());
-    let processedStream = null;
+    let processedStream;
     try {
         processedStream = setupMicGainPipeline(rawMicStream);
     } catch (e) {
-        rawMicStream.getTracks().forEach((track) => {
-            try { track.stop(); } catch (stopError) {}
-        });
-        throw e;
+        teardownMicGainPipeline();
+        processedStream = rawMicStream;
     }
     localStream = new MediaStream(processedStream.getAudioTracks());
     bindCallAudioUnlockHandlers();
@@ -1519,7 +1595,7 @@ async function startVoiceCall(options = {}) {
     }
     applySidebarStatus({
         effective_status: 'busy',
-        effective_status_label: 'Busy',
+        effective_status_label: callText('busy_state'),
         effective_status_text_class: 'text-amber-400',
         effective_status_dot_class: 'bg-amber-500'
     });
@@ -1634,17 +1710,21 @@ function sendLocalMediaMetaSignal() {
 }
 
 async function toggleVideoInCall() {
-    if (!localStream) return;
+    const targetStream = localStream;
+    if (!targetStream) return;
 
     if (!isVideoEnabled) {
         try {
             const cameraStream = await navigator.mediaDevices.getUserMedia(getSavedVideoConstraints());
             const videoTrack = cameraStream.getVideoTracks()[0];
-            if (!videoTrack) return;
+            if (!videoTrack || targetStream !== localStream || isVideoEnabled) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+                return;
+            }
 
-            localStream.addTrack(videoTrack);
+            targetStream.addTrack(videoTrack);
             const localVideo = document.getElementById('local-video');
-            if (localVideo) localVideo.srcObject = localStream;
+            if (localVideo) localVideo.srcObject = targetStream;
             isVideoEnabled = true;
             localCameraStartedAtMs = Date.now();
 
@@ -1747,7 +1827,7 @@ function updateCallParticipantsPanelVisibility() {
     panel.classList.toggle('hidden', !callParticipantsPanelOpen);
     panel.setAttribute('aria-hidden', callParticipantsPanelOpen ? 'false' : 'true');
     toggleButton.setAttribute('aria-expanded', callParticipantsPanelOpen ? 'true' : 'false');
-    toggleButton.title = callParticipantsPanelOpen ? 'Hide participants panel' : 'Show participants panel';
+    toggleButton.title = callText(callParticipantsPanelOpen ? 'hide_participants' : 'show_participants');
     toggleButton.classList.toggle('bg-zinc-600', callParticipantsPanelOpen);
     toggleButton.classList.toggle('border-zinc-500', callParticipantsPanelOpen);
     toggleButton.classList.toggle('bg-zinc-800', !callParticipantsPanelOpen);
@@ -1759,8 +1839,8 @@ function getSortedRemotePeerIds() {
         .map((peerId) => Number(peerId || 0))
         .filter((peerId) => peerId > 0)
         .sort((leftPeerId, rightPeerId) => {
-            const leftUsername = String(callPeerStates.get(leftPeerId)?.username || 'Participant').toLowerCase();
-            const rightUsername = String(callPeerStates.get(rightPeerId)?.username || 'Participant').toLowerCase();
+            const leftUsername = String(callPeerStates.get(leftPeerId)?.username || callText('participant')).toLowerCase();
+            const rightUsername = String(callPeerStates.get(rightPeerId)?.username || callText('participant')).toLowerCase();
             const byName = leftUsername.localeCompare(rightUsername);
             if (byName !== 0) return byName;
             return leftPeerId - rightPeerId;
@@ -1858,7 +1938,7 @@ function updateLocalPipLayout() {
 function updateRemoteUsernameLabel() {
     const btn = document.getElementById('remote-username-btn');
     if (!btn) return;
-    btn.textContent = peerUsername || 'Participant';
+    btn.textContent = peerUsername || callText('participant');
     btn.disabled = true;
     btn.style.cursor = 'default';
     btn.classList.remove('hover:text-white', 'hover:underline', 'underline-offset-2');
@@ -1969,16 +2049,14 @@ function updateCallVideoTileLayout() {
 // ── Meta signaling (screen_sharing status) ───────────────────────────────────
 
 async function sendMetaSignal(data) {
-    if (!currentCallId) return;
-    await postForm('/api/calls/signal', {
-        csrf_token: getCsrfToken(),
-        call_id: String(currentCallId),
-        type: 'meta',
-        data: JSON.stringify(data)
-    }).catch(() => {});
+    const callId = Number(currentCallId || 0);
+    const generation = callSignalGeneration;
+    if (!callId) return;
+    await postCallSignal(callId, { type: 'meta', data: JSON.stringify(data) });
 
     const peerIds = Array.from(callPeerConnections.keys());
     for (const peerId of peerIds) {
+        if (generation !== callSignalGeneration || callId !== Number(currentCallId || 0)) return;
         await sendSignalToPeer(peerId, 'meta', data);
     }
 }
@@ -1995,9 +2073,16 @@ function toggleScreenShare() {
     }
     if (isScreenSharing) {
         stopScreenShare(true);
-    } else {
-        document.getElementById('screenshare-modal')?.classList.remove('hidden');
+        return;
     }
+    const defaultQuality = window.CAUSETTE_CALLS?.videoQuality?.screen;
+    if (defaultQuality && defaultQuality !== 'ask') {
+        void startScreenShare(defaultQuality);
+        return;
+    }
+    const remember = document.getElementById('remember-screenshare-quality');
+    if (remember) remember.checked = false;
+    document.getElementById('screenshare-modal')?.classList.remove('hidden');
 }
 
 function closeScreenShareModal() {
@@ -2094,18 +2179,84 @@ function stopSettingsLevelMeter() {
 
 function getSavedAudioConstraints() {
     const savedMicId = localStorage.getItem(CALL_PREFERRED_MIC_KEY);
-    if (savedMicId) {
-        return { audio: { deviceId: { ideal: savedMicId } }, video: false };
+    const audio = savedMicId ? { deviceId: { ideal: savedMicId } } : {};
+    if (navigator.mediaDevices.getSupportedConstraints?.().noiseSuppression) {
+        audio.noiseSuppression = localStorage.getItem(CALL_NOISE_SUPPRESSION_KEY) === '1';
     }
-    return { audio: true, video: false };
+    return { audio, video: false };
 }
 
-function getSavedVideoConstraints() {
-    const savedCameraId = localStorage.getItem(CALL_PREFERRED_CAMERA_KEY);
-    if (savedCameraId) {
-        return { video: { deviceId: { ideal: savedCameraId } } };
+function getVideoQualityConstraints(quality) {
+    switch (quality) {
+        case 'eco':
+            return { width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 }, frameRate: { ideal: 25, max: 25 } };
+        case '1080p-30fps':
+            return { width: { ideal: 1920, max: 1920 }, height: { ideal: 1080, max: 1080 }, frameRate: { ideal: 30, max: 30 } };
+        case 'native-60fps':
+            return { frameRate: { ideal: 60, max: 60 } };
+        default:
+            return {};
     }
-    return { video: true };
+}
+
+function getSavedVideoConstraints(exactDeviceId = '') {
+    const quality = currentCameraQuality ?? window.CAUSETTE_CALLS?.videoQuality?.camera;
+    const video = getVideoQualityConstraints(quality);
+    const savedCameraId = localStorage.getItem(CALL_PREFERRED_CAMERA_KEY);
+    if (exactDeviceId) video.deviceId = { exact: exactDeviceId };
+    else if (savedCameraId) video.deviceId = { ideal: savedCameraId };
+    return { video: Object.keys(video).length ? video : true };
+}
+
+async function rememberVideoQuality(media, quality) {
+    try {
+        const result = await postForm('/settings/call-video', { csrf_token: getCsrfToken(), media, quality });
+        if (result?.success === true && result.quality === quality) {
+            const config = window.CAUSETTE_CALLS ??= {};
+            (config.videoQuality ??= {})[media] = quality;
+            showToast(uiText('call_video_quality_saved'), 'success');
+            return;
+        }
+    } catch {
+        // The choice still applies to the current capture.
+    }
+    showToast(uiText('call_video_quality_save_failed'), 'error');
+}
+
+function bindCameraQualitySettings() {
+    const form = document.getElementById('call-camera-quality-form');
+    const select = document.getElementById('call-camera-quality');
+    const remember = document.getElementById('remember-camera-quality');
+    const submit = form?.querySelector('button[type="submit"]');
+    if (!select || !remember || !submit) return;
+
+    select.value = currentCameraQuality ?? window.CAUSETTE_CALLS?.videoQuality?.camera ?? 'auto';
+    remember.checked = false;
+    form.onsubmit = async (event) => {
+        event.preventDefault();
+        if (submit.disabled) return;
+        const quality = select.value;
+        const persist = remember.checked;
+        const callId = currentCallId;
+        const camera = getLiveLocalCameraTrack();
+        submit.disabled = true;
+        try {
+            if (camera) {
+                const constraints = camera.getConstraints();
+                delete constraints.width;
+                delete constraints.height;
+                delete constraints.frameRate;
+                await camera.applyConstraints({ ...constraints, ...getVideoQualityConstraints(quality) });
+            }
+            if (currentCallId === callId) currentCameraQuality = quality;
+            if (persist) await rememberVideoQuality('camera', quality);
+            else if (currentCallId === callId) showToast(uiText('call_video_quality_applied'), 'success');
+        } catch {
+            showToast(uiText('call_video_quality_apply_failed'), 'error');
+        } finally {
+            submit.disabled = false;
+        }
+    };
 }
 
 function openCallSettingsModal() {
@@ -2113,6 +2264,23 @@ function openCallSettingsModal() {
     if (!modal) return;
     modal.classList.remove('hidden');
     populateCallSettingsDevices();
+    bindCameraQualitySettings();
+    const noise = document.getElementById('call-noise-suppression');
+    if (noise) {
+        noise.disabled = !navigator.mediaDevices?.getSupportedConstraints?.().noiseSuppression;
+        noise.checked = localStorage.getItem(CALL_NOISE_SUPPRESSION_KEY) === '1';
+        noise.onchange = async () => {
+            const requested = noise.checked;
+            const track = micGainInputStream?.getAudioTracks()[0] ?? getLiveLocalAudioTrack();
+            try {
+                if (track) await track.applyConstraints({ ...track.getConstraints(), noiseSuppression: requested });
+                localStorage.setItem(CALL_NOISE_SUPPRESSION_KEY, requested ? '1' : '0');
+            } catch {
+                noise.checked = !requested;
+                showToast(uiText('call_noise_suppression_failed'), 'error');
+            }
+        };
+    }
 
     const volumeSlider = document.getElementById('call-settings-volume');
     if (volumeSlider) {
@@ -2169,13 +2337,16 @@ async function populateCallSettingsDevices() {
     if (micSelect) {
         micSelect.innerHTML = '';
         if (mics.length === 0) {
-            micSelect.innerHTML = '<option value="">No microphones found</option>';
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = callText('no_microphones');
+            micSelect.appendChild(option);
             micSelect.disabled = true;
         } else {
             mics.forEach((mic, i) => {
                 const opt = document.createElement('option');
                 opt.value = mic.deviceId;
-                opt.textContent = mic.label || ('Microphone ' + (i + 1));
+                opt.textContent = mic.label || callText('microphone_number', { number: i + 1 });
                 // Prefer active device, fall back to saved preference
                 if (activeMicId && mic.deviceId === activeMicId) opt.selected = true;
                 else if (!activeMicId && mic.deviceId === savedMicId) opt.selected = true;
@@ -2193,13 +2364,16 @@ async function populateCallSettingsDevices() {
             cameraWrap.classList.remove('hidden');
             cameraSelect.innerHTML = '';
             if (cameras.length === 0) {
-                cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = callText('no_cameras');
+            cameraSelect.appendChild(option);
                 cameraSelect.disabled = true;
             } else {
                 cameras.forEach((cam, i) => {
                     const opt = document.createElement('option');
                     opt.value = cam.deviceId;
-                    opt.textContent = cam.label || ('Camera ' + (i + 1));
+                opt.textContent = cam.label || callText('camera_number', { number: i + 1 });
                     if (activeCameraId && cam.deviceId === activeCameraId) opt.selected = true;
                     else if (!activeCameraId && cam.deviceId === savedCameraId) opt.selected = true;
                     cameraSelect.appendChild(opt);
@@ -2221,15 +2395,20 @@ async function handleMicChange() {
 
     localStorage.setItem(CALL_PREFERRED_MIC_KEY, deviceId);
 
-    if (!localStream) return;
+    const targetStream = localStream;
+    if (!targetStream) return;
 
     let rawStream = null;
     let pipelineConfigured = false;
     try {
         rawStream = await navigator.mediaDevices.getUserMedia({
-            audio: { deviceId: { exact: deviceId } },
+            audio: { ...getSavedAudioConstraints().audio, deviceId: { exact: deviceId } },
             video: false
         });
+        if (targetStream !== localStream || micSelect.value !== deviceId || !rawStream.getAudioTracks().length) {
+            rawStream.getTracks().forEach((track) => track.stop());
+            return;
+        }
         const processedStream = setupMicGainPipeline(rawStream);
         pipelineConfigured = true;
         const newAudioTrack = processedStream.getAudioTracks()[0];
@@ -2271,14 +2450,16 @@ async function handleCameraChange() {
 
     localStorage.setItem(CALL_PREFERRED_CAMERA_KEY, deviceId);
 
-    if (!localStream || !isVideoEnabled) return;
+    const targetStream = localStream;
+    if (!targetStream || !isVideoEnabled) return;
 
     try {
-        const newStream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: deviceId } }
-        });
+        const newStream = await navigator.mediaDevices.getUserMedia(getSavedVideoConstraints(deviceId));
         const newVideoTrack = newStream.getVideoTracks()[0];
-        if (!newVideoTrack) return;
+        if (!newVideoTrack || targetStream !== localStream || cameraSelect.value !== deviceId || !isVideoEnabled) {
+            newStream.getTracks().forEach((track) => track.stop());
+            return;
+        }
 
         localStream.getVideoTracks().forEach(track => {
             if (screenStream && screenStream.getVideoTracks().some(st => st.id === track.id)) {
@@ -2299,50 +2480,49 @@ async function handleCameraChange() {
     }
 }
 
-navigator.mediaDevices.addEventListener('devicechange', () => {
+navigator.mediaDevices?.addEventListener?.('devicechange', () => {
     const modal = document.getElementById('call-settings-modal');
     if (modal && !modal.classList.contains('hidden')) {
         populateCallSettingsDevices();
     }
 });
 
-async function startScreenShare(quality) {
-    if (isMobileDevice()) {
-        return;
-    }
+async function startScreenShare(quality, remember = false) {
+    const callId = Number(currentCallId || 0);
+    if (isMobileDevice() || !callId || screenShareRequest || screenStream) return;
     closeScreenShareModal();
+    const request = {};
+    screenShareRequest = request;
 
-    let videoConstraints;
-    switch (quality) {
-        case '720p-10fps':
-            videoConstraints = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 10, max: 10 } };
-            break;
-        case '1080p-30fps':
-            videoConstraints = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 30 } };
-            break;
-        case 'native-60fps':
-            videoConstraints = { frameRate: { ideal: 60, max: 60 } };
-            break;
-        default:
-            videoConstraints = true;
-    }
+    const constraints = getVideoQualityConstraints(quality);
+    const videoConstraints = Object.keys(constraints).length ? constraints : true;
 
+    let capture;
     try {
-        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints, audio: false });
+        capture = await navigator.mediaDevices.getDisplayMedia({ video: videoConstraints, audio: false });
+        if (screenShareRequest !== request || Number(currentCallId || 0) !== callId || screenStream) {
+            capture.getTracks().forEach((track) => track.stop());
+            return;
+        }
     } catch (e) {
-        if (e.name !== 'NotAllowedError') {
+        if (screenShareRequest === request && e.name !== 'NotAllowedError') {
             showToast(uiText('could_not_start_screen_share'), 'error');
         }
         return;
+    } finally {
+        if (screenShareRequest === request) {
+            screenShareRequest = null;
+        }
     }
 
-    const screenTrack = screenStream.getVideoTracks()[0];
+    const screenTrack = capture.getVideoTracks()[0];
     if (!screenTrack) {
+        capture.getTracks().forEach((track) => track.stop());
         showToast(uiText('no_screen_selected'), 'error');
-        screenStream = null;
         return;
     }
 
+    screenStream = capture;
     const screenVideo = document.getElementById('screen-share-video');
     if (screenVideo) {
         screenVideo.srcObject = screenStream;
@@ -2355,7 +2535,10 @@ async function startScreenShare(quality) {
     updateLocalPipLayout();
     sendLocalMediaMetaSignal();
 
-    screenTrack.onended = () => { stopScreenShare(true); };
+    screenTrack.onended = () => {
+        if (screenStream === capture) stopScreenShare(true);
+    };
+    if (remember) void rememberVideoQuality('screen', quality);
 }
 
 async function stopScreenShare(restoreCamera = true) {
@@ -2371,15 +2554,25 @@ async function stopScreenShare(restoreCamera = true) {
         screenVideo.srcObject = null;
     }
 
-    if (restoreCamera && isVideoEnabled && localStream) {
+    const targetStream = localStream;
+    if (restoreCamera && isVideoEnabled && targetStream && !getLiveLocalCameraTrack()) {
         try {
             const cameraStream = await navigator.mediaDevices.getUserMedia(getSavedVideoConstraints());
             const cameraTrack = cameraStream.getVideoTracks()[0];
-            if (cameraTrack) {
-                localStream.getVideoTracks().forEach(t => { t.stop(); localStream.removeTrack(t); });
-                localStream.addTrack(cameraTrack);
+            if (targetStream !== localStream) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+                return;
+            }
+            if (!cameraTrack || !isVideoEnabled) {
+                cameraStream.getTracks().forEach((track) => track.stop());
+            } else {
+                targetStream.getVideoTracks().forEach((track) => {
+                    track.stop();
+                    targetStream.removeTrack(track);
+                });
+                targetStream.addTrack(cameraTrack);
                 const localVideo = document.getElementById('local-video');
-                if (localVideo) localVideo.srcObject = localStream;
+                if (localVideo) localVideo.srcObject = targetStream;
                 localCameraStartedAtMs = Date.now();
             }
         } catch (e) {}
@@ -2402,13 +2595,13 @@ function setupPeerConnection() {
     return null;
 }
 
-function shouldInitiatePeerOffer(peerId) {
+function shouldInitiatePeerOffer(peerId, connection = null) {
     const me = Number(currentUserId || 0);
     const other = Number(peerId || 0);
     if (!(me > 0 && other > 0) || me === other) {
         return false;
     }
-    return me < other;
+    return Boolean(connection?.remoteDescription) || me < other;
 }
 
 function getLiveLocalAudioTrack() {
@@ -2665,6 +2858,13 @@ function assignIncomingVideoTrack(state, track) {
     };
 }
 
+function toggleCallSelfView() {
+    hideCallSelfView = !hideCallSelfView;
+    document.getElementById('toggle-call-self-view')?.setAttribute('aria-pressed', String(hideCallSelfView));
+    if (hideCallSelfView && activeRemotePeerId === CALL_SELF_FOCUS_PEER_ID) activeRemotePeerId = 0;
+    refreshActiveRemoteTile();
+}
+
 function updateDynamicRemotePeerTiles(primaryPeerId = 0) {
     const participantsList = document.getElementById('call-participants-list');
     if (!participantsList) {
@@ -2673,18 +2873,18 @@ function updateDynamicRemotePeerTiles(primaryPeerId = 0) {
 
     const sortedRemotePeerIds = getSortedRemotePeerIds();
     const participants = [
-        {
+        ...(hideCallSelfView ? [] : [{
             peerId: CALL_SELF_FOCUS_PEER_ID,
-            username: localUsername || 'You',
+            username: localUsername || callText('you'),
             isSelf: true,
             stream: (isScreenSharing && screenStream) ? screenStream : localStream,
             screenSharing: Boolean(isScreenSharing)
-        },
+        }]),
         ...sortedRemotePeerIds.map((peerId) => {
             const state = callPeerStates.get(peerId);
             return {
                 peerId,
-                username: String(state?.username || 'Participant'),
+                username: String(state?.username || callText('participant')),
                 isSelf: false,
                 stream: getPreferredParticipantStream(state),
                 screenSharing: Boolean(state?.screenSharing)
@@ -2774,7 +2974,7 @@ function updateDynamicRemotePeerTiles(primaryPeerId = 0) {
         const nameButton = document.createElement('button');
         nameButton.type = 'button';
         nameButton.className = 'js-call-participant-username text-xs text-zinc-300 text-left truncate';
-        nameButton.textContent = participant.isSelf ? `${participant.username} (You)` : participant.username;
+        nameButton.textContent = participant.isSelf ? callText('self_name', { name: participant.username }) : participant.username;
         const hasLiveVideo = Boolean(liveVideoStream);
 
         const selectAsPrimary = () => {
@@ -2839,7 +3039,7 @@ function refreshActiveRemoteTile() {
     peerConnection = activeRemotePeerId > 0 ? (callPeerConnections.get(activeRemotePeerId) || null) : null;
 
     if (isSelfFocused && remoteCameraVideo && remoteScreenVideo) {
-        peerUsername = localUsername ? `${localUsername} (You)` : 'You';
+        peerUsername = localUsername ? callText('self_name', { name: localUsername }) : callText('you');
         remoteIsScreenSharing = Boolean(isScreenSharing);
         remoteCameraVideo.muted = true;
         remoteScreenVideo.muted = true;
@@ -2911,7 +3111,7 @@ function refreshActiveRemoteTile() {
         return;
     }
 
-    peerUsername = state.username || 'Participant';
+    peerUsername = state.username || callText('participant');
     remoteIsScreenSharing = Boolean(state.screenSharing);
     remoteCameraVideo.muted = false;
     remoteScreenVideo.muted = false;
@@ -2969,15 +3169,27 @@ function removePeerConnection(peerId) {
     refreshActiveRemoteTile();
 }
 
-async function sendSignalToPeer(peerId, type, payload) {
+async function postCallSignal(callId, fields, stillConnected = () => true) {
+    const generation = callSignalGeneration;
+    const body = { csrf_token: getCsrfToken(), call_id: String(callId), ...fields };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (generation !== callSignalGeneration || callId !== Number(currentCallId || 0) || !stillConnected()) return;
+
+        const result = await postForm('/api/calls/signal', body).catch(() => null);
+        const retryDelay = Number(result?.retry_after_ms || 0);
+        if (result?.success || !Number.isFinite(retryDelay) || retryDelay <= 0 || attempt === 2) return;
+        const delay = Math.min(retryDelay, 200) + Math.random() * 60;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+}
+
+async function sendSignalToPeer(peerId, type, payload, connection = null) {
     if (!currentCallId || !peerId) return;
-    await postForm('/api/calls/signal', {
-        csrf_token: getCsrfToken(),
-        call_id: String(currentCallId),
+    await postCallSignal(Number(currentCallId), {
         to_user_id: String(peerId),
         type,
         data: JSON.stringify(payload)
-    }).catch(() => {});
+    }, () => connection === null || callPeerConnections.get(peerId) === connection);
 }
 
 async function flushPendingIce(peerId) {
@@ -3012,7 +3224,7 @@ function ensurePeerConnection(peerId, username = '') {
     if (username) peerState.username = username;
 
     const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        iceServers: currentCallIceServers()
     });
 
     if (localStream) {
@@ -3048,17 +3260,17 @@ function ensurePeerConnection(peerId, username = '') {
 
     pc.onicecandidate = async (event) => {
         if (!event.candidate || !currentCallId) return;
-        await sendSignalToPeer(numericPeerId, 'ice', event.candidate);
+        await sendSignalToPeer(numericPeerId, 'ice', event.candidate, pc);
     };
 
     pc.onnegotiationneeded = async () => {
-        if (!currentCallId || !shouldInitiatePeerOffer(numericPeerId)) return;
+        if (!currentCallId || !shouldInitiatePeerOffer(numericPeerId, pc)) return;
         if (pc.signalingState !== 'stable' || peerState.makingOffer || peerState.isApplyingRemote) return;
         try {
             peerState.makingOffer = true;
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            await sendSignalToPeer(numericPeerId, 'offer', offer);
+            await sendSignalToPeer(numericPeerId, 'offer', offer, pc);
         } catch (e) {
         } finally {
             peerState.makingOffer = false;
@@ -3102,9 +3314,9 @@ function syncPeerParticipants(participants) {
         if (!peerId) return;
         activePeerIds.add(peerId);
 
-        ensurePeerConnection(peerId, String(participant?.username || 'Participant'));
+        ensurePeerConnection(peerId, String(participant?.username || callText('participant')));
         const state = getOrCreatePeerState(peerId);
-        state.username = String(participant?.username || state.username || 'Participant');
+        state.username = String(participant?.username || state.username || callText('participant'));
         applyPeerMediaMeta(state, {
             screen_sharing: Boolean(participant?.screen_sharing)
         });
@@ -3139,6 +3351,9 @@ async function handleIncomingCallSignal(signal) {
     const state = getOrCreatePeerState(fromUserId);
 
     if (signalType === 'offer') {
+        const collision = state.makingOffer || pc.signalingState !== 'stable';
+        state.ignoredOffer = collision && shouldInitiatePeerOffer(fromUserId);
+        if (state.ignoredOffer) return;
         try {
             state.isApplyingRemote = true;
             if (pc.signalingState === 'have-local-offer') {
@@ -3148,7 +3363,8 @@ async function handleIncomingCallSignal(signal) {
             await flushPendingIce(fromUserId);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            await sendSignalToPeer(fromUserId, 'answer', answer);
+            state.isApplyingRemote = false;
+            await sendSignalToPeer(fromUserId, 'answer', answer, pc);
         } catch (e) {
         } finally {
             state.isApplyingRemote = false;
@@ -3160,6 +3376,7 @@ async function handleIncomingCallSignal(signal) {
         try {
             if (pc.signalingState === 'have-local-offer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(payload));
+                state.ignoredOffer = false;
                 await flushPendingIce(fromUserId);
             }
         } catch (e) {}
@@ -3167,6 +3384,7 @@ async function handleIncomingCallSignal(signal) {
     }
 
     if (signalType === 'ice') {
+        if (state.ignoredOffer) return;
         if (pc.remoteDescription) {
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(payload));
@@ -3183,8 +3401,8 @@ async function handleIncomingCallSignal(signal) {
     }
 }
 
-function rampDownCallSignalPolling() {
-    if (!callSignalPollFastMode) return;
+function rampDownCallSignalPolling(generation = callSignalGeneration) {
+    if (!callSignalPollFastMode || generation !== callSignalGeneration) return;
     callSignalPollFastMode = false;
     if (callSignalPollFastModeTimeout) {
         clearTimeout(callSignalPollFastModeTimeout);
@@ -3199,7 +3417,10 @@ function rampDownCallSignalPolling() {
     }
 }
 
-async function startCallSignaling(options = {}) {
+function stopCallSignalPolling() {
+    callSignalGeneration += 1;
+    callSignalRequest?.abort();
+    callSignalRequest = null;
     if (callSignalPollInterval) {
         clearInterval(callSignalPollInterval);
         callSignalPollInterval = null;
@@ -3208,11 +3429,19 @@ async function startCallSignaling(options = {}) {
         clearTimeout(callSignalPollFastModeTimeout);
         callSignalPollFastModeTimeout = null;
     }
+    callSignalPollFastMode = false;
+}
+
+async function startCallSignaling(options = {}) {
+    stopCallSignalPolling();
+    const generation = callSignalGeneration;
+    const callId = Number(currentCallId || 0);
+    if (!callId) return;
 
     const persistedSession = readPersistedActiveCallSession();
     const persistedCursor = Number(persistedSession?.signal_cursor || 0);
     const persistedCallId = Number(persistedSession?.call_id || 0);
-    callSignalCursor = (persistedCursor > 0 && persistedCallId === Number(currentCallId || 0))
+    callSignalCursor = (persistedCursor > 0 && persistedCallId === callId)
         ? persistedCursor
         : 0;
 
@@ -3220,39 +3449,69 @@ async function startCallSignaling(options = {}) {
     const pollInterval = callSignalPollFastMode ? 300 : 1200;
 
     await pollCallSignal();
+    if (generation !== callSignalGeneration || callId !== Number(currentCallId || 0)) return;
+
     callSignalPollInterval = setInterval(pollCallSignal, pollInterval);
 
     if (callSignalPollFastMode) {
-        callSignalPollFastModeTimeout = setTimeout(rampDownCallSignalPolling, 15000);
+        callSignalPollFastModeTimeout = setTimeout(() => rampDownCallSignalPolling(generation), 15000);
     }
 }
 
 async function pollCallSignal() {
-    if (!currentCallId) return;
-    try {
-        const response = await fetch(`/api/calls/signal/${currentCallId}?since_id=${callSignalCursor}`);
-        const data = await response.json();
-        if (!data || data.error) return;
+    const callId = Number(currentCallId || 0);
+    if (!callId || callSignalRequest) return;
 
-        if (Number.isFinite(Number(data?.next_since_id))) {
+    const request = new AbortController();
+    const isCurrent = () => callSignalRequest === request
+        && callId === Number(currentCallId || 0)
+        && !request.signal.aborted;
+    callSignalRequest = request;
+    const timeout = setTimeout(() => request.abort(), 5000);
+    try {
+        let renewal = '';
+        if (Date.now() >= callTurnRefreshAt) {
+            renewal = '&refresh_ice=1';
+            callTurnRefreshAt = Date.now() + 15000;
+        }
+        const response = await fetch(callPath(`/api/calls/signal/${callId}?since_id=${callSignalCursor}${renewal}`), {
+            signal: request.signal,
+        });
+        if (!response.ok || !isCurrent()) return;
+
+        const data = await response.json();
+        if (!data || data.error || !isCurrent()) return;
+
+        if (Object.hasOwn(data, 'turn')) {
+            applyCallTurnTicket(data.turn);
+        }
+        syncPeerParticipants(data.participants || []);
+        for (const signal of Array.isArray(data.signals) ? data.signals : []) {
+            if (!isCurrent()) return;
+            await handleIncomingCallSignal(signal);
+        }
+
+        if (isCurrent() && Number.isSafeInteger(Number(data.next_since_id))) {
             callSignalCursor = Math.max(callSignalCursor, Number(data.next_since_id || 0));
             try {
                 const raw = sessionStorage.getItem(CALL_SESSION_STORAGE_KEY);
                 if (raw) {
                     const parsed = JSON.parse(raw);
-                    parsed.signal_cursor = callSignalCursor;
-                    sessionStorage.setItem(CALL_SESSION_STORAGE_KEY, JSON.stringify(parsed));
+                    if (Number(parsed.call_id) === callId) {
+                        parsed.signal_cursor = callSignalCursor;
+                        sessionStorage.setItem(CALL_SESSION_STORAGE_KEY, JSON.stringify(parsed));
+                    }
                 }
             } catch {}
         }
-
-        syncPeerParticipants(data?.participants || []);
-
-        const signals = Array.isArray(data?.signals) ? data.signals : [];
-        for (const signal of signals) {
-            await handleIncomingCallSignal(signal);
+    } catch {
+        // The next poll retries from the last successfully processed cursor.
+    } finally {
+        clearTimeout(timeout);
+        if (callSignalRequest === request) {
+            callSignalRequest = null;
         }
-    } catch (e) {}
+    }
 }
 
 async function acceptCall() {
@@ -3338,6 +3597,7 @@ function applyParticipantTileVisualState(tile, { isSelected = false, isSpeaking 
 
     const selected = Boolean(isSelected);
     const speaking = Boolean(isSpeaking);
+    tile.style.order = speaking ? '-1' : '0';
 
     tile.classList.toggle('bg-blue-500/10', selected);
     tile.classList.remove('border-zinc-700', 'border-blue-500', 'border-emerald-400');

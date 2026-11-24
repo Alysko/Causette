@@ -11,12 +11,12 @@ class PostController extends Controller {
         $content = Post::normalizeContent($_POST['content'] ?? '');
 
         if (!Post::isContentValid($content)) {
-            $this->json(['error' => 'Posts must be between 1 and 500 characters'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.posts_must_be_between_1_and_500_characters')], 400);
         }
 
         $post = Post::create($userId, $content);
         if (!$post) {
-            $this->json(['error' => 'Unable to create post'], 500);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.unable_to_create_post')], 500);
         }
 
         $this->json(['success' => true, 'post_id' => (int)$post->id]);
@@ -31,20 +31,20 @@ class PostController extends Controller {
         $reactionCode = Post::normalizeReactionCode($_POST['reaction_code'] ?? '');
 
         if ($postId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
         if ($reactionCode === '') {
-            $this->json(['error' => 'Invalid reaction'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_reaction')], 400);
         }
 
         $post = Post::findById($postId);
         if (!$post) {
-            $this->json(['error' => 'Post not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.post_not_found')], 404);
         }
 
         $postOwnerId = (int)($post->user_id ?? 0);
         if (!Post::canUserReactToPost($userId, $postOwnerId)) {
-            $this->json(['error' => 'Only friends can react to posts'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_friends_can_react_to_posts')], 403);
         }
 
         $existing = Database::query(
@@ -96,20 +96,20 @@ class PostController extends Controller {
         $postId = (int)($_POST['post_id'] ?? 0);
 
         if ($postId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $post = Post::findById($postId);
         if (!$post) {
-            $this->json(['error' => 'Post not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.post_not_found')], 404);
         }
 
         if (!Post::canUserDeletePost($currentUser, $post)) {
-            $this->json(['error' => 'You are not allowed to delete this post'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_are_not_allowed_to_delete_this_post')], 403);
         }
 
         if (!Post::deleteById($postId)) {
-            $this->json(['error' => 'Unable to delete post'], 500);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.unable_to_delete_post')], 500);
         }
 
         $this->json(['success' => true]);

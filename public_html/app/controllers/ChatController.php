@@ -1,7 +1,9 @@
 <?php
+use Causette\Chat\GroupHistoryText;
 use Causette\Chat\PollDraft;
 use Causette\Http\ChatResponse;
 use Causette\Localization\DisplayPreferences;
+use Causette\Localization\Locale;
 use Causette\Security\ConversationRead;
 use Causette\Storage\AttachmentBudget;
 
@@ -12,7 +14,6 @@ require_once __DIR__ . '/../core/PollDraft.php';
 
 class ChatController extends Controller {
     private const GROUP_CHAT_USER_LIMIT = 999;
-    private const USER_LIMIT_REACHED_MESSAGE = 'User limit reached. Please try again later.';
     private const GROUP_VISIBILITY_NONE = 'none';
     private const GROUP_VISIBILITY_REQUESTABLE = 'requestable';
     private const GROUP_VISIBILITY_PUBLIC = 'public';
@@ -625,7 +626,7 @@ class ChatController extends Controller {
             }
         }
 
-        $chatTitle = 'Chat #' . User::formatUserNumber($chat->chat_number);
+        $chatTitle = Locale::current()->text('browser.sidebar_chat_number', ['number' => User::formatUserNumber($chat->chat_number)]);
         if ($chat->type === 'personal') {
             $customTitle = $supportsChatTitle ? trim((string)($chat->title ?? '')) : '';
             if ($customTitle !== '') {
@@ -832,7 +833,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsPolls()) {
-            $this->json(['error' => 'Polls are not available until the database is updated'], 503);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.polls_are_not_available_until_the_database_is_updated')], 503);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -844,44 +845,47 @@ class ChatController extends Controller {
         $isCurrentUserAdmin = strtolower(trim((string)($user->role ?? 'user'))) === 'admin';
 
         if ($chatId <= 0 || $question === '') {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         if ($this->pollTextLength($question) > PollDraft::MAX_TEXT_LENGTH) {
-            $this->json(['error' => 'Poll question must be 40 characters or fewer'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_question_must_be_40_characters_or_fewer')], 400);
         }
 
         if (count($options) < PollDraft::MIN_OPTIONS) {
-            $this->json(['error' => 'Poll must have between 2 and 10 options'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_must_have_between_2_and_10_options')], 400);
         }
 
         $seenOptions = [];
         foreach ($options as $option) {
             if ($this->pollTextLength($option) > PollDraft::MAX_TEXT_LENGTH) {
-                $this->json(['error' => 'Each poll option must be 40 characters or fewer'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.each_poll_option_must_be_40_characters_or_fewer')], 400);
             }
 
             $dedupeKey = function_exists('mb_strtolower') ? mb_strtolower($option, 'UTF-8') : strtolower($option);
             if (isset($seenOptions[$dedupeKey])) {
-                $this->json(['error' => 'Poll options must be unique'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_options_must_be_unique')], 400);
             }
             $seenOptions[$dedupeKey] = true;
         }
 
         if ($expirySeconds === null) {
-            $this->json(['error' => 'Poll duration must be between 1 and 168 hours or between 1 and 7 days'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('chat.poll_duration_invalid', [
+                'hours' => PollDraft::MAX_HOURS,
+                'days' => PollDraft::MAX_DAYS,
+            ])], 400);
         }
 
         $chat = $this->supportsChatSoftDelete()
             ? Database::query("SELECT id, type, created_by, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch()
             : Database::query("SELECT id, type, created_by FROM chats WHERE id = ?", [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Group chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_chat_not_found')], 404);
         }
 
         $member = $this->getGroupMember($chatId, $userId);
         if (!$member) {
-            $this->json(['error' => 'Only group members can create polls'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_members_can_create_polls')], 403);
         }
 
         $pdo = Database::getInstance();
@@ -896,7 +900,7 @@ class ChatController extends Controller {
             )->fetchColumn();
             if ($activePollId > 0) {
                 $pdo->rollBack();
-                $this->json(['error' => 'Only one active poll is allowed per group'], 409);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_one_active_poll_is_allowed_per_group')], 409);
             }
 
             Database::query(
@@ -919,7 +923,7 @@ class ChatController extends Controller {
                 $pdo->rollBack();
             }
 
-            $this->json(['error' => 'Unable to create poll'], 500);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.unable_to_create_poll')], 500);
         }
 
         $activePoll = Chat::getActivePollForChat($chatId, $userId);
@@ -955,7 +959,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsPolls()) {
-            $this->json(['error' => 'Polls are not available until the database is updated'], 503);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.polls_are_not_available_until_the_database_is_updated')], 503);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -966,19 +970,19 @@ class ChatController extends Controller {
         $isCurrentUserAdmin = strtolower(trim((string)($user->role ?? 'user'))) === 'admin';
 
         if ($chatId <= 0 || $pollId <= 0 || $optionId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chat = $this->supportsChatSoftDelete()
             ? Database::query("SELECT id, type, created_by, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch()
             : Database::query("SELECT id, type, created_by FROM chats WHERE id = ?", [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Group chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_chat_not_found')], 404);
         }
 
         $member = $this->getGroupMember($chatId, $userId);
         if (!$member) {
-            $this->json(['error' => 'Only group members can vote'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_members_can_vote')], 403);
         }
 
         Chat::cleanupExpiredPollsForChat($chatId);
@@ -988,11 +992,11 @@ class ChatController extends Controller {
             [$pollId, $chatId]
         )->fetch();
         if (!$poll) {
-            $this->json(['error' => 'Poll not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_not_found')], 404);
         }
 
         if (strtolower((string)$poll->status) !== 'active') {
-            $this->json(['error' => 'This poll is closed'], 409);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.this_poll_is_closed')], 409);
         }
 
         $pollOption = Database::query(
@@ -1000,7 +1004,7 @@ class ChatController extends Controller {
             [$optionId, $pollId]
         )->fetch();
         if (!$pollOption) {
-            $this->json(['error' => 'Poll option not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_option_not_found')], 404);
         }
 
         try {
@@ -1010,10 +1014,10 @@ class ChatController extends Controller {
             );
         } catch (Throwable $e) {
             if (stripos($e->getMessage(), 'uniq_poll_votes_poll_user') !== false) {
-                $this->json(['error' => 'You have already voted in this poll'], 409);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_have_already_voted_in_this_poll')], 409);
             }
 
-            $this->json(['error' => 'Unable to submit vote'], 500);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.unable_to_submit_vote')], 500);
         }
 
         $activePoll = Chat::getActivePollForChat($chatId, $userId);
@@ -1030,7 +1034,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsPolls()) {
-            $this->json(['error' => 'Polls are not available until the database is updated'], 503);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.polls_are_not_available_until_the_database_is_updated')], 503);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -1040,19 +1044,19 @@ class ChatController extends Controller {
         $isCurrentUserAdmin = strtolower(trim((string)($user->role ?? 'user'))) === 'admin';
 
         if ($chatId <= 0 || $pollId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chat = $this->supportsChatSoftDelete()
             ? Database::query("SELECT id, type, created_by, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch()
             : Database::query("SELECT id, type, created_by FROM chats WHERE id = ?", [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Group chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_chat_not_found')], 404);
         }
 
         $member = $this->getGroupMember($chatId, $userId);
         if (!$member && !$isCurrentUserAdmin) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $poll = Database::query(
@@ -1060,13 +1064,13 @@ class ChatController extends Controller {
             [$pollId, $chatId]
         )->fetch();
         if (!$poll) {
-            $this->json(['error' => 'Poll not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.poll_not_found')], 404);
         }
 
         $canExpire = (int)($poll->creator_user_id ?? 0) === $userId
             || $this->canModerateGroupMembers($chat, $userId, $isCurrentUserAdmin);
         if (!$canExpire) {
-            $this->json(['error' => 'Only the creator, owner, moderator, or admin can expire this poll'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_the_creator_owner_moderator_or_admin_can_expire_this_poll')], 403);
         }
 
         if (strtolower((string)($poll->status ?? '')) === 'active') {
@@ -1121,25 +1125,26 @@ class ChatController extends Controller {
         Auth::requireAuth();
         Auth::csrfValidate();
         $chatId = (int)($_POST['chat_id'] ?? 0);
-        $rawContent = trim($_POST['content'] ?? '');
+        $incomingContent = $_POST['content'] ?? '';
+        $rawContent = is_string($incomingContent) ? trim($incomingContent) : '';
         $attachmentIds = $this->parseAttachmentIds($_POST['attachment_ids'] ?? '');
         $quotedMessageId = (int)($_POST['quoted_message_id'] ?? 0);
         $userId = Auth::user()->id;
 
-        if ($chatId <= 0 || $rawContent === '') {
-            $this->json(['error' => 'Invalid payload'], 400);
+        if ($chatId <= 0 || !is_string($incomingContent) || ($rawContent === '' && $attachmentIds === [])) {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
         if ($attachmentIds === null) {
             $this->json(['error' => 'attachment_batch_too_large'], 400);
         }
 
         if (mb_strlen($rawContent) > 16384) {
-            $this->json(['error' => 'Message exceeds the maximum length of 16,384 characters'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.message_exceeds_the_maximum_length_of_16_384_characters')], 400);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -1147,23 +1152,23 @@ class ChatController extends Controller {
             : "SELECT chat_number, type FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (Chat::isGroupType($chat->type ?? null) && $this->isGroupMemberMuted($chatId, (int)$userId)) {
-            $this->json(['error' => 'You are muted in this group'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_are_muted_in_this_group')], 403);
         }
 
         $messageRestrictionReason = $this->getPersonalChatMessageRestrictionReason($chatId, (int)$userId);
         if ($messageRestrictionReason === 'banned_user') {
-            $this->json(['error' => "You can't send messages to a banned user"], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.messaging_target_banned')], 403);
         }
         if ($messageRestrictionReason === 'not_friends') {
-            $this->json(['error' => 'You can only message friends in personal chats'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_can_only_message_friends_in_personal_chats')], 403);
         }
 
         $content = Message::encodeMentionsForChat($chatId, $rawContent);
@@ -1182,7 +1187,7 @@ class ChatController extends Controller {
             )->fetch();
 
             if (!$quotedMessage) {
-                $this->json(['error' => 'Quoted message not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.quoted_message_not_found')], 404);
             }
 
             $quotedContent = (string)($quotedMessage->content ?? '');
@@ -1239,7 +1244,8 @@ class ChatController extends Controller {
         $chatPath = '/c/' . User::formatUserNumber($chat->chat_number);
         foreach ($members as $m) {
             $locale = DisplayPreferences::localeForRecipient((int) $m->user_id);
-            Notification::create($m->user_id, 'message', $locale->text($notificationTitleKey, $titleParameters), $notificationPreview, $chatPath);
+            $preview = $rawContent === '' ? $locale->text('browser.attachment_label') : $notificationPreview;
+            Notification::create($m->user_id, 'message', $locale->text($notificationTitleKey, $titleParameters), $preview, $chatPath);
         }
 
         $this->json(['success' => true]);
@@ -1255,7 +1261,7 @@ class ChatController extends Controller {
         $userId = (int)$user->id;
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $authorize = fn() => $this->attachmentUploadDenial($chatId, $userId);
@@ -1263,7 +1269,7 @@ class ChatController extends Controller {
             $this->json(['error' => $denial['error']], $denial['status']);
         }
         if (!isset($_FILES['attachment']) || !is_array($_FILES['attachment'])) {
-            $this->json(['error' => 'No file uploaded'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.no_file_uploaded')], 400);
         }
 
         $result = Attachment::createPendingFromUpload($chatId, $user, $_FILES['attachment'], $expirySeconds, $authorize);
@@ -1284,28 +1290,28 @@ class ChatController extends Controller {
     private function attachmentUploadDenial(int $chatId, int $userId): ?array {
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$member) {
-            return ['error' => 'Access denied', 'status' => 403];
+            return ['error' => \Causette\Localization\Locale::current()->text('response.access_denied'), 'status' => 403];
         }
 
         if ($this->supportsChatSoftDelete()) {
             $chat = Database::query("SELECT id, type, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                return ['error' => 'Chat not found', 'status' => 404];
+                return ['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found'), 'status' => 404];
             }
         } else {
             $chat = Database::query("SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
         }
 
         if ($chat && Chat::isGroupType($chat->type ?? null) && $this->isGroupMemberMuted($chatId, $userId)) {
-            return ['error' => 'You are muted in this group', 'status' => 403];
+            return ['error' => \Causette\Localization\Locale::current()->text('response.you_are_muted_in_this_group'), 'status' => 403];
         }
 
         $messageRestrictionReason = $this->getPersonalChatMessageRestrictionReason($chatId, $userId);
         if ($messageRestrictionReason === 'banned_user') {
-            return ['error' => "You can't send messages to a banned user", 'status' => 403];
+            return ['error' => \Causette\Localization\Locale::current()->text('response.messaging_target_banned'), 'status' => 403];
         }
         if ($messageRestrictionReason === 'not_friends') {
-            return ['error' => 'You can only message friends in personal chats', 'status' => 403];
+            return ['error' => \Causette\Localization\Locale::current()->text('response.you_can_only_message_friends_in_personal_chats'), 'status' => 403];
         }
 
         return null;
@@ -1315,16 +1321,19 @@ class ChatController extends Controller {
         Auth::requireAuth();
         Auth::csrfValidate();
 
-        $attachmentId = (int)($_POST['attachment_id'] ?? 0);
+        $attachmentId = $this->requireMutationId('attachment_id');
         $pendingOnly = ($_POST['pending_only'] ?? null) === '1';
+        $locale = Locale::current();
         $authUser = Auth::user();
+        if (!$authUser) {
+            $this->json(['error' => $locale->text('error.session_expired')], 401);
+        }
         $userId = (int)$authUser->id;
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
-        if ($attachmentId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
-        }
-
+        $archiveCondition = $this->supportsChatSoftDelete()
+            ? "AND (a.status <> 'submitted' OR c.deleted_at IS NULL)"
+            : '';
         $attachment = Database::query(
             "SELECT a.id, a.chat_id, a.user_id, a.message_id, a.status, a.submitted_at, m.created_at AS message_created_at, c.type
              FROM attachments a
@@ -1332,18 +1341,19 @@ class ChatController extends Controller {
              JOIN chats c ON c.id = a.chat_id
              LEFT JOIN messages m ON m.id = a.message_id
              WHERE a.id = ?
+             $archiveCondition
              LIMIT 1",
             [$userId, $attachmentId]
         )->fetch();
 
         if (!$attachment || ($pendingOnly && $attachment->status !== 'pending')) {
-            $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : 'Attachment not found'], 404);
+            $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : $locale->text('response.attachment_not_found')], 404);
         }
 
         $isOwner = (int)$attachment->user_id === $userId;
         if ($attachment->status === 'pending') {
             if (!$isOwner) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
 
             $deleted = Attachment::deletePendingByIdForUser($attachmentId, $userId);
@@ -1351,18 +1361,18 @@ class ChatController extends Controller {
                 $this->json(['error' => 'attachment_upload_busy'], 503);
             }
             if (!$deleted) {
-                $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : 'Attachment not found'], 404);
+                $this->json(['error' => $pendingOnly ? 'attachment_unavailable' : $locale->text('response.attachment_not_found')], 404);
             }
 
             $this->json(['success' => true]);
         }
 
         if ($attachment->status !== 'submitted') {
-            $this->json(['error' => 'Attachment not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.attachment_not_found')], 404);
         }
 
         if (!$isOwner && !$isAdmin) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $isGroupChat = Chat::isGroupType($attachment->type ?? null);
@@ -1370,12 +1380,12 @@ class ChatController extends Controller {
             $deleteWindow = $this->getGroupMessageWindow('delete', (int)$attachment->chat_id);
             $attachmentTimestamp = (string)($attachment->message_created_at ?? $attachment->submitted_at ?? '');
             if (!$this->isWithinWindow($deleteWindow, $attachmentTimestamp)) {
-                $this->json(['error' => 'Delete window has expired'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.delete_window_has_expired')], 403);
             }
         }
 
         if (!Attachment::deleteSubmittedById($attachmentId, 'manual')) {
-            $this->json(['error' => 'Unable to delete attachment'], 500);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.unable_to_delete_attachment')], 500);
         }
 
         $this->json(['success' => true]);
@@ -1390,12 +1400,12 @@ class ChatController extends Controller {
         $userId = (int)Auth::user()->id;
 
         if ($attachmentId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $updated = Attachment::updatePendingExpiryForUser($attachmentId, $userId, $expirySeconds);
         if (!$updated) {
-            $this->json(['error' => 'Attachment not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.attachment_not_found')], 404);
         }
 
         $this->json(['success' => true, 'expiry_seconds' => $expirySeconds]);
@@ -1410,13 +1420,13 @@ class ChatController extends Controller {
 
         $member = Database::query("SELECT * FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if ($this->supportsChatSoftDelete()) {
             $chat = Database::query("SELECT id, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
 
@@ -1534,10 +1544,10 @@ class ChatController extends Controller {
         $userId = (int)Auth::user()->id;
 
         if ($messageId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
         if ($reactionCode === '') {
-            $this->json(['error' => 'Invalid reaction'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_reaction')], 400);
         }
 
         $message = Database::query(
@@ -1549,13 +1559,13 @@ class ChatController extends Controller {
             [$userId, $messageId]
         )->fetch();
         if (!$message) {
-            $this->json(['error' => 'Message not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.message_not_found')], 404);
         }
 
         if ($this->supportsChatSoftDelete()) {
             $chat = Database::query("SELECT id, deleted_at FROM chats WHERE id = ?", [(int)$message->chat_id])->fetch();
             if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                $this->json(['error' => 'Message not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.message_not_found')], 404);
             }
         }
 
@@ -1635,7 +1645,7 @@ class ChatController extends Controller {
         $actorUsername = User::normalizeUsername($authUser->username ?? '');
 
         if ($chatId <= 0 || $targetUsername === '') {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -1643,29 +1653,29 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Personal chats cannot add or remove users'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.personal_chats_cannot_add_or_remove_users')], 403);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $currentUserId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$this->canAddGroupMembers($chat, $currentUserId, $isCurrentUserAdmin)) {
-            $this->json(['error' => 'Only group owner or admin can add users'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owner_or_admin_can_add_users')], 403);
         }
 
         $target = User::findByUsername($targetUsername);
         if (!$target) {
-            $this->json(['error' => 'User not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_not_found')], 404);
         }
 
         $targetUserId = (int)$target->id;
@@ -1681,7 +1691,7 @@ class ChatController extends Controller {
             )->fetchColumn();
 
             if ($memberCount >= self::GROUP_CHAT_USER_LIMIT) {
-                $this->json(['error' => self::USER_LIMIT_REACHED_MESSAGE], 429);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_user_limit')], 429);
             }
         }
 
@@ -1716,7 +1726,7 @@ class ChatController extends Controller {
         $actorUsername = User::normalizeUsername($authUser->username ?? '');
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -1724,29 +1734,29 @@ class ChatController extends Controller {
             : "SELECT id, type, chat_number, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Personal chats cannot add or remove users'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.personal_chats_cannot_add_or_remove_users')], 403);
         }
 
         $member = Database::query("SELECT id, role FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $currentUserId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$this->canModerateGroupMembers($chat, $currentUserId, $isCurrentUserAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $ownerUserId = (int)($chat->created_by ?? 0);
         if ($ownerUserId > 0 && $ownerUserId === $targetUserId) {
-            $this->json(['error' => 'Group owner cannot be removed'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_owner_cannot_be_removed')], 403);
         }
 
         $targetUser = Database::query(
@@ -1759,13 +1769,13 @@ class ChatController extends Controller {
         )->fetch();
 
         if (!$targetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_is_not_in_this_group')], 404);
         }
 
         $actorIsOwner = $this->isGroupOwner($chat, $currentUserId);
         $targetIsModerator = $this->isGroupModeratorByMember($targetMember);
         if ($targetIsModerator && !$actorIsOwner && !$isCurrentUserAdmin) {
-            $this->json(['error' => 'Only group owner can remove a moderator'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owner_can_remove_a_moderator')], 403);
         }
 
         Database::query("DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $targetUserId]);
@@ -1797,7 +1807,7 @@ class ChatController extends Controller {
         $actorUsername = User::normalizeUsername($authUser->username ?? '');
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -1805,15 +1815,15 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Only group chats can be left'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_chats_can_be_left')], 403);
         }
 
         $member = Database::query(
@@ -1821,7 +1831,7 @@ class ChatController extends Controller {
             [$chatId, $currentUserId]
         )->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if ((int)($chat->created_by ?? 0) === $currentUserId) {
@@ -1835,7 +1845,7 @@ class ChatController extends Controller {
             )->fetchAll();
 
             if (count($eligibleNewOwners) === 0) {
-                $this->json(['error' => 'You cannot leave a group you own with no other members. Delete the group instead.'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_cannot_leave_a_group_you_own_with_no_other_members_delete_the_group_instead')], 403);
             }
 
             $newOwnerIsEligible = false;
@@ -1847,7 +1857,7 @@ class ChatController extends Controller {
             }
 
             if (!$newOwnerIsEligible) {
-                $this->json(['error' => 'Choose a current group member to transfer ownership before leaving.'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.choose_a_current_group_member_to_transfer_ownership_before_leaving')], 400);
             }
 
             Database::query("UPDATE chats SET created_by = ? WHERE id = ?", [$newOwnerUserId, $chatId]);
@@ -1884,7 +1894,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatTitle()) {
-            $this->json(['error' => 'Chat rename is not available until the database update is applied'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_rename_is_not_available_until_the_database_update_is_applied')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -1894,11 +1904,11 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         if (mb_strlen($title) > 80) {
-            $this->json(['error' => 'Chat name must be 80 characters or fewer'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_name_must_be_80_characters_or_fewer')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -1906,24 +1916,24 @@ class ChatController extends Controller {
             : "SELECT id, type, chat_number, title, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Only group chats can be renamed'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_chats_can_be_renamed')], 403);
         }
 
         if (!$this->canManageGroupSettings($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Only the group owner can rename this chat'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_the_group_owner_can_rename_this_chat')], 403);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $currentUserId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $oldTitle = trim((string)($chat->title ?? ''));
@@ -1937,7 +1947,7 @@ class ChatController extends Controller {
             if ($this->supportsSystemEvents()) {
                 Database::query(
                     "INSERT INTO chat_system_events (chat_id, event_type, content) VALUES (?, 'chat_renamed', ?)",
-                    [$chatId, 'Chat renamed from ' . $oldTitle . ' to ' . $newTitle]
+                    [$chatId, GroupHistoryText::encodeRename($oldTitle, $newTitle)]
                 );
             }
             $this->json(['success' => true, 'title' => $newTitle, 'reset' => true]);
@@ -1947,7 +1957,7 @@ class ChatController extends Controller {
         if ($this->supportsSystemEvents()) {
             Database::query(
                 "INSERT INTO chat_system_events (chat_id, event_type, content) VALUES (?, 'chat_renamed', ?)",
-                [$chatId, 'Chat renamed from ' . $oldTitle . ' to ' . $title]
+                [$chatId, GroupHistoryText::encodeRename($oldTitle, $title)]
             );
         }
         $this->json(['success' => true, 'title' => $title, 'reset' => false]);
@@ -1958,7 +1968,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatSoftDelete()) {
-            $this->json(['error' => 'Group delete requires database update for chat trash support'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_delete_requires_database_update_for_chat_trash_support')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -1967,7 +1977,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chat = Database::query(
@@ -1975,19 +1985,19 @@ class ChatController extends Controller {
             [$chatId]
         )->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat already deleted'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_already_deleted')], 400);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Only group chats can be deleted'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_chats_can_be_deleted')], 403);
         }
 
         if (!$this->canManageGroupSettings($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Only the group owner can delete this group'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_the_group_owner_can_delete_this_group')], 403);
         }
 
         $member = Database::query(
@@ -1995,7 +2005,7 @@ class ChatController extends Controller {
             [$chatId, $currentUserId]
         )->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (Chat::supportsDeletedBy()) {
@@ -2023,7 +2033,7 @@ class ChatController extends Controller {
 
         $chatNumberFormatted = User::formatUserNumber((string)$chat->chat_number);
         $supportsChatTitle = $this->supportsChatTitle();
-        $chatTitle = 'Personal Chat ' . $chatNumberFormatted;
+        $chatTitle = Locale::current()->text('ui.personal_chat_number', ['number' => $chatNumberFormatted]);
         $customTitle = $supportsChatTitle ? trim((string)($chat->title ?? '')) : '';
         if ($customTitle !== '') {
             $chatTitle = $customTitle;
@@ -2143,11 +2153,11 @@ class ChatController extends Controller {
         $actorUsername = User::normalizeUsername($authUser->username ?? '');
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         if (!$isCurrentUserAdmin) {
-            $this->json(['error' => 'Only admins can take group ownership'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_admins_can_take_group_ownership')], 403);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2155,15 +2165,15 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if ($this->chatIsSoftDeleted($chat)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Only group chats can change ownership'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_chats_can_change_ownership')], 403);
         }
 
         $member = Database::query(
@@ -2171,12 +2181,12 @@ class ChatController extends Controller {
             [$chatId, $currentUserId]
         )->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $ownerUserId = (int)($chat->created_by ?? 0);
         if ($ownerUserId === $currentUserId) {
-            $this->json(['error' => 'You already own this group'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_already_own_this_group')], 400);
         }
 
         Database::query("UPDATE chats SET created_by = ? WHERE id = ?", [$currentUserId, $chatId]);
@@ -2208,7 +2218,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatMemberRole()) {
-            $this->json(['error' => 'Group roles require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_roles_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2218,7 +2228,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2226,27 +2236,27 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canManageGroupSettings($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Only group owner can promote moderators'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owner_can_promote_moderators')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
         if ((int)($chat->created_by ?? 0) === $targetUserId) {
-            $this->json(['error' => 'Group owner already has elevated permissions'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_owner_already_has_elevated_permissions')], 400);
         }
 
         $targetMember = $this->getGroupMember($chatId, $targetUserId);
         if (!$targetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_is_not_in_this_group')], 404);
         }
 
         Database::query(
@@ -2273,7 +2283,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatMemberRole()) {
-            $this->json(['error' => 'Group roles require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_roles_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2283,7 +2293,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2291,27 +2301,27 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canManageGroupSettings($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Only group owner can demote moderators'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owner_can_demote_moderators')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
         if ((int)($chat->created_by ?? 0) === $targetUserId) {
-            $this->json(['error' => 'Group owner role cannot be changed'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_owner_role_cannot_be_changed')], 400);
         }
 
         $targetMember = $this->getGroupMember($chatId, $targetUserId);
         if (!$targetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_is_not_in_this_group')], 404);
         }
 
         Database::query(
@@ -2338,7 +2348,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatMemberMute()) {
-            $this->json(['error' => 'Group mute requires a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_mute_requires_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2348,7 +2358,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2356,32 +2366,32 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canModerateGroupMembers($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
         if ((int)($chat->created_by ?? 0) === $targetUserId) {
-            $this->json(['error' => 'Group owner cannot be muted'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_owner_cannot_be_muted')], 403);
         }
 
         $targetMember = $this->getGroupMember($chatId, $targetUserId);
         if (!$targetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_is_not_in_this_group')], 404);
         }
 
         $targetIsModerator = $this->isGroupModeratorByMember($targetMember);
         if ($targetIsModerator) {
-            $this->json(['error' => 'Moderators cannot be muted'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.moderators_cannot_be_muted')], 403);
         }
 
         Database::query(
@@ -2408,7 +2418,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsChatMemberMute()) {
-            $this->json(['error' => 'Group mute requires a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_mute_requires_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2418,7 +2428,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $targetUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2426,28 +2436,28 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canModerateGroupMembers($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
         $targetMember = $this->getGroupMember($chatId, $targetUserId);
         if (!$targetMember) {
-            $this->json(['error' => 'User is not in this group'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_is_not_in_this_group')], 404);
         }
 
         $targetIsModerator = $this->isGroupModeratorByMember($targetMember);
         if ($targetIsModerator && !$this->isGroupOwner($chat, $currentUserId) && !$isAdmin) {
-            $this->json(['error' => 'Only group owner can unmute a moderator'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owner_can_unmute_a_moderator')], 403);
         }
 
         Database::query(
@@ -2474,7 +2484,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsGroupJoinRequests()) {
-            $this->json(['error' => 'Group join requests require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_join_requests_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2482,7 +2492,7 @@ class ChatController extends Controller {
         $currentUserId = (int)$authUser->id;
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2490,17 +2500,17 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by, chat_number, non_member_visibility FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         $visibility = $this->getGroupVisibility($chat);
         if (!in_array($visibility, [self::GROUP_VISIBILITY_REQUESTABLE, self::GROUP_VISIBILITY_PUBLIC], true)) {
-            $this->json(['error' => 'This group does not accept join requests'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.this_group_does_not_accept_join_requests')], 403);
         }
 
         $existingMember = $this->getGroupMember($chatId, $currentUserId);
         if ($existingMember) {
-            $this->json(['error' => 'You are already a group member'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_are_already_a_group_member')], 400);
         }
 
         $existing = Database::query(
@@ -2564,14 +2574,14 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsGroupJoinRequests()) {
-            $this->json(['error' => 'Group join requests require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_join_requests_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
         $currentUserId = (int)Auth::user()->id;
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         Database::query(
@@ -2589,7 +2599,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsGroupJoinRequests()) {
-            $this->json(['error' => 'Group join requests require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_join_requests_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2599,7 +2609,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $requesterUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2607,17 +2617,17 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by, chat_number FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canApproveGroupJoinRequests($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
@@ -2626,7 +2636,7 @@ class ChatController extends Controller {
             [$chatId, $requesterUserId]
         )->fetch();
         if (!$request || strtolower((string)($request->status ?? '')) !== 'pending') {
-            $this->json(['error' => 'Join request not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.join_request_not_found')], 404);
         }
 
         $memberCount = (int)Database::query(
@@ -2634,7 +2644,7 @@ class ChatController extends Controller {
             [$chatId]
         )->fetchColumn();
         if ($memberCount >= self::GROUP_CHAT_USER_LIMIT) {
-            $this->json(['error' => self::USER_LIMIT_REACHED_MESSAGE], 429);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_user_limit')], 429);
         }
 
         Database::query(
@@ -2682,7 +2692,7 @@ class ChatController extends Controller {
         Auth::csrfValidate();
 
         if (!$this->supportsGroupJoinRequests()) {
-            $this->json(['error' => 'Group join requests require a database update'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.group_join_requests_require_a_database_update')], 400);
         }
 
         $chatId = (int)($_POST['chat_id'] ?? 0);
@@ -2692,7 +2702,7 @@ class ChatController extends Controller {
         $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
 
         if ($chatId <= 0 || $requesterUserId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $chatSelect = $this->supportsChatSoftDelete()
@@ -2700,17 +2710,17 @@ class ChatController extends Controller {
             : "SELECT id, type, created_by, chat_number FROM chats WHERE id = ?";
         $chat = Database::query($chatSelect, [$chatId])->fetch();
         if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canApproveGroupJoinRequests($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         if (!$isAdmin) {
             $actorMember = $this->getGroupMember($chatId, $currentUserId);
             if (!$actorMember) {
-                $this->json(['error' => 'Access denied'], 403);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
             }
         }
 
@@ -2719,7 +2729,7 @@ class ChatController extends Controller {
             [$chatId, $requesterUserId]
         )->fetch();
         if (!$request || strtolower((string)($request->status ?? '')) !== 'pending') {
-            $this->json(['error' => 'Join request not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.join_request_not_found')], 404);
         }
 
         Database::query(
@@ -2775,26 +2785,16 @@ class ChatController extends Controller {
         )->fetch();
     }
 
-    public function editMessage() {
-        Auth::requireAuth();
-        Auth::csrfValidate();
-
-        $messageId = (int)($_POST['message_id'] ?? 0);
-        $newContent = trim($_POST['content'] ?? '');
-        $authUser = Auth::user();
-        $currentUserId = (int)$authUser->id;
-        $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
-
-        if ($messageId <= 0 || $newContent === '') {
-            $this->json(['error' => 'Invalid payload'], 400);
+    private function requireMutableMessage(int $messageId, string $operation): object {
+        $locale = Locale::current();
+        $viewer = Auth::user();
+        if (!$viewer) {
+            $this->json(['error' => $locale->text('error.session_expired')], 401);
         }
-
-        if (mb_strlen($newContent) > 16384) {
-            $this->json(['error' => 'Message exceeds the maximum length of 16,384 characters'], 400);
-        }
-
+        $currentUserId = (int)$viewer->id;
+        $isAdmin = strtolower((string)($viewer->role ?? '')) === 'admin';
         $message = Database::query(
-            "SELECT m.id, m.chat_id, m.user_id, m.content, m.created_at
+            "SELECT m.id, m.chat_id, m.user_id, m.created_at
              FROM messages m
              JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
              WHERE m.id = ?
@@ -2802,33 +2802,64 @@ class ChatController extends Controller {
             [$currentUserId, $messageId]
         )->fetch();
         if (!$message) {
-            $this->json(['error' => 'Message not found'], 404);
+            $this->json(['error' => $locale->text('response.message_not_found')], 404);
         }
 
         $chatId = (int)$message->chat_id;
-        $chat = Database::query("SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
-        if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
+        $chat = Database::query($this->supportsChatSoftDelete()
+            ? "SELECT id, type, deleted_at FROM chats WHERE id = ?"
+            : "SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
+        if (!$chat || $this->chatIsSoftDeleted($chat)) {
+            $this->json(['error' => $locale->text('response.chat_not_found')], 404);
         }
 
-        $isGroupChat = Chat::isGroupType($chat->type ?? null);
-        $isOwner = (int)$message->user_id === $currentUserId;
-        if (!$isOwner && !$isAdmin) {
-            $this->json(['error' => 'Access denied'], 403);
+        if ((int)$message->user_id !== $currentUserId && !$isAdmin) {
+            $this->json(['error' => $locale->text('response.access_denied')], 403);
         }
 
+        $isEdit = $operation === 'edit';
         if ($this->messageIsQuoted($messageId, $chatId)) {
-            $this->json(['error' => 'Cannot edit a message that has been quoted'], 403);
+            $this->json(['error' => $locale->text($isEdit
+                ? 'response.cannot_edit_a_message_that_has_been_quoted'
+                : 'response.cannot_delete_a_message_that_has_been_quoted')], 403);
         }
 
-        if ($isGroupChat && !$isAdmin) {
-            $editWindow = $this->getGroupMessageWindow('edit', $chatId);
-            if (!$this->isWithinWindow($editWindow, (string)$message->created_at)) {
-                $this->json(['error' => 'Edit window has expired'], 403);
+        if (Chat::isGroupType($chat->type ?? null) && !$isAdmin) {
+            $window = $this->getGroupMessageWindow($operation, $chatId);
+            if (!$this->isWithinWindow($window, (string)$message->created_at)) {
+                $this->json(['error' => $locale->text($isEdit
+                    ? 'response.edit_window_has_expired'
+                    : 'response.delete_window_has_expired')], 403);
             }
         }
 
-        $encodedContent = Message::encodeMentionsForChat($chatId, $newContent);
+        return $message;
+    }
+
+    private function requireMutationId(string $field): int {
+        $id = filter_var($_POST[$field] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if ($id === false) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+        }
+        return $id;
+    }
+
+    public function editMessage() {
+        Auth::requireAuth();
+        Auth::csrfValidate();
+
+        $messageId = $this->requireMutationId('message_id');
+        $content = $_POST['content'] ?? null;
+        $newContent = is_string($content) ? trim($content) : '';
+        if ($newContent === '' || !mb_check_encoding($newContent, 'UTF-8')) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+        }
+        if (mb_strlen($newContent, 'UTF-8') > 16384) {
+            $this->json(['error' => Locale::current()->text('response.message_exceeds_the_maximum_length_of_16_384_characters')], 400);
+        }
+
+        $message = $this->requireMutableMessage($messageId, 'edit');
+        $encodedContent = Message::encodeMentionsForChat((int)$message->chat_id, $newContent);
         Database::query(
             "UPDATE messages SET content = ?, edited_at = NOW() WHERE id = ?",
             [$encodedContent, $messageId]
@@ -2841,52 +2872,10 @@ class ChatController extends Controller {
         Auth::requireAuth();
         Auth::csrfValidate();
 
-        $messageId = (int)($_POST['message_id'] ?? 0);
-        $authUser = Auth::user();
-        $currentUserId = (int)$authUser->id;
-        $isAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
-
-        if ($messageId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
-        }
-
-        $message = Database::query(
-            "SELECT m.id, m.chat_id, m.user_id, m.created_at
-             FROM messages m
-             JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
-             WHERE m.id = ?
-             LIMIT 1",
-            [$currentUserId, $messageId]
-        )->fetch();
-        if (!$message) {
-            $this->json(['error' => 'Message not found'], 404);
-        }
-
-        $chatId = (int)$message->chat_id;
-        $chat = Database::query("SELECT id, type FROM chats WHERE id = ?", [$chatId])->fetch();
-        if (!$chat) {
-            $this->json(['error' => 'Chat not found'], 404);
-        }
-
-        $isGroupChat = Chat::isGroupType($chat->type ?? null);
-        $isOwner = (int)$message->user_id === $currentUserId;
-        if (!$isOwner && !$isAdmin) {
-            $this->json(['error' => 'Access denied'], 403);
-        }
-
-        if ($this->messageIsQuoted($messageId, $chatId)) {
-            $this->json(['error' => 'Cannot delete a message that has been quoted'], 403);
-        }
-
-        if ($isGroupChat && !$isAdmin) {
-            $deleteWindow = $this->getGroupMessageWindow('delete', $chatId);
-            if (!$this->isWithinWindow($deleteWindow, (string)$message->created_at)) {
-                $this->json(['error' => 'Delete window has expired'], 403);
-            }
-        }
-
+        $messageId = $this->requireMutationId('message_id');
+        $this->requireMutableMessage($messageId, 'delete');
         if (!Attachment::deleteSubmittedForMessage($messageId)) {
-            $this->json(['error' => 'Unable to delete attachments for this message'], 500);
+            $this->json(['error' => Locale::current()->text('response.unable_to_delete_attachments_for_this_message')], 500);
         }
 
         $this->json(['success' => true]);
@@ -2907,21 +2896,24 @@ class ChatController extends Controller {
         $allowedValues = ['never', '600', '3600', '86400', 'forever'];
         $allowedVisibilityValues = [self::GROUP_VISIBILITY_NONE, self::GROUP_VISIBILITY_REQUESTABLE, self::GROUP_VISIBILITY_PUBLIC];
         if ($chatId <= 0 || !in_array($editWindow, $allowedValues, true) || !in_array($deleteWindow, $allowedValues, true) || !in_array($nonMemberVisibility, $allowedVisibilityValues, true)) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
-        $chat = Database::query("SELECT id, type, created_by, non_member_visibility FROM chats WHERE id = ?", [$chatId])->fetch();
-        if (!$chat || !Chat::isGroupType($chat->type ?? null)) {
-            $this->json(['error' => 'Chat not found'], 404);
+        $chatSelect = $this->supportsChatSoftDelete()
+            ? "SELECT id, type, created_by, non_member_visibility, deleted_at FROM chats WHERE id = ?"
+            : "SELECT id, type, created_by, non_member_visibility FROM chats WHERE id = ?";
+        $chat = Database::query($chatSelect, [$chatId])->fetch();
+        if (!$chat || $this->chatIsSoftDeleted($chat) || !Chat::isGroupType($chat->type ?? null)) {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
         }
 
         if (!$this->canManageGroupSettings($chat, $currentUserId, $isAdmin)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $currentUserId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         Setting::set($this->getGroupMessageSettingKey('edit', $chatId), $editWindow);

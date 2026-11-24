@@ -259,14 +259,14 @@ CREATE TABLE IF NOT EXISTS message_reactions (
 	id BIGINT AUTO_INCREMENT PRIMARY KEY,
 	message_id INT NOT NULL,
 	user_id INT NOT NULL,
-	reaction_code VARCHAR(12) NOT NULL,
+	reaction_code VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 	UNIQUE KEY uniq_message_reactions_message_user (message_id, user_id),
 	KEY idx_message_reactions_message (message_id),
 	KEY idx_message_reactions_user (user_id),
-	CONSTRAINT chk_message_reactions_code_v3 CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9','1F389','1F525','1F44F','1F64C','1F62E','1F914','1F602','1F60D','1F929','1F60E','1F64F','1F680','1F4AF','2728','1F600','1F601','1F605','1F642','1F609','1F970','1F618','1F917','1F60F','1FAE0','1FAE1','1F644','1F610','1F615','1F612','1F629','1F62D','1F631','1F621','1F624','1F973','1F92F','1F97A','1F636','1F44B','1F44C','270C','1F91D','1F4AA','1F91E','1F44A','1F590','1F918','2764','1F494','1F49B','1F49A','1F499','1F49C','1F90D','1FA77','1F495','1F440','1F3C6','1F31F','1F308','1F382','2615','1F431','1F480','1F9E0','1F33B','1F381','1F388'))
+	CONSTRAINT chk_message_reactions_code_v4 CHECK (CHAR_LENGTH(reaction_code) BETWEEN 2 AND 128)
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS posts (
@@ -283,14 +283,14 @@ CREATE TABLE IF NOT EXISTS post_reactions (
 	id BIGINT AUTO_INCREMENT PRIMARY KEY,
 	post_id BIGINT NOT NULL,
 	user_id INT NOT NULL,
-	reaction_code VARCHAR(12) NOT NULL,
+	reaction_code VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 	UNIQUE KEY uniq_post_reactions_post_user (post_id, user_id),
 	KEY idx_post_reactions_post (post_id),
 	KEY idx_post_reactions_user (user_id),
-	CONSTRAINT chk_post_reactions_code_v3 CHECK (reaction_code IN ('1F44D','1F44E','2665','1F923','1F622','1F436','1F4A9','1F389','1F525','1F44F','1F64C','1F62E','1F914','1F602','1F60D','1F929','1F60E','1F64F','1F680','1F4AF','2728','1F600','1F601','1F605','1F642','1F609','1F970','1F618','1F917','1F60F','1FAE0','1FAE1','1F644','1F610','1F615','1F612','1F629','1F62D','1F631','1F621','1F624','1F973','1F92F','1F97A','1F636','1F44B','1F44C','270C','1F91D','1F4AA','1F91E','1F44A','1F590','1F918','2764','1F494','1F49B','1F49A','1F499','1F49C','1F90D','1FA77','1F495','1F440','1F3C6','1F31F','1F308','1F382','2615','1F431','1F480','1F9E0','1F33B','1F381','1F388'))
+	CONSTRAINT chk_post_reactions_code_v4 CHECK (CHAR_LENGTH(reaction_code) BETWEEN 2 AND 128)
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -388,7 +388,7 @@ CREATE TABLE IF NOT EXISTS call_signals (
 CREATE TABLE IF NOT EXISTS notifications (
 	id INT AUTO_INCREMENT PRIMARY KEY,
 	user_id INT NOT NULL,
-	type ENUM('message','call','friend_request','friend_request_accepted','report','poke') NOT NULL,
+	type ENUM('message','call','friend_request','friend_request_accepted','report','poke','group_join_request','group_join_approved','group_join_denied') NOT NULL,
 	title VARCHAR(100) NOT NULL,
 	message TEXT NOT NULL,
 	link VARCHAR(255) NULL,
@@ -495,6 +495,20 @@ CREATE TABLE IF NOT EXISTS api_key_logs (
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
 	KEY idx_api_key_logs_key (api_key_id, created_at)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+	id BIGINT AUTO_INCREMENT PRIMARY KEY,
+	bucket_start DATETIME NOT NULL,
+	ip_address VARCHAR(45) NOT NULL,
+	user_id INT NOT NULL DEFAULT 0,
+	route_key VARCHAR(191) NOT NULL,
+	method VARCHAR(10) NOT NULL,
+	request_count INT NOT NULL DEFAULT 0,
+	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	UNIQUE KEY uniq_api_rate_limit (bucket_start, ip_address, user_id, route_key, method),
+	KEY idx_api_rate_limit_bucket (bucket_start),
+	KEY idx_api_rate_limit_user (user_id, bucket_start)
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO settings (`key`, `value`) VALUES ('invite_codes_per_user', '3');

@@ -1,7 +1,7 @@
 // Extracted from app.js for feature-focused organization.
 
 function navigateWithFallback(url, options = {}) {
-    const targetUrl = String(url || '').trim();
+    const targetUrl = appPath(String(url || '').trim());
     if (!targetUrl) return;
 
     if (typeof window.navigateApp === 'function') {
@@ -109,7 +109,7 @@ async function sendInviteReferralFriendRequest() {
         });
 
         if (result.success) {
-            showToast(username ? `Friend request sent to ${username}` : 'Friend request sent', 'success');
+            showToast(username ? uiText('friend_request_sent_to', { name: username }) : uiText('friend_request_sent'), 'success');
         } else {
             showToast(uiActionError(result.error, 'unable_to_send_friend_request'), 'error');
         }
@@ -244,7 +244,7 @@ async function toggleFavoriteUser(userId, favorite) {
     });
 
     if (result.success) {
-        showToast(result.is_favorite ? 'Added to favorites' : 'Removed from favorites', 'success');
+        showToast(result.is_favorite ? uiText('favorite_added') : uiText('favorite_removed'), 'success');
         await reloadCurrentView({ source: 'toggle-favorite-user' });
         return;
     }
@@ -328,7 +328,7 @@ async function createProfilePost(content) {
     }
 
     if (typeof queuePendingPageToast === 'function') {
-        queuePendingPageToast('Post published', 'success');
+        queuePendingPageToast(uiText('post_published'), 'success');
     } else {
         showToast(uiText('post_published'), 'success');
     }
@@ -354,7 +354,7 @@ async function deleteProfilePost(postId) {
     }
 
     if (typeof queuePendingPageToast === 'function') {
-        queuePendingPageToast('Post deleted', 'success');
+        queuePendingPageToast(uiText('post_deleted'), 'success');
     } else {
         showToast(uiText('post_deleted'), 'success');
     }
@@ -382,8 +382,8 @@ function openProfilePostDeleteModal(postId, username = '') {
     const safeUsername = String(username || '').trim();
     if (description) {
         description.textContent = safeUsername
-            ? `Are you sure you want to delete @${safeUsername}'s post? This cannot be undone.`
-            : 'Are you sure you want to delete this post? This cannot be undone.';
+            ? uiText('delete_post_by_user_confirm', { name: safeUsername })
+            : uiText('delete_post_confirm');
     }
 
     pendingProfilePostDeleteId = safePostId;
@@ -599,9 +599,10 @@ async function searchUsers(event) {
     if (!query) return;
     const isValidSearch = /^[A-Za-z0-9-]+$/.test(query);
     if (!isValidSearch) {
-        input.setCustomValidity('Use only letters, numbers, and dashes.');
+        const label = uiText('use_only_letters_numbers_and_dashes');
+        input.setCustomValidity(label);
         input.reportValidity();
-        showToast(uiText('use_only_letters_numbers_and_dashes'), 'error');
+        showToast(label, 'error');
         return;
     }
     input.setCustomValidity('');
@@ -609,7 +610,7 @@ async function searchUsers(event) {
         help.classList.add('hidden');
     }
 
-    const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
+    const res = await fetch(appPath(`/api/users/search?q=${encodeURIComponent(query)}`));
     const data = await res.json();
     const users = data.users || [];
 
@@ -620,12 +621,12 @@ async function searchUsers(event) {
                 <div class="min-w-0">
                     <div class="font-medium truncate">${escapeHtml(user.username)}</div>
                     <div class="text-xs text-zinc-400">${escapeHtml(user.formatted_user_number || formatNumber(user.user_number))}</div>
-                    <div class="text-xs ${escapeHtml(user.effective_status_text_class || 'text-zinc-500')} mt-0.5">${escapeHtml(user.effective_status_label || 'Offline')}</div>
+                    <div class="text-xs ${escapeHtml(user.effective_status_text_class || 'text-zinc-500')} mt-0.5">${escapeHtml(presenceLabel(user.effective_status))}</div>
                 </div>
             </div>
             ${renderSearchResultAction(user)}
         </div>
-    `).join('') || '<p class="text-zinc-400 text-sm sm:col-span-2">No users found.</p>';
+    `).join('') || `<p class="text-zinc-400 text-sm sm:col-span-2">${escapeHtml(uiText('search_no_users'))}</p>`;
 
     replaceElementMarkup(results, usersMarkup);
 }
@@ -636,10 +637,11 @@ function renderSearchResultAction(user) {
     const personalChatNumber = String(user.personal_chat_number || '').trim();
 
     if (friendshipStatus === 'accepted' && personalChatNumber !== '') {
-        return `<a href="/c/${escapeHtml(personalChatNumber)}" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm inline-flex items-center justify-center">Personal Chat</a>`;
+        const chatUrl = appPath(`/c/${personalChatNumber}`);
+        return `<a href="${escapeHtml(chatUrl)}" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm inline-flex items-center justify-center">${escapeHtml(uiText('search_open_direct_message'))}</a>`;
     }
 
-    return `<button class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm" data-app-action="send-friend-request" data-user-number="${escapeHtml(formattedUserNumber)}">Add Friend</button>`;
+    return `<button class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm" data-app-action="send-friend-request" data-user-number="${escapeHtml(formattedUserNumber)}">${escapeHtml(uiText('search_add_friend'))}</button>`;
 }
 
 function getAdminUserListNodes() {
@@ -758,14 +760,14 @@ function setAdminUserRoleState(userId, role) {
 
     const badge = document.getElementById(`admin-user-role-badge-${safeUserId}`);
     if (badge) {
-        badge.textContent = isAdmin ? 'admin' : 'user';
+        badge.textContent = uiText(isAdmin ? 'role_admin' : 'role_user');
         badge.classList.remove('bg-emerald-700', 'text-emerald-100', 'bg-zinc-700', 'text-zinc-200');
         badge.classList.add(isAdmin ? 'bg-emerald-700' : 'bg-zinc-700', isAdmin ? 'text-emerald-100' : 'text-zinc-200');
     }
 
     const roleAction = document.getElementById(`admin-user-role-action-${safeUserId}`);
     if (roleAction) {
-        roleAction.textContent = isAdmin ? 'Demote' : 'Promote';
+        roleAction.textContent = isAdmin ? uiText('demote') : uiText('promote');
         roleAction.classList.remove('bg-amber-700', 'hover:bg-amber-600', 'text-amber-100', 'bg-emerald-700', 'hover:bg-emerald-600', 'text-emerald-100');
         if (isAdmin) {
             roleAction.classList.add('bg-amber-700', 'hover:bg-amber-600', 'text-amber-100');
@@ -791,7 +793,7 @@ function setAdminUserBanState(userId, isBanned) {
 
     const banAction = document.getElementById(`admin-user-ban-action-${safeUserId}`);
     if (banAction) {
-        banAction.textContent = nextIsBanned ? 'Unban' : 'Ban';
+        banAction.textContent = nextIsBanned ? uiText('unban') : uiText('ban');
     }
 }
 
@@ -811,11 +813,11 @@ function openAdminUserActionModal(config) {
     const retainMessagesInput = document.getElementById('admin-user-retain-messages');
     if (!modal || !title || !description || !submit) return false;
 
-    const submitLabel = String(config?.submitLabel || 'Confirm').trim() || 'Confirm';
+    const submitLabel = String(config?.submitLabel || uiText('confirm')).trim() || uiText('confirm');
     const submitTone = String(config?.submitTone || 'emerald').trim().toLowerCase();
 
-    title.textContent = String(config?.title || 'Confirm action');
-    description.textContent = String(config?.description || 'Are you sure?');
+    title.textContent = String(config?.title || uiText('confirm_action'));
+    description.textContent = String(config?.description || uiText('are_you_sure'));
     submit.textContent = submitLabel;
     submit.classList.remove('bg-emerald-700', 'hover:bg-emerald-600', 'bg-amber-700', 'hover:bg-amber-600', 'bg-red-700', 'hover:bg-red-600');
 
@@ -862,7 +864,7 @@ async function performAdminUserRoleAction(userId) {
 
     setAdminUserRoleState(safeUserId, nextRole);
 
-    showToast(nextRole === 'admin' ? 'User promoted to admin' : 'User demoted to user', 'success');
+    showToast(nextRole === 'admin' ? uiText('admin_promoted') : uiText('admin_demoted'), 'success');
     closeAdminUserMenus();
 }
 
@@ -883,14 +885,14 @@ async function performAdminUserBanAction(userId) {
     });
 
     if (!result.success) {
-        showToast(result.error || `Unable to ${nextIsBanned ? 'ban' : 'unban'} user`, 'error');
+        showToast(result.error || uiText(nextIsBanned ? 'admin_ban_failed' : 'admin_unban_failed'), 'error');
         return;
     }
 
     const effectiveIsBanned = Number(result.is_banned) === 1;
     setAdminUserBanState(safeUserId, effectiveIsBanned);
 
-    showToast(effectiveIsBanned ? 'User banned and sessions deleted' : 'User unbanned', 'success');
+    showToast(effectiveIsBanned ? uiText('admin_banned') : uiText('admin_unbanned'), 'success');
     closeAdminUserMenus();
 }
 
@@ -917,7 +919,7 @@ async function performDeleteAdminUser(userId, retainMessages = false) {
         card.remove();
     }
 
-    showToast(retainMessages ? 'User deleted and messages retained' : 'User deleted and sessions removed', 'success');
+    showToast(retainMessages ? uiText('admin_deleted_retained') : uiText('admin_deleted'), 'success');
     closeAdminUserMenus();
 }
 
@@ -930,15 +932,15 @@ function confirmAdminUserRoleAction(userId) {
     }
 
     const makeAdmin = state.role !== 'admin';
-    const usernamePrefix = state.username ? `@${state.username} ` : 'this user ';
+    const username = state.username ? `@${state.username}` : uiText('account_this_user');
     const opened = openAdminUserActionModal({
         type: 'role',
         userId: safeUserId,
-        title: makeAdmin ? 'Promote user' : 'Demote user',
+        title: makeAdmin ? uiText('admin_promote_title') : uiText('admin_demote_title'),
         description: makeAdmin
-            ? `Are you sure you want to make ${usernamePrefix}an admin?`
-            : `Are you sure you want to make ${usernamePrefix}a user?`,
-        submitLabel: makeAdmin ? 'Promote' : 'Demote',
+            ? uiText('admin_promote_confirm', { name: username })
+            : uiText('admin_demote_confirm', { name: username }),
+        submitLabel: makeAdmin ? uiText('promote') : uiText('demote'),
         submitTone: makeAdmin ? 'emerald' : 'amber'
     });
 
@@ -956,15 +958,15 @@ function confirmAdminUserBanAction(userId) {
     }
 
     const shouldBan = !state.isBanned;
-    const usernamePrefix = state.username ? `@${state.username}` : 'this user';
+    const username = state.username ? `@${state.username}` : uiText('account_this_user');
     const opened = openAdminUserActionModal({
         type: 'ban',
         userId: safeUserId,
-        title: shouldBan ? 'Ban user' : 'Unban user',
+        title: shouldBan ? uiText('admin_ban_title') : uiText('admin_unban_title'),
         description: shouldBan
-            ? `Are you sure you want to ban ${usernamePrefix}?`
-            : `Are you sure you want to unban ${usernamePrefix}?`,
-        submitLabel: shouldBan ? 'Ban' : 'Unban',
+            ? uiText('admin_ban_confirm', { name: username })
+            : uiText('admin_unban_confirm', { name: username }),
+        submitLabel: shouldBan ? uiText('ban') : uiText('unban'),
         submitTone: 'amber'
     });
 
@@ -981,13 +983,13 @@ function deleteAdminUser(userId) {
         return;
     }
 
-    const usernamePrefix = state.username ? `@${state.username}` : 'this user';
+    const username = state.username ? `@${state.username}` : uiText('account_this_user');
     const opened = openAdminUserActionModal({
         type: 'delete',
         userId: safeUserId,
-        title: 'Delete user',
-        description: `Are you sure you want to delete ${usernamePrefix}? This cannot be undone.`,
-        submitLabel: 'Delete',
+        title: uiText('admin_delete_title'),
+        description: uiText('admin_delete_confirm', { name: username }),
+        submitLabel: uiText('delete'),
         submitTone: 'red',
         showRetainMessages: true,
         retainMessagesDefault: false
@@ -1042,7 +1044,7 @@ function bindAdminUserActionModal() {
         const safeUserId = Number(action.userId || 0);
         const previousLabel = submit.textContent;
         submit.disabled = true;
-        submit.textContent = String(action.submitLabel || previousLabel || 'Working...') + '...';
+        submit.textContent = uiText('working');
 
         try {
             if (action.type === 'role') {
@@ -1141,12 +1143,12 @@ function bindReportModal() {
     if (!modal || !description || !form || !input || !cancel || !submit) return;
 
     const targetLabelByType = {
-        user: 'this user',
-        chat: 'this chat',
-        message: 'this message'
+        user: uiText('report_target_user'),
+        chat: uiText('report_target_chat'),
+        message: uiText('report_target_message')
     };
 
-    const getTargetLabel = () => targetLabelByType[pendingReportTargetType] || 'this content';
+    const getTargetLabel = () => targetLabelByType[pendingReportTargetType] || uiText('report_target_content');
 
     const updateReasonCounter = () => {
         const safeValue = String(input.value || '').slice(0, REPORT_REASON_MAX_LENGTH);
@@ -1163,7 +1165,7 @@ function bindReportModal() {
         modal.classList.toggle('hidden', !isOpen);
 
         if (isOpen) {
-            description.textContent = `Help us understand what is wrong with ${getTargetLabel()}.`;
+            description.textContent = uiText('report_request_description', { target: getTargetLabel() });
             input.value = '';
             updateReasonCounter();
             setTimeout(() => {
@@ -1262,11 +1264,11 @@ function applySidebarStatus(payload) {
     if (!statusWrap || !statusDot || !statusLabel) return;
 
     statusWrap.classList.remove('text-emerald-400', 'text-amber-400', 'text-red-400');
-    statusDot.classList.remove('bg-emerald-500', 'bg-amber-500', 'bg-red-500');
+    statusDot.classList.remove('bg-emerald-500', 'bg-amber-500', 'bg-red-500', 'bg-sky-500');
 
     statusWrap.classList.add(String(payload?.effective_status_text_class || 'text-emerald-400'));
     statusDot.classList.add(String(payload?.effective_status_dot_class || 'bg-emerald-500'));
-    statusLabel.textContent = String(payload?.effective_status_label || 'Online');
+    statusLabel.textContent = presenceLabel(payload?.effective_status, 'online');
 }
 
 function updateStatusMenuChecks(status) {
@@ -1299,7 +1301,52 @@ async function savePresenceStatus(status, options = {}) {
     updateStatusMenuChecks(selectedPresenceStatus);
 
     if (!options.silent) {
-        showToast(`Status set to ${result.effective_status_label || 'Online'}`, 'success', { excludeFromHistory: true });
+        showToast(uiText('presence_status_saved', { status: presenceLabel(result.effective_status, 'online') }), 'success', { excludeFromHistory: true });
+    }
+}
+
+let presenceActivityBound = false;
+let systemIdleDetector = null;
+
+async function startSystemIdleDetection() {
+    if (systemIdleDetector || !window.IdleDetector) return;
+    const detector = new window.IdleDetector();
+    detector.addEventListener('change', () => {
+        systemPresenceIdle = detector.userState === 'idle' || detector.screenState === 'locked';
+        if (!systemPresenceIdle) lastPresenceInteraction = Date.now();
+    });
+    await detector.start({ threshold: 60000 });
+    systemIdleDetector = detector;
+    document.getElementById('enable-system-pause')?.classList.add('hidden');
+}
+
+async function enableSystemPause() {
+    try {
+        if (await window.IdleDetector.requestPermission() !== 'granted') {
+            throw new Error('Permission declined');
+        }
+        await startSystemIdleDetection();
+    } catch {
+        showToast(uiText('presence_system_unavailable'), 'error');
+    }
+}
+
+function bindPresenceActivity() {
+    if (presenceActivityBound || !window.CURRENT_USER_ID) return;
+    presenceActivityBound = true;
+    const recordActivity = () => { lastPresenceInteraction = Date.now(); };
+    document.addEventListener('pointerdown', recordActivity, { passive: true });
+    document.addEventListener('keydown', recordActivity);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) recordActivity();
+    });
+    if (window.isSecureContext && window.IdleDetector) {
+        const control = document.getElementById('enable-system-pause');
+        control?.classList.remove('hidden');
+        control?.addEventListener('click', enableSystemPause);
+        navigator.permissions?.query({ name: 'idle-detection' }).then(permission => {
+            if (permission.state === 'granted') return startSystemIdleDetection();
+        }).catch(() => {});
     }
 }
 
@@ -1515,10 +1562,10 @@ async function searchPostsPage(query, page) {
     const results = document.getElementById('post-search-results');
     if (!results) return;
 
-    results.innerHTML = '<p class="text-zinc-400 text-sm">Searching...</p>';
+    results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_pending'))}</p>`;
 
     try {
-        const res = await fetch(`/api/posts/search?q=${encodeURIComponent(query)}&page=${page}`);
+        const res = await fetch(appPath(`/api/posts/search?q=${encodeURIComponent(query)}&page=${page}`));
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             showToast(uiActionError(data.error, 'search_failed'), 'error');
@@ -1533,7 +1580,7 @@ async function searchPostsPage(query, page) {
         const total = Number(data.total || 0);
 
         if (posts.length === 0) {
-            results.innerHTML = '<p class="text-zinc-400 text-sm">No posts found.</p>';
+            results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_no_posts'))}</p>`;
             return;
         }
 
@@ -1541,7 +1588,7 @@ async function searchPostsPage(query, page) {
             const authorUsername = escapeHtml(String(post.author_username || ''));
             const authorNumFormatted = escapeHtml(String(post.author_user_number_formatted || ''));
             const postId = Number(post.post_id || 0);
-            const profileUrl = `/u/${authorNumFormatted}?post=${postId}`;
+            const profileUrl = appPath(`/u/${authorNumFormatted}?post=${postId}`);
             const rawContent = String(post.content || '');
             const highlightedContent = highlightSearchTerm(rawContent, query);
             const createdAtRaw = String(post.created_at || '');
@@ -1555,14 +1602,14 @@ async function searchPostsPage(query, page) {
             const currentUserId = Number(window.CURRENT_USER_ID || 0);
             const isOwnPost = authorId > 0 && currentUserId > 0 && authorId === currentUserId;
             const isFriend = post.is_friend === true || post.is_friend === 1;
-            const friendLabel = isOwnPost ? 'You' : (isFriend ? 'Friend' : 'Not Friend');
+            const friendLabel = uiText(isOwnPost ? 'friend_identity_self' : (isFriend ? 'friend_identity_friend' : 'friend_identity_other'));
 
             return `
                 <a href="${profileUrl}" class="block bg-zinc-800 hover:bg-zinc-700/80 rounded-xl p-4 transition border border-zinc-700 hover:border-zinc-600">
                     <div class="flex items-center gap-2 mb-2 min-w-0">
                         ${renderAvatarMarkup(authorObj, 'w-7 h-7', 'text-xs')}
                         <span class="font-medium text-zinc-100 truncate">${authorUsername}</span>
-                        <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${friendLabel}</span>
+                        <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${escapeHtml(friendLabel)}</span>
                         <span class="ml-auto shrink-0 text-xs text-zinc-500" data-utc="${escapeHtml(createdAtRaw)}" title="${escapeHtml(createdAtRaw)}">${escapeHtml(timestamp)}</span>
                     </div>
                     <div class="text-sm text-zinc-300 leading-5 overflow-hidden search-preview">${highlightedContent}</div>
@@ -1579,11 +1626,11 @@ async function searchPostsPage(query, page) {
             paginationHtml = `
                 <div class="flex items-center justify-between mt-4 pt-4 border-t border-zinc-700">
                     <button type="button" class="${prevDisabled ? disabledClass : activeClass}" data-page="${currentPage - 1}" ${prevDisabled ? 'disabled' : ''}>
-                        <i class="fa fa-arrow-left text-xs"></i> Previous
+                        <i class="fa fa-arrow-left text-xs"></i> ${escapeHtml(uiText('search_previous'))}
                     </button>
-                    <span class="text-zinc-400 text-sm">Page ${currentPage} of ${totalPages}</span>
+                    <span class="text-zinc-400 text-sm">${escapeHtml(uiText('search_position', { page: currentPage, total: totalPages }))}</span>
                     <button type="button" class="${nextDisabled ? disabledClass : activeClass}" data-page="${currentPage + 1}" ${nextDisabled ? 'disabled' : ''}>
-                        Next <i class="fa fa-arrow-right text-xs"></i>
+                        ${escapeHtml(uiText('search_next'))} <i class="fa fa-arrow-right text-xs"></i>
                     </button>
                 </div>
             `;
@@ -1629,10 +1676,10 @@ async function searchMessagesPage(query, page) {
     const results = document.getElementById('message-search-results');
     if (!results) return;
 
-    results.innerHTML = '<p class="text-zinc-400 text-sm">Searching...</p>';
+    results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_pending'))}</p>`;
 
     try {
-        const res = await fetch(`/api/messages/search?q=${encodeURIComponent(query)}&page=${page}`);
+        const res = await fetch(appPath(`/api/messages/search?q=${encodeURIComponent(query)}&page=${page}`));
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             showToast(uiActionError(data.error, 'search_failed'), 'error');
@@ -1646,21 +1693,21 @@ async function searchMessagesPage(query, page) {
         const currentPage = Number(data.page || 1);
 
         if (messages.length === 0) {
-            results.innerHTML = '<p class="text-zinc-400 text-sm">No messages found.</p>';
+            results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_no_messages'))}</p>`;
             return;
         }
 
         const messageItems = messages.map(msg => {
             const chatTitle = escapeHtml(String(msg.chat_title || msg.chat_number_formatted || ''));
             const chatType = String(msg.chat_type_normalized || '');
-            const chatTypeLabel = chatType === 'group' ? 'Group Chat' : 'Private Chat';
+            const chatTypeLabel = uiText(chatType === 'group' ? 'search_group_chat' : 'search_private_chat');
             const chatNumFormatted = escapeHtml(String(msg.chat_number_formatted || ''));
             const msgId = Number(msg.message_id || 0);
-            const chatUrl = `/c/${chatNumFormatted}?msg=${msgId}`;
+            const chatUrl = appPath(`/c/${chatNumFormatted}?msg=${msgId}`);
             const rawContent = stripMessageMentions(String(msg.content || ''));
             const highlightedContent = highlightSearchTerm(rawContent, query);
-            const senderUsername = escapeHtml(msg.bot_name
-                ? uiText('bot_name', { name: msg.bot_name }) : String(msg.sender_username || ''));
+            const senderUsername = msg.bot_name
+                ? uiText('bot_name', { name: msg.bot_name }) : String(msg.sender_username || '');
             const createdAtRaw = String(msg.created_at || '');
             const timestamp = formatCompactMessageTimestamp(createdAtRaw);
 
@@ -1668,11 +1715,11 @@ async function searchMessagesPage(query, page) {
                 <a href="${chatUrl}" class="block bg-zinc-800 hover:bg-zinc-700/80 rounded-xl p-4 transition border border-zinc-700 hover:border-zinc-600">
                     <div class="flex items-center gap-2 mb-2 min-w-0">
                         <span class="font-medium text-zinc-100 truncate">${chatTitle}</span>
-                        <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${chatTypeLabel}</span>
+                        <span class="shrink-0 text-xs text-zinc-500 bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 rounded">${escapeHtml(chatTypeLabel)}</span>
                         <span class="ml-auto shrink-0 text-xs text-zinc-500" data-utc="${escapeHtml(createdAtRaw)}" title="${escapeHtml(createdAtRaw)}">${escapeHtml(timestamp)}</span>
                     </div>
                     <div class="text-sm text-zinc-300 leading-5 overflow-hidden search-preview search-preview-short">${highlightedContent}</div>
-                    <div class="mt-2 text-xs text-zinc-500">Sent by <span class="text-zinc-400">${senderUsername}</span></div>
+                    <div class="mt-2 text-xs text-zinc-400">${escapeHtml(uiText('search_sent_by', { name: senderUsername }))}</div>
                 </a>
             `;
         }).join('');
@@ -1686,11 +1733,11 @@ async function searchMessagesPage(query, page) {
             paginationHtml = `
                 <div class="flex items-center justify-between mt-4 pt-4 border-t border-zinc-700">
                     <button type="button" class="${prevDisabled ? disabledClass : activeClass}" data-page="${currentPage - 1}" ${prevDisabled ? 'disabled' : ''}>
-                        <i class="fa fa-arrow-left text-xs"></i> Previous
+                        <i class="fa fa-arrow-left text-xs"></i> ${escapeHtml(uiText('search_previous'))}
                     </button>
-                    <span class="text-zinc-400 text-sm">Page ${currentPage} of ${totalPages}</span>
+                    <span class="text-zinc-400 text-sm">${escapeHtml(uiText('search_position', { page: currentPage, total: totalPages }))}</span>
                     <button type="button" class="${nextDisabled ? disabledClass : activeClass}" data-page="${currentPage + 1}" ${nextDisabled ? 'disabled' : ''}>
-                        Next <i class="fa fa-arrow-right text-xs"></i>
+                        ${escapeHtml(uiText('search_next'))} <i class="fa fa-arrow-right text-xs"></i>
                     </button>
                 </div>
             `;

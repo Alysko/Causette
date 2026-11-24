@@ -9,8 +9,8 @@ final class PollDraft
     public const MAX_OPTIONS = 10;
     public const MAX_TEXT_LENGTH = 40;
     public const DEFAULT_HOURS = 24;
-    public const MAX_DAYS = 7;
-    public const MAX_HOURS = self::MAX_DAYS * 24;
+    public const MAX_DAYS = 60;
+    public const MAX_HOURS = 24;
 
     public static function expirySeconds(mixed $expiry): ?int
     {
@@ -18,7 +18,9 @@ final class PollDraft
             return null;
         }
         $duration = (int)$parts[1];
-        $inHours = strtolower($parts[2]) === 'd' ? $duration * 24 : $duration;
-        return $inHours <= self::MAX_HOURS ? $inHours * 3600 : null;
+        if (strtolower($parts[2]) === 'd') {
+            return $duration <= self::MAX_DAYS ? $duration * 86400 : null;
+        }
+        return $duration <= self::MAX_HOURS ? $duration * 3600 : null;
     }
 }

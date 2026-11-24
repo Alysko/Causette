@@ -3,11 +3,9 @@
 declare(strict_types=1);
 
 $database = $privateConfiguration['database'];
-$version = require __DIR__ . '/../../version.php';
-
 define('APP_NAME', 'Causette');
-define('APP_VERSION', $version['app_version']);
-define('CAUSETTE_UPDATE_SOURCES', $version['compatible_database_versions'] ?? []);
+define('APP_VERSION', $causetteVersion['app_version']);
+define('CAUSETTE_UPDATE_SOURCES', $causetteVersion['compatible_database_versions'] ?? []);
 define('APP_URL', CAUSETTE_CANONICAL_URL);
 define('APP_BASE_PATH', ltrim(CAUSETTE_PUBLIC_PATH, '/'));
 define('DB_HOST', $database['host']);

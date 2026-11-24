@@ -1,6 +1,12 @@
-<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
+<?php
+$locale = \Causette\Localization\Locale::current();
+$tr = $locale->html(...);
+?>
 <div class="p-8 overflow-auto">
-    <h1 class="text-3xl font-bold mb-6"><?= $tr('ui.reports') ?></h1>
+    <div class="mb-6 space-y-2">
+        <h1 class="text-3xl font-bold"><?= $tr('ui.reports') ?></h1>
+        <?php require __DIR__ . '/partials/back-to-settings.php'; ?>
+    </div>
 
     <?php
         $filter = $selectedFilter ?? 'new';
@@ -11,8 +17,9 @@
                 : 'bg-zinc-900 text-zinc-300 border-zinc-700 hover:bg-zinc-800';
         };
 
-        $formatTarget = static function($report) {
+        $formatTarget = static function($report) use ($locale) {
             $targetType = strtolower((string)($report->target_type ?? ''));
+            $targetId = (int)($report->target_id ?? 0);
 
             if ($targetType === 'user') {
                 $targetUserNumber = trim((string)($report->target_user_number ?? ''));
@@ -29,7 +36,7 @@
                 }
 
                 return [
-                    'label' => 'User #' . (int)($report->target_id ?? 0),
+                    'label' => $locale->text('ui.report_user_number', ['number' => $targetId]),
                     'href' => null
                 ];
             }
@@ -39,13 +46,13 @@
                 if ($chatNumber !== '') {
                     $formattedChatNumber = User::formatUserNumber($chatNumber);
                     return [
-                        'label' => 'Chat ' . $formattedChatNumber,
+                        'label' => $locale->text('ui.report_chat_number', ['number' => $formattedChatNumber]),
                         'href' => base_url('/c/' . $formattedChatNumber)
                     ];
                 }
 
                 return [
-                    'label' => 'Chat #' . (int)($report->target_id ?? 0),
+                    'label' => $locale->text('ui.report_chat_number', ['number' => $targetId]),
                     'href' => null
                 ];
             }
@@ -55,19 +62,19 @@
                 if ($messageChatNumber !== '') {
                     $formattedChatNumber = User::formatUserNumber($messageChatNumber);
                     return [
-                        'label' => 'Message #' . (int)($report->target_id ?? 0) . ' in Chat ' . $formattedChatNumber,
+                        'label' => $locale->text('ui.report_message_in_chat', ['number' => $targetId, 'chat' => $formattedChatNumber]),
                         'href' => base_url('/c/' . $formattedChatNumber)
                     ];
                 }
 
                 return [
-                    'label' => 'Message #' . (int)($report->target_id ?? 0),
+                    'label' => $locale->text('ui.report_message_number', ['number' => $targetId]),
                     'href' => null
                 ];
             }
 
             return [
-                'label' => ucfirst($targetType) . ' #' . (int)($report->target_id ?? 0),
+                'label' => $locale->text('ui.report_target_number', ['number' => $targetId]),
                 'href' => null
             ];
         };
@@ -110,7 +117,7 @@
                             <div class="min-w-0 flex-1">
                                 <div class="flex items-center gap-3 mb-3">
                                     <?php if ($reporterAvatar): ?>
-                                        <img src="<?= htmlspecialchars($reporterAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($report->reporter_username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
+                                        <img src="<?= htmlspecialchars($reporterAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $report->reporter_username]) ?>" class="w-9 h-9 rounded-full object-cover border border-zinc-700">
                                     <?php else: ?>
                                         <div class="w-9 h-9 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($report->reporter_user_number), ENT_QUOTES, 'UTF-8') ?>">
                                             <?= htmlspecialchars(User::avatarInitial($report->reporter_username), ENT_QUOTES, 'UTF-8') ?>
@@ -141,13 +148,13 @@
                                 </div>
 
                                 <div class="text-xs text-zinc-500 mt-2">
-                                    Submitted <?= htmlspecialchars((string)$report->created_at, ENT_QUOTES, 'UTF-8') ?>
+                                    <?= $tr('ui.report_submitted_at', ['date' => \Causette\Localization\DisplayPreferences::formatTimestamp((string)$report->created_at)]) ?>
                                 </div>
                             </div>
 
                             <div class="shrink-0 flex flex-col items-end gap-2">
                                 <span class="text-xs px-2 py-1 rounded-full border <?= $isPending ? 'border-amber-600 text-amber-300 bg-amber-900/30' : 'border-emerald-600 text-emerald-300 bg-emerald-900/30' ?>">
-                                    <?= $isPending ? 'New' : 'Handled' ?>
+                                    <?= $tr($isPending ? 'ui.report_status_new' : 'ui.report_status_handled') ?>
                                 </span>
 
                                 <?php if ($isPending): ?>

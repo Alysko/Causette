@@ -19,8 +19,14 @@ final class DisplayPreferences
         'ymd' => 'ui.date_format_ymd',
     ];
     public const TIME_FORMATS = ['24h' => 'ui.time_format_24h', '12h' => 'ui.time_format_12h'];
+    public const THEMES = [
+        'dark' => 'ui.theme_dark',
+        'light' => 'ui.theme_light',
+        'colorblind' => 'ui.theme_colorblind',
+    ];
 
-    private const DEFAULTS = ['language' => '', 'date_format' => 'locale', 'time_format' => '24h'];
+    private const DEFAULT_THEME = 'dark';
+    private const DEFAULTS = ['language' => '', 'date_format' => 'locale', 'time_format' => '24h', 'theme' => self::DEFAULT_THEME];
     private static array $effective = self::DEFAULTS;
     private static array $stored = [];
     private static string $timezone = 'UTC+0';
@@ -96,6 +102,8 @@ final class DisplayPreferences
                 $preferences[$field] = $value;
             }
         }
+        $theme = $stored['theme'] ?? null;
+        $preferences['theme'] = $userId !== null && self::valid($theme, self::THEMES, false) ? $theme : self::DEFAULT_THEME;
         return $preferences;
     }
 
@@ -109,9 +117,17 @@ final class DisplayPreferences
             }
             $preferences[$field] = $value;
         }
+        if ($userId !== null) {
+            // Cached forms from older releases can update the other preferences.
+            $theme = array_key_exists('theme', $input) ? $input['theme'] : self::read($userId)['theme'];
+            if (!self::valid($theme, self::THEMES, false)) {
+                return false;
+            }
+            $preferences['theme'] = $theme;
+        }
         $key = self::key($userId);
         Setting::set($key, json_encode($preferences, JSON_THROW_ON_ERROR));
-        self::$stored[$key] = $preferences;
+        self::$stored[$key] = $preferences + ['theme' => self::DEFAULT_THEME];
         return true;
     }
 

@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    'example_message' => 'Bonjour, ici le bot !',
+    'example_error_message' => 'Description de l’erreur',
     'back' => 'Retour aux clés API',
     'title' => 'Documentation de l’API des robots',
     'intro' => 'Les clés API de robot permettent à une application, un script ou un service d’envoyer des messages dans vos groupes. Les clés utilisateur seront disponibles plus tard avec des droits plus étendus.',
@@ -20,6 +22,7 @@ return [
     'chat_parameter' => 'Le numéro de conversation du groupe cible comporte 16 chiffres. Les tirets sont facultatifs, par exemple {formatted} ou {digits}.',
     'text_parameter' => 'Le contenu du message, limité à 16 384 caractères.',
     'example' => 'Exemple de requête',
+    'example_environment' => 'Définissez la variable d’environnement {variable} avec la clé de votre bot avant de lancer un exemple.',
     'example_header' => 'Exemple avec authentification par en-tête',
     'success_response' => 'Réponse en cas de succès',
     'error_response' => 'Réponse en cas d’erreur',

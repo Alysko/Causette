@@ -1,11 +1,11 @@
-<?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
+<?php $locale = \Causette\Localization\Locale::current(); $tr = $locale->html(...); ?>
 <?php
 $postReactionCodes = Post::REACTION_CODES;
 $currentUser = Auth::user();
 $isCurrentUserAdmin = strtolower((string)($currentUser->role ?? '')) === 'admin';
-$postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels(\Causette\Localization\Locale::current());
+$postReactionCodeToLabel = \Causette\Chat\ReactionCatalog::labels($locale);
 
-$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel): string {
+$renderPostReactionBadges = static function (int $postId, array $reactions) use ($postReactionCodes, $postReactionCodeToLabel, $locale): string {
     if (count($reactions) === 0) {
         return '';
     }
@@ -41,8 +41,11 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             }
         }
 
-        $label = $postReactionCodeToLabel[$code] ?? 'Reaction';
-        $tooltip = $label . ': ' . (count($users) > 0 ? implode(', ', $users) : 'No users');
+        $label = $postReactionCodeToLabel[$code] ?? $locale->text('ui.reaction_label');
+        $tooltip = $locale->text('ui.reaction_tooltip', [
+            'reaction' => $label,
+            'users' => $users === [] ? $locale->text('ui.reaction_no_users') : implode(', ', $users),
+        ]);
         $reactedByCurrentUser = !empty($reaction->reacted_by_current_user);
         $badgeClass = $reactedByCurrentUser
             ? 'bg-zinc-700 border-zinc-500 text-zinc-100'
@@ -73,7 +76,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
         <?php $profileAvatar = User::avatarUrl($profile); ?>
         <div class="mb-5">
             <?php if ($profileAvatar): ?>
-                <img src="<?= htmlspecialchars($profileAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($profile->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-20 h-20 rounded-full object-cover border border-zinc-700">
+                <img src="<?= htmlspecialchars($profileAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $profile->username]) ?>" class="w-20 h-20 rounded-full object-cover border border-zinc-700">
             <?php else: ?>
                 <div class="w-20 h-20 rounded-full border border-zinc-700 flex items-center justify-center text-2xl font-semibold <?= htmlspecialchars(User::avatarColorClasses($profile->user_number), ENT_QUOTES, 'UTF-8') ?>">
                     <?= htmlspecialchars(User::avatarInitial($profile->username), ENT_QUOTES, 'UTF-8') ?>
@@ -94,7 +97,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             <div class="rounded-xl border border-zinc-700 bg-zinc-800/60 p-3">
                 <div class="text-xs uppercase tracking-wide text-zinc-500"><?= $tr('ui.status') ?></div>
                 <div class="mt-1 text-sm <?= htmlspecialchars($profile->effective_status_text_class ?? 'text-zinc-500', ENT_QUOTES, 'UTF-8') ?>">
-                    <?= htmlspecialchars($profile->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>
+                    <?= $tr('ui.' . (User::normalizePresenceStatus($profile->effective_status ?? null) ?? 'offline')) ?>
                 </div>
             </div>
             <div class="rounded-xl border border-zinc-700 bg-zinc-800/60 p-3">
@@ -141,7 +144,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             <?php endif; ?>
             <button type="button" data-app-action="toggle-favorite-user" data-user-id="<?= (int)$profile->id ?>" data-favorite="<?= !empty($isFavorite ?? false) ? '0' : '1' ?>" class="<?= htmlspecialchars(!empty($isFavorite ?? false) ? $profileActionNeutralClass : $profileActionWarnClass, ENT_QUOTES, 'UTF-8') ?>">
                 <i class="fa <?= !empty($isFavorite ?? false) ? 'fa-star-half-stroke' : 'fa-star' ?> text-xs"></i>
-                <?= !empty($isFavorite ?? false) ? 'Remove Favorite' : 'Add to Favorites' ?>
+                <?= $tr(!empty($isFavorite ?? false) ? 'ui.remove_favorite' : 'ui.add_to_favorites') ?>
             </button>
             <button type="button" data-app-action="unfriend" data-user-id="<?= (int)$profile->id ?>" class="<?= htmlspecialchars($profileActionDangerClass, ENT_QUOTES, 'UTF-8') ?>"><i class="fa fa-user-minus text-xs"></i> <?= $tr('ui.unfriend') ?></button>
             <?php elseif (($friendshipStatus ?? null) === 'pending' && ($friendshipDirection ?? null) === 'incoming'): ?>
@@ -162,7 +165,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
     <div class="flex items-center justify-between gap-3 mb-4">
         <h2 class="text-xl font-semibold text-zinc-100"><?= $tr('ui.posts') ?></h2>
         <div class="flex items-center gap-3">
-            <span class="text-xs text-zinc-500 uppercase tracking-wide"><?= (int)($totalPosts ?? count($posts ?? [])) ?> total</span>
+            <span class="text-xs text-zinc-500 uppercase tracking-wide"><?= $tr('ui.post_total', ['count' => (int)($totalPosts ?? count($posts ?? []))]) ?></span>
             <?php if ((int)$profile->id === (int)$currentUserId): ?>
                 <button type="button" data-app-action="new-post" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm transition">
                     <i class="fa fa-plus text-xs"></i> <?= $tr('ui.new_post') ?>
@@ -230,7 +233,7 @@ $renderPostReactionBadges = static function (int $postId, array $reactions) use 
             <?php else: ?>
                 <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800/40 border border-zinc-700/40 text-zinc-600 text-sm cursor-default"><i class="fa fa-arrow-left text-xs"></i> <?= $tr('ui.previous') ?></span>
             <?php endif; ?>
-            <span class="text-zinc-400 text-sm">Page <?= $currentPage ?> of <?= $totalPages ?></span>
+            <span class="text-zinc-400 text-sm"><?= $tr('ui.pagination_position', ['page' => $currentPage, 'total' => $totalPages]) ?></span>
             <?php if ($currentPage < $totalPages): ?>
                 <a href="<?= htmlspecialchars($profilePageBaseUrl, ENT_QUOTES, 'UTF-8') ?>?page=<?= $currentPage + 1 ?>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition"><?= $tr('ui.next') ?> <i class="fa fa-arrow-right text-xs"></i></a>
             <?php else: ?>

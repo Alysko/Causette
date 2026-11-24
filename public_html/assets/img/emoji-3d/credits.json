@@ -1,0 +1,9 @@
+{
+  "name": "Noto 3D Emoji",
+  "attribution": "Noto 3D Emoji artwork by Google LLC.",
+  "source": "https://github.com/googlefonts/noto-emoji/tree/e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e/3D/png/72",
+  "revision": "e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e",
+  "imageLicense": "Apache-2.0",
+  "changes": "Causette transcodes the 72-pixel PNGs to WebP. catalog.json maps existing emoji codes to the corresponding local artwork.",
+  "notices": ["LICENSE.txt", "UPSTREAM-LICENSE.txt", "THIRD-PARTY-FLAGS.txt"]
+}

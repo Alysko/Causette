@@ -3,8 +3,17 @@
 declare(strict_types=1);
 
 return [
+    'mail_test_missing_settings' => 'Renseignez les paramètres requis par le mode d’envoi avant de lancer le test.',
+    'mail_test_delivery_failed' => 'Le mode d’envoi sélectionné n’a pas pu transmettre le courriel de test.',
+    'mail_settings_invalid' => 'Vérifiez le mode d’envoi, l’adresse d’expéditeur et les réglages SMTP.',
     'api_key_expired' => 'Clé API expirée.',
     'chat_not_found' => 'Cette conversation est introuvable.',
+    'report_handled' => 'Signalement marqué comme traité.',
+    'report_invalid_selection' => 'Signalement non valide.',
+    'report_missing_or_handled' => 'Ce signalement est introuvable ou a déjà été traité.',
+    'trash_permanently_deleted' => 'Conversation définitivement supprimée.',
+    'trash_chat_not_found' => 'Cette conversation supprimée est introuvable.',
+    'trash_delete_failed' => 'Impossible de supprimer définitivement cette conversation.',
     'user_not_found' => 'Cet utilisateur est introuvable.',
     'update_complete' => 'Base de données mise à jour.',
     'invalid_or_expired_code' => 'Code invalide ou expiré.',

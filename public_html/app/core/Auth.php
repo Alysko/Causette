@@ -1,7 +1,9 @@
 <?php
 require_once __DIR__ . '/TrustedBrowser.php';
 require_once __DIR__ . '/BrowserSession.php';
+require_once __DIR__ . '/DisplayPreferences.php';
 
+use Causette\Localization\Locale;
 use Causette\Security\BrowserSession;
 use Causette\Security\TrustedBrowser;
 
@@ -51,15 +53,19 @@ class Auth {
             $digest = BrowserSession::sessionDigest($replacement);
         }
 
-        if ($lastTouchAt <= 0 || ($now - $lastTouchAt) >= 60) {
+        $presenceTouchedAt = (int)($_SESSION['last_presence_touch_at'] ?? $lastTouchAt);
+        if (($_SERVER['HTTP_X_CAUSETTE_PRESENCE'] ?? '') !== 'idle' && $now - $presenceTouchedAt >= 60) {
             User::touchActivity((int)$user->id);
+            $_SESSION['last_presence_touch_at'] = $now;
+            $user->last_active_at = date('Y-m-d H:i:s', $now);
+        }
+        if ($lastTouchAt <= 0 || ($now - $lastTouchAt) >= 60) {
             Database::query(
                 'UPDATE user_sessions SET last_seen_at = UTC_TIMESTAMP()
                  WHERE user_id = ? AND session_token = CAST(? AS BINARY) AND ' . BrowserSession::ACTIVE,
                 [$userId, $digest],
             );
             $_SESSION['last_activity_touch_at'] = $now;
-            $user->last_active_at = date('Y-m-d H:i:s', $now);
         }
 
         return User::attachEffectiveStatus($user);
@@ -113,6 +119,7 @@ class Auth {
             self::beginEmailVerification($user);
             self::redirect('/verify-email');
         }
+        Locale::bindAuthenticatedAccount((int)$user->id);
     }
 
     public static function passwordBinding(object $user): string {

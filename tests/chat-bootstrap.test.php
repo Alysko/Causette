@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../public_html/app/core/Model.php';
 require_once __DIR__ . '/../public_html/app/models/Attachment.php';
 require_once __DIR__ . '/../public_html/app/models/Message.php';
+require_once __DIR__ . '/../public_html/app/models/User.php';
 
 final class Setting
 {
@@ -12,17 +13,20 @@ final class Setting
         return match ($key) {
             'attachments_accepted_file_types' => 'png,jpg',
             'attachments_maximum_file_size_mb', 'system_messages_auto_combine_2' => '1',
+            'attachments_expiry_enabled', 'attachments_expiry_hours' => null,
             default => throw new RuntimeException('Unexpected setting in chat view: ' . $key),
         };
     }
 }
 
-function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, ?object $activePoll): string
+function base_url(string $path): string { return $path; }
+
+function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, ?object $activePoll, array $messages = [], bool $asAdmin = false): string
 {
     $chat = (object) ['id' => 101, 'chat_number' => '1000000000000001', 'type' => 'group', 'created_by' => 1];
     $chatTitle = 'Fixture chat';
     $currentUserId = 2;
-    $messages = [];
+    $isCurrentUserAdmin = $asAdmin;
     $members = [];
     $csrf = 'view-fixture';
 
@@ -33,6 +37,23 @@ function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, 
     } finally {
         ob_end_clean();
     }
+}
+
+$_GET['lang'] = 'fr';
+if (in_array('--render-dialogs', $argv, true)) {
+    echo renderChatBootstrap([], null, null, asAdmin: true);
+    exit;
+}
+
+$html = renderChatBootstrap([], null, null, [(object) [
+    'id' => 91, 'user_id' => 2, 'user_number' => '1000000000000002', 'username' => 'fixture',
+    'content' => 'Fixture', 'created_at' => '2026-11-22 12:00:00',
+    'attachments' => [(object) [
+        'id' => 16, 'file_size' => 2560, 'file_extension' => 'png', 'url' => '/fixture.png',
+    ]],
+]]);
+if (!str_contains($html, '2,5 Ko') || !str_contains($html, 'alt="Pièce jointe"')) {
+    throw new RuntimeException('The initial French message must localize attachment size and unnamed attachment label.');
 }
 
 function bootstrapJson(string $html, string $name): string

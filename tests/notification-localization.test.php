@@ -56,10 +56,11 @@ final class WebPushService
 
 final class FixtureResult
 {
-    public function __construct(private readonly mixed $row = null) {}
+    public function __construct(private readonly mixed $row = null, private readonly int $affectedRows = 0) {}
     public function fetch(): mixed { return $this->row; }
     public function fetchAll(?int $mode = null): array { return $this->row; }
     public function fetchColumn(): mixed { return $this->row; }
+    public function rowCount(): int { return $this->affectedRows; }
 }
 
 final class Database
@@ -68,6 +69,13 @@ final class Database
     public static array $preferenceReads = [];
     private static array $friends = [];
     private static array $settings = [];
+    private bool $openTransaction = false;
+
+    public static function getInstance(): self { return new self(); }
+    public function beginTransaction(): void { $this->openTransaction = true; }
+    public function commit(): void { $this->openTransaction = false; }
+    public function inTransaction(): bool { return $this->openTransaction; }
+    public function rollBack(): void { $this->openTransaction = false; }
 
     public static function account(int $id): object
     {
@@ -106,12 +114,23 @@ final class Database
             return new FixtureResult();
         }
         $pair = implode(':', array_slice($values, 0, 2));
-        if (str_starts_with($sql, 'SELECT id FROM friends')) {
-            return new FixtureResult(isset(self::$friends[$pair]) ? (object) ['id' => 1] : false);
+        $reversePair = implode(':', array_reverse(array_slice($values, 0, 2)));
+        if (str_starts_with($sql, 'SELECT id FROM friends WHERE (')) {
+            return new FixtureResult(isset(self::$friends[$pair]) || isset(self::$friends[$reversePair]) ? (object) ['id' => 1] : false);
         }
-        if (str_starts_with($sql, 'INSERT IGNORE INTO friends') || str_starts_with($sql, 'UPDATE friends')) {
-            self::$friends[$pair] = true;
-            return new FixtureResult();
+        if (str_starts_with($sql, 'SELECT id FROM friends WHERE friend_id')) {
+            return new FixtureResult((self::$friends[$reversePair] ?? null) === 'accepted' ? (object) ['id' => 1] : false);
+        }
+        if (str_starts_with($sql, 'INSERT IGNORE INTO friends')) {
+            self::$friends[$pair] = 'pending';
+            return new FixtureResult(affectedRows: 1);
+        }
+        if (str_starts_with($sql, 'UPDATE friends')) {
+            if ((self::$friends[$reversePair] ?? null) !== 'pending') {
+                return new FixtureResult();
+            }
+            self::$friends[$reversePair] = 'accepted';
+            return new FixtureResult(affectedRows: 1);
         }
         throw new LogicException('Unexpected fixture database query');
     }
@@ -172,6 +191,7 @@ Locale::initializeForAccount('fr', 'en');
 $_POST = ['requester_id' => '1'];
 expectNotifications($controller->acceptRequest(...), [1, 'friend_request_accepted', 'Friend Request Accepted',
     'Éloïse accepted your request', '/u/2222-2222-2222-2222']);
+expectNotifications($controller->acceptRequest(...));
 
 saveDisplayLanguage('fr');
 $_POST = ['user_number' => '3333-3333-3333-3333'];

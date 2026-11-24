@@ -138,7 +138,9 @@ if (($argv[1] ?? '') === 'link') {
         expectRecoveryState($site->scheme($_SERVER) === 'https' && $site->acceptsHost($_SERVER, 'https'),
             'The fixture must enter through an accepted HTTPS route');
         $_SESSION = ['csrf_token' => 'fixture-csrf'];
-        $_POST = ['csrf_token' => 'fixture-csrf', 'email' => 'peer@example.test'];
+        $_POST = ['csrf_token' => 'fixture-csrf'] + ($language === 'fr'
+            ? ['identifier' => ' FixturePeer ']
+            : ['email' => 'peer@example.test']);
         expectRecoveryState(recoveryRedirect($controller->forgotPassword(...)) === '/forgot-password',
             'A valid recovery request must use the normal response');
         $subject = $language === 'fr' ? 'Réinitialisation du mot de passe Causette' : 'Causette Password Reset';

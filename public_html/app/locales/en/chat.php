@@ -3,6 +3,10 @@
 declare(strict_types=1);
 
 return [
+    'system_events_show_one' => 'Show {count} more event',
+    'system_events_show_other' => 'Show {count} more events',
+    'system_events_hide_one' => 'Hide {count} event',
+    'system_events_hide_other' => 'Hide {count} events',
     'actions_menu' => 'Open chat actions menu',
     'active_poll' => 'Active poll',
     'add_option' => 'Add an option',
@@ -55,6 +59,7 @@ return [
     'replace_pin_help' => 'This chat already has a pinned message. Do you want to replace it?',
     'replacing' => 'Replacing...',
     'unknown_user' => 'Unknown user',
+    'deleted_user_label' => '{name} (deleted user)',
     'unpin' => 'Unpin',
     'unpin_error' => 'Unable to unpin message',
     'vote_count_one' => '{count} vote',

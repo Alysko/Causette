@@ -6,7 +6,7 @@
         $toastKind = 'info';
         $flashError = flash_get('error');
         if (flash_get('success') !== null) {
-            $toastMessage = \Causette\Localization\Locale::current()->text('ui.if_that_email_exists_a_reset');
+            $toastMessage = \Causette\Localization\Locale::current()->text('ui.if_the_account_exists_a_reset');
             $toastKind = 'success';
         } elseif ($flashError === 'captcha_failed') {
             $toastMessage = \Causette\Localization\Locale::current()->text('ui.captcha_verification_failed_please_try_again');
@@ -21,8 +21,8 @@
     <?php endif; ?>
     <form method="POST" action="<?= htmlspecialchars(base_path('/forgot-password'), ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-        <label for="forgot-email" class="block text-sm text-zinc-300 mb-2"><?= $tr('ui.email_address') ?></label>
-        <input id="forgot-email" type="email" name="email" placeholder="<?= $tr('ui.email') ?>" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 mb-6" required>
+        <label for="forgot-identifier" class="block text-sm text-zinc-300 mb-2"><?= $tr('login.identifier') ?></label>
+        <input id="forgot-identifier" type="text" name="identifier" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="254" class="w-full bg-zinc-800 border border-zinc-700 rounded-2xl px-5 py-4 mb-6" required>
         <?php if (!empty($captchaWidgetHtml)): ?>
             <div class="mb-4"><?= $captchaWidgetHtml ?></div>
             <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" src="<?= htmlspecialchars($captchaScriptUrl, ENT_QUOTES, 'UTF-8') ?>" async defer></script>

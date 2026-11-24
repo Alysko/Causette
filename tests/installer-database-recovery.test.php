@@ -121,7 +121,7 @@ try {
         'Recovery must keep the integration key generated before activation was interrupted.');
     $version = require __DIR__ . '/../public_html/version.php';
     $databaseVersion = $pdo->query("SELECT `value` FROM settings WHERE `key` = 'database_version'")->fetchColumn();
-    expectRecovery($databaseVersion === $version['app_version'], 'Recovery did not preserve the database version.');
+    expectRecovery($databaseVersion === $version['database_version'], 'Recovery did not preserve the database version.');
     $installationId = $pdo->query("SELECT `value` FROM settings WHERE `key` = 'causette_installation_id'")->fetchColumn();
     expectRecovery(
         is_string($installationId) && preg_match('/\A[a-f0-9]{32}\z/', $installationId) === 1

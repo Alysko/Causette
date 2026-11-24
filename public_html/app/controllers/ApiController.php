@@ -1,7 +1,12 @@
 <?php
+use Causette\Calls\CallSignals;
+use Causette\Calls\CallTurnConfiguration;
 use Causette\Http\ChatResponse;
+use Causette\Localization\Locale;
 use Causette\Security\ConversationRead;
 
+require_once __DIR__ . '/../core/CallSignals.php';
+require_once __DIR__ . '/../core/CallTurnConfiguration.php';
 require_once __DIR__ . '/../core/ChatResponse.php';
 require_once __DIR__ . '/../core/ConversationRead.php';
 
@@ -267,25 +272,6 @@ class ApiController extends Controller {
         )->fetchColumn() === 1;
     }
 
-    private function ensureCallSignalTableExists(): void {
-        Database::query(
-            "CREATE TABLE IF NOT EXISTS call_signals (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                call_id INT NOT NULL,
-                from_user_id INT NOT NULL,
-                to_user_id INT NOT NULL,
-                signal_type ENUM('offer','answer','ice','meta') NOT NULL,
-                payload LONGTEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_call_signals_to (call_id, to_user_id, id),
-                INDEX idx_call_signals_from (call_id, from_user_id, id),
-                FOREIGN KEY (call_id) REFERENCES calls(id) ON DELETE CASCADE,
-                FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-        );
-    }
-
     private function supportsLastSeenMessageId(): bool {
         static $supports = null;
         if ($supports !== null) {
@@ -492,7 +478,8 @@ class ApiController extends Controller {
                 if ($customTitle !== '') {
                     $r->chat_title = $customTitle;
                 } else {
-                    $r->chat_title = $otherUsername !== '' ? $otherUsername : ('Personal Chat ' . $r->chat_number_formatted);
+                    $r->chat_title = $otherUsername !== '' ? $otherUsername
+                        : Locale::current()->text('ui.personal_chat_number', ['number' => $r->chat_number_formatted]);
                 }
             }
 
@@ -515,7 +502,7 @@ class ApiController extends Controller {
 
         if (!preg_match('/^[A-Za-z0-9-]+$/', $q)) {
             $this->json([
-                'error' => 'Use only letters, numbers, and dashes.',
+                'error' => \Causette\Localization\Locale::current()->text('response.use_only_letters_numbers_and_dashes'),
                 'users' => []
             ], 422);
         }
@@ -706,7 +693,7 @@ class ApiController extends Controller {
             } elseif (!empty($chat->other_username)) {
                 $chat->chat_title = $chat->other_username;
             } else {
-                $chat->chat_title = 'Personal Chat ' . User::formatUserNumber($chat->chat_number);
+                $chat->chat_title = Locale::current()->text('ui.personal_chat_number', ['number' => $chat->chat_number_formatted]);
             }
         }
 
@@ -780,7 +767,7 @@ class ApiController extends Controller {
         if ($this->supportsChatSoftDelete()) {
             $chatRow = Database::query("SELECT id, type, non_member_visibility, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chatRow || $this->chatIsSoftDeleted($chatRow)) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
         if (!$chatRow) {
@@ -789,7 +776,7 @@ class ApiController extends Controller {
 
         $allowed = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!ConversationRead::allows($chatRow ?: null, (bool)$allowed)) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
         $isPublicGroupViewer = !$allowed;
 
@@ -978,30 +965,30 @@ class ApiController extends Controller {
         $userId = (int)Auth::user()->id;
 
         if ($chatId <= 0 || $messageId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $chat = null;
         if ($this->supportsChatSoftDelete()) {
             $chat = Database::query("SELECT id, type, created_by, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
         if (!$chat) {
             $chat = Database::query("SELECT id, type, created_by FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
 
         if (Chat::isGroupType($chat->type ?? null) && !$this->canPinGroupMessages($chat, $chatId, $userId)) {
-            $this->json(['error' => 'Only group owners or moderators can pin messages'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owners_or_moderators_can_pin_messages')], 403);
         }
 
         $message = Database::query(
@@ -1009,7 +996,7 @@ class ApiController extends Controller {
             [$messageId, $chatId]
         )->fetch();
         if (!$message) {
-            $this->json(['error' => 'Message not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.message_not_found')], 404);
         }
 
         $settingKey = $this->getPinnedMessageSettingKey($chatId);
@@ -1039,30 +1026,30 @@ class ApiController extends Controller {
         $userId = (int)Auth::user()->id;
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $chat = null;
         if ($this->supportsChatSoftDelete()) {
             $chat = Database::query("SELECT id, type, created_by, deleted_at FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat || $this->chatIsSoftDeleted($chat)) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
         if (!$chat) {
             $chat = Database::query("SELECT id, type, created_by FROM chats WHERE id = ?", [$chatId])->fetch();
             if (!$chat) {
-                $this->json(['error' => 'Chat not found'], 404);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.chat_not_found')], 404);
             }
         }
 
         if (Chat::isGroupType($chat->type ?? null) && !$this->canPinGroupMessages($chat, $chatId, $userId)) {
-            $this->json(['error' => 'Only group owners or moderators can unpin messages'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.only_group_owners_or_moderators_can_unpin_messages')], 403);
         }
 
         $this->clearPinnedMessageForChat($chatId);
@@ -1082,12 +1069,12 @@ class ApiController extends Controller {
         $userId = Auth::user()->id;
 
         if ($chatId <= 0) {
-            $this->json(['error' => 'Invalid payload'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_payload')], 400);
         }
 
         $allowed = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, $userId])->fetch();
         if (!$allowed) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         try {
@@ -1128,7 +1115,7 @@ class ApiController extends Controller {
 
         $allowed = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$chatId, Auth::user()->id])->fetch();
         if (!$allowed) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
                 $call = Database::query(
@@ -1266,61 +1253,44 @@ class ApiController extends Controller {
 
     public function getCallSignal($params) {
         Auth::requireAuth();
-        $this->ensureCallSignalTableExists();
 
-        $callId = (int)($params['call_id'] ?? 0);
-        $userId = Auth::user()->id;
-        $sinceId = (int)($_GET['since_id'] ?? 0);
+        $callId = CallSignals::id($params['call_id'] ?? null, 1);
+        $userId = (int) Auth::user()->id;
+        $sinceId = CallSignals::id($_GET['since_id'] ?? 0, 0, CallSignals::MAX_CURSOR);
+        $locale = \Causette\Localization\Locale::current();
+        if ($callId === null || $sinceId === null) {
+            $this->json(['error' => $locale->text('calls.invalid_signal_cursor')], 400);
+            return;
+        }
 
         $call = Database::query("SELECT id, chat_id FROM calls WHERE id = ? AND status = 'active'", [$callId])->fetch();
         if (!$call) {
-            $this->json(['error' => 'Call not found'], 404);
+            $this->json(['error' => $locale->text('calls.call_not_found')], 404);
+            return;
         }
 
-        $member = Database::query("SELECT id FROM chat_members WHERE chat_id = ? AND user_id = ?", [$call->chat_id, $userId])->fetch();
-        if (!$member) {
-            $this->json(['error' => 'Access denied'], 403);
+        $viewer = CallSignals::participant($callId, (int) $call->chat_id, $userId);
+        if (!$viewer) {
+            $this->json(['error' => $locale->text('calls.access_denied')], 403);
+            return;
         }
 
-        try {
-            $participants = Database::query(
-                "SELECT cp.user_id,
-                        cp.screen_sharing,
-                        cp.joined_at,
-                        u.username
-                 FROM call_participants cp
-                 JOIN users u ON u.id = cp.user_id
-                 WHERE cp.call_id = ?
-                   AND cp.user_id != ?
-                   AND cp.left_at IS NULL
-                 ORDER BY cp.joined_at ASC",
-                [$callId, $userId]
-            )->fetchAll();
-        } catch (Throwable $e) {
-            $participants = Database::query(
-                "SELECT cp.user_id,
-                        cp.joined_at,
-                        u.username
-                 FROM call_participants cp
-                 JOIN users u ON u.id = cp.user_id
-                 WHERE cp.call_id = ?
-                   AND cp.user_id != ?
-                   AND cp.left_at IS NULL
-                 ORDER BY cp.joined_at ASC",
-                [$callId, $userId]
-            )->fetchAll();
-        }
-
-        $signals = Database::query(
-            "SELECT id, from_user_id, signal_type, payload, created_at
-             FROM call_signals
-             WHERE call_id = ?
-               AND to_user_id = ?
-               AND id > ?
-             ORDER BY id ASC
-             LIMIT 500",
-            [$callId, $userId, $sinceId]
+        $participants = Database::query(
+            'SELECT cp.user_id,
+                    MAX(cp.screen_sharing) AS screen_sharing,
+                    MAX(cp.joined_at) AS joined_at,
+                    u.username
+             FROM call_participants cp
+             JOIN chat_members cm ON cm.chat_id = ? AND cm.user_id = cp.user_id
+             JOIN users u ON u.id = cp.user_id AND COALESCE(u.is_banned, 0) = 0
+             WHERE cp.call_id = ? AND cp.user_id != ? AND cp.left_at IS NULL
+             GROUP BY cp.user_id, u.username
+             ORDER BY joined_at, cp.user_id
+             LIMIT 99',
+            [(int) $call->chat_id, $callId, $userId],
         )->fetchAll();
+
+        $signals = CallSignals::page($callId, (int) $call->chat_id, $userId, $sinceId, (string) $viewer->joined_at);
 
         $nextSinceId = $sinceId;
         $normalizedSignals = [];
@@ -1362,7 +1332,7 @@ class ApiController extends Controller {
             }
         }
 
-        $this->json([
+        $response = [
             'peer' => $legacyPeer ?: [
                 'offer' => null,
                 'answer' => null,
@@ -1373,7 +1343,12 @@ class ApiController extends Controller {
             'participants' => $normalizedParticipants,
             'signals' => $normalizedSignals,
             'next_since_id' => $nextSinceId,
-        ]);
+        ];
+        if (($_GET['refresh_ice'] ?? null) === '1') {
+            header('Cache-Control: private, no-store');
+            $response['turn'] = CallTurnConfiguration::issueFor($callId, $userId);
+        }
+        $this->json($response);
     }
 
     public function getServers() {
@@ -1388,7 +1363,7 @@ class ApiController extends Controller {
 
         $allowed = Database::query("SELECT id FROM server_members WHERE server_id = ? AND user_id = ?", [$serverId, Auth::user()->id])->fetch();
         if (!$allowed) {
-            $this->json(['error' => 'Access denied'], 403);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.access_denied')], 403);
         }
 
         $channels = Database::query("SELECT id, channel_number, name, type, created_at FROM channels WHERE server_id = ? ORDER BY name ASC", [$serverId])->fetchAll();
@@ -1400,8 +1375,8 @@ class ApiController extends Controller {
         Auth::csrfValidate();
 
         $status = User::normalizePresenceStatus($_POST['status'] ?? null);
-        if ($status === null) {
-            $this->json(['error' => 'Invalid status'], 400);
+        if ($status === null || $status === 'paused') {
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_status')], 400);
         }
 
         $userId = (int)Auth::user()->id;

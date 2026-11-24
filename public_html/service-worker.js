@@ -6,13 +6,29 @@ self.addEventListener('activate', (event) => {
     event.waitUntil(self.clients.claim());
 });
 
+function isInScope(url, scope) {
+    return url.origin === scope.origin && url.pathname.startsWith(scope.pathname);
+}
+
+function notificationTarget(link, scope) {
+    const route = String(link || '').trim();
+    if (!route.startsWith('/') || route.startsWith('//')) return null;
+    const target = new URL(route.slice(1), scope);
+    return isInScope(target, scope) ? target : null;
+}
+
 self.addEventListener('push', (event) => {
     event.waitUntil((async () => {
+        const scope = new URL(self.registration.scope);
+        const language = String(self.navigator?.language || '').split('-')[0].toLowerCase();
+        const fallback = language === 'fr'
+            ? { title: 'Nouveau message', body: 'Vous avez une nouvelle notification dans Causette.' }
+            : { title: 'New message', body: 'You have a new notification in Causette.' };
         let payload = {};
 
         if (event.data) {
             try {
-                payload = event.data.json();
+                payload = event.data.json() ?? {};
             } catch {
                 payload = { body: event.data.text() };
             }
@@ -25,7 +41,7 @@ self.addEventListener('push', (event) => {
 
         if (!title || !body) {
             try {
-                const response = await fetch('/notifications', {
+                const response = await fetch(new URL('notifications', scope).href, {
                     method: 'GET',
                     headers: {
                         Accept: 'application/json',
@@ -40,9 +56,9 @@ self.addEventListener('push', (event) => {
                     const notifications = Array.isArray(data?.notifications) ? data.notifications : [];
                     const firstUnread = notifications.find((item) => Number(item?.read) === 0) || notifications[0] || null;
                     if (firstUnread) {
-                        title = String(firstUnread.title || title || 'New message').trim();
-                        body = String(firstUnread.message || body || 'You have a new notification in Causette.').trim();
-                        link = String(firstUnread.link || link || '/').trim();
+                        title = String(firstUnread.title || title).trim();
+                        body = String(firstUnread.message || body).trim();
+                        link = String(firstUnread.link || link).trim();
                         notificationType = String(firstUnread.type || notificationType || '').trim().toLowerCase();
                     }
                 }
@@ -51,20 +67,11 @@ self.addEventListener('push', (event) => {
             }
         }
 
-        if (!title) {
-            title = 'New message';
-        }
-        if (!body) {
-            body = 'You have a new notification in Causette.';
-        }
-        if (!link) {
-            link = '/';
-        }
-
-        await self.registration.showNotification(title, {
-            body,
-            icon: '/assets/img/favicon.png',
-            badge: '/assets/img/favicon.png',
+        const icon = new URL('assets/img/favicon.png', scope).href;
+        await self.registration.showNotification(title || fallback.title, {
+            body: body || fallback.body,
+            icon,
+            badge: icon,
             data: {
                 link,
                 type: notificationType
@@ -80,8 +87,10 @@ self.addEventListener('notificationclick', (event) => {
     const notificationType = String(event.notification?.data?.type || '').trim().toLowerCase();
     const shouldJoinCall = notificationType === 'poke' || title === 'call poke';
 
-    const target = new URL(String(event.notification?.data?.link || '/'), self.location.origin);
-    if (shouldJoinCall) {
+    const scope = new URL(self.registration.scope);
+    const noticeUrl = notificationTarget(event.notification?.data?.link, scope);
+    const target = noticeUrl || scope;
+    if (noticeUrl && shouldJoinCall) {
         if (target.searchParams.get('join_call') !== '1') {
             target.searchParams.set('join_call', '1');
         }
@@ -90,28 +99,18 @@ self.addEventListener('notificationclick', (event) => {
         }
     }
 
-    const targetPath = target.pathname + target.search + target.hash;
-    const targetUrl = new URL(targetPath, self.location.origin).href;
-
     event.waitUntil((async () => {
-        const clientList = await self.clients.matchAll({
-            type: 'window',
-            includeUncontrolled: true
-        });
+        const clientList = await self.clients.matchAll({ type: 'window' });
 
         for (const client of clientList) {
-            if (!client || !('url' in client)) {
-                continue;
-            }
-
-            const clientUrl = String(client.url || '');
-            if (clientUrl.startsWith(self.location.origin)) {
-                await client.focus();
-                client.navigate(targetUrl);
+            if (!isInScope(new URL(client.url), scope)) continue;
+            const window = client.url === target.href ? client : await client.navigate(target.href);
+            if (window) {
+                await window.focus();
                 return;
             }
         }
 
-        await self.clients.openWindow(targetUrl);
+        await self.clients.openWindow(target.href);
     })());
 });

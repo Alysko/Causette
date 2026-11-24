@@ -1,8 +1,8 @@
 <?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <div class="p-8 overflow-auto">
-    <div class="flex items-center justify-between gap-4 mb-6">
+    <div class="mb-6 space-y-2">
         <h1 class="text-3xl font-bold"><?= $tr('ui.trash') ?></h1>
-        <a href="<?= htmlspecialchars(base_url('/settings'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-xl text-sm"><?= $tr('ui.back_to_settings') ?></a>
+        <?php require __DIR__ . '/partials/back-to-settings.php'; ?>
     </div>
 
     <?php if (!empty($toastMessage ?? '')): ?>
@@ -26,13 +26,16 @@
                             <div class="font-medium text-zinc-100 truncate"><?= htmlspecialchars((string)$chat->chat_title, ENT_QUOTES, 'UTF-8') ?></div>
                             <div class="text-xs text-zinc-400 mt-1">
                                 <?= htmlspecialchars((string)$chat->chat_number_formatted, ENT_QUOTES, 'UTF-8') ?>
-                                · Deleted <?= htmlspecialchars((string)$chat->deleted_at, ENT_QUOTES, 'UTF-8') ?>
-                                <?php if (!empty($chat->deleted_by_username)): ?>
-                                    · by <?= htmlspecialchars((string)$chat->deleted_by_username, ENT_QUOTES, 'UTF-8') ?>
-                                <?php endif; ?>
+                                · <?= !empty($chat->deleted_by_username)
+                                    ? $tr('ui.chat_deleted_by', ['date' => $chat->deleted_at, 'name' => $chat->deleted_by_username])
+                                    : $tr('ui.chat_deleted_on', ['date' => $chat->deleted_at]) ?>
                             </div>
                             <div class="text-xs text-zinc-500 mt-1">
-                                <?= (int)($chat->message_count ?? 0) ?> messages · <?= (int)($chat->attachment_count ?? 0) ?> attachments
+                                <?php
+                                    $messageCount = (int)($chat->message_count ?? 0);
+                                    $attachmentCount = (int)($chat->attachment_count ?? 0);
+                                ?>
+                                <?= $tr($messageCount === 1 ? 'ui.message_count_one' : 'ui.message_count_other', ['count' => $messageCount]) ?> · <?= $tr($attachmentCount === 1 ? 'ui.attachment_count_one' : 'ui.attachment_count_other', ['count' => $attachmentCount]) ?>
                             </div>
                         </div>
 

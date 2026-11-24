@@ -3,8 +3,17 @@
 declare(strict_types=1);
 
 return [
+    'mail_test_missing_settings' => 'Configure the delivery method and its required settings before sending a test email.',
+    'mail_test_delivery_failed' => 'The selected delivery method could not send the test message.',
+    'mail_settings_invalid' => 'Check the delivery method, sender address and SMTP settings.',
     'api_key_expired' => 'API key expired successfully.',
     'chat_not_found' => 'That chat was not found.',
+    'report_handled' => 'Report marked as handled.',
+    'report_invalid_selection' => 'Invalid report.',
+    'report_missing_or_handled' => 'Report not found or already handled.',
+    'trash_permanently_deleted' => 'Chat permanently deleted.',
+    'trash_chat_not_found' => 'Deleted chat not found.',
+    'trash_delete_failed' => 'Unable to permanently delete chat.',
     'user_not_found' => 'That user was not found.',
     'update_complete' => 'Database updated successfully.',
     'invalid_or_expired_code' => 'Invalid or expired code.',

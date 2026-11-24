@@ -155,7 +155,18 @@ if ($mode === 'smtp') {
     $_POST['mail_host'] = 'new-mail.example.test';
     expectCredential(redirectForCredentialAction($admin->saveMailSettings(...)) === '/settings' && Setting::get('mail_host') === 'new-mail.example.test'
         && Setting::get('mail_pass') === $cipher, 'A blank password must preserve the protected credential.');
-    echo "SMTP stores an encrypted record\n";
+
+    $_POST = ['csrf_token' => 'fixture-csrf', 'mail_transport' => 'php', 'mail_from' => 'sender@example.test',
+        'mail_host' => 'ignored.example.test', 'mail_pass' => 'fixture-ignored-in-php-mode'];
+    expectCredential(redirectForCredentialAction($admin->saveMailSettings(...)) === '/settings'
+        && Setting::get('mail_transport') === 'php' && Setting::get('mail_from') === 'sender@example.test'
+        && Setting::get('mail_host') === 'new-mail.example.test' && Setting::get('mail_pass') === $cipher,
+        'Choosing PHP mail must preserve the saved SMTP server and credential.');
+    $_POST['mail_from'] = 'invalid sender';
+    expectCredential(redirectForCredentialAction($admin->saveMailSettings(...)) === '/settings'
+        && ($_SESSION['_flash']['error'] ?? null) === 'mail_settings_invalid' && Setting::get('mail_from') === 'sender@example.test',
+        'An invalid PHP mail sender must leave the working configuration available.');
+    echo "SMTP stores an encrypted record and PHP mail preserves it\n";
     exit;
 }
 

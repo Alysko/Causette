@@ -36,7 +36,7 @@ class ApiKeyController extends Controller {
 
         $user = Auth::user();
         if (!$user) {
-            $this->json(['error' => 'Sign in again to create an API key'], 401);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.sign_in_again_to_create_an_api_key')], 401);
             return;
         }
         $userId = (int)$user->id;
@@ -48,11 +48,11 @@ class ApiKeyController extends Controller {
         $chatIds = $_POST['chat_ids'] ?? [];
 
         if ($name === '' || mb_strlen($name) > 100) {
-            $this->json(['error' => 'Name is required (max 100 characters)'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.name_is_required_max_100_characters')], 400);
             return;
         }
         if (!in_array($type, ['bot', 'user'], true)) {
-            $this->json(['error' => 'Invalid key type'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_key_type')], 400);
             return;
         }
         if ($type === 'bot') {
@@ -62,7 +62,7 @@ class ApiKeyController extends Controller {
             $chatIds = array_map('intval', $chatIds);
             $chatIds = array_filter($chatIds, fn($id) => $id > 0);
             if (empty($chatIds)) {
-                $this->json(['error' => 'Bot keys require at least one chat'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.bot_keys_require_at_least_one_chat')], 400);
                 return;
             }
         }
@@ -73,7 +73,7 @@ class ApiKeyController extends Controller {
             $ipParts = array_filter($ipParts, fn($ip) => $ip !== '');
             foreach ($ipParts as $ip) {
                 if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-                    $this->json(['error' => 'Invalid IP address: ' . $ip], 400);
+                    $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_ip_address_address', ['address' => $ip])], 400);
                     return;
                 }
             }
@@ -100,7 +100,7 @@ class ApiKeyController extends Controller {
                     [$userId, $chatId, $userId]
                 )->fetch();
                 if (!$owned) {
-                    $this->json(['error' => 'You can only grant bot access to group chats you own'], 403);
+                    $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_can_only_grant_bot_access_to_group_chats_you_own')], 403);
                     return;
                 }
             }
@@ -108,7 +108,7 @@ class ApiKeyController extends Controller {
         }
 
         if (ApiKey::activeCountForUser($userId) >= 25) {
-            $this->json(['error' => 'Maximum of 25 active API keys reached'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.maximum_of_25_active_api_keys_reached')], 400);
             return;
         }
 
@@ -117,7 +117,7 @@ class ApiKeyController extends Controller {
             $userId, (string)($_SESSION['auth_session_token'] ?? ''), $rawKey, $name, $type, $cleanedIps, $allowedChats, $expiresAt,
         );
         if ($keyId === null) {
-            $this->json(['error' => 'Sign in again to create an API key'], 401);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.sign_in_again_to_create_an_api_key')], 401);
             return;
         }
 
@@ -139,7 +139,7 @@ class ApiKeyController extends Controller {
         $userId = (int)Auth::user()->id;
 
         if ($keyId <= 0) {
-            $this->json(['error' => 'Invalid key'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_key')], 400);
             return;
         }
 
@@ -155,17 +155,17 @@ class ApiKeyController extends Controller {
         $keyId = (int)($_POST['key_id'] ?? 0);
 
         if ($keyId <= 0) {
-            $this->json(['error' => 'Invalid key'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_key')], 400);
             return;
         }
 
         $key = ApiKey::getById($keyId, $userId);
         if (!$key) {
-            $this->json(['error' => 'Key not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.key_not_found')], 404);
             return;
         }
         if ($key->status !== 'active') {
-            $this->json(['error' => 'Cannot update an expired key'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.cannot_update_an_expired_key')], 400);
             return;
         }
 
@@ -177,7 +177,7 @@ class ApiKeyController extends Controller {
             $ipParts = array_filter($ipParts, fn($ip) => $ip !== '');
             foreach ($ipParts as $ip) {
                 if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-                    $this->json(['error' => 'Invalid IP address: ' . $ip], 400);
+                    $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_ip_address_address', ['address' => $ip])], 400);
                     return;
                 }
             }
@@ -195,7 +195,7 @@ class ApiKeyController extends Controller {
             $chatIds = array_filter($chatIds, fn($id) => $id > 0);
 
             if (empty($chatIds)) {
-                $this->json(['error' => 'Bot keys require at least one chat'], 400);
+                $this->json(['error' => \Causette\Localization\Locale::current()->text('response.bot_keys_require_at_least_one_chat')], 400);
                 return;
             }
 
@@ -207,7 +207,7 @@ class ApiKeyController extends Controller {
                     [$userId, $chatId, $userId]
                 )->fetch();
                 if (!$owned) {
-                    $this->json(['error' => 'You can only grant bot access to group chats you own'], 403);
+                    $this->json(['error' => \Causette\Localization\Locale::current()->text('response.you_can_only_grant_bot_access_to_group_chats_you_own')], 403);
                     return;
                 }
             }

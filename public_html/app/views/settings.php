@@ -2,8 +2,10 @@
 $locale = \Causette\Localization\Locale::current();
 $tr = $locale->html(...);
 require_once __DIR__ . '/../core/HtmlJson.php';
+require_once __DIR__ . '/../core/CallVideoPreferences.php';
+$callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
 ?>
-<div class="p-8 overflow-auto space-y-8">
+<div class="settings-page overflow-auto space-y-6">
     <h1 class="text-3xl font-bold"><?= $tr('ui.settings') ?></h1>
 
     <?php
@@ -17,9 +19,22 @@ require_once __DIR__ . '/../core/HtmlJson.php';
         $mailTestError = flash_get('mail_test_error');
 
         // Settings flash messages
-        if ($flashError === 'integration_storage_error') {
+        if ($flashError === 'invalid_video_quality' || $flashSuccess === 'call_video_quality_saved') {
+            $toastMessage = $locale->text($flashError === 'invalid_video_quality'
+                ? 'browser.call_video_quality_save_failed' : 'browser.call_video_quality_saved');
+            $toastKind = $flashError === 'invalid_video_quality' ? 'error' : 'success';
+            $autoOpenModalId = 'cp-call-video-modal';
+        } elseif ($flashError === 'integration_storage_error') {
             $toastMessage = $locale->text('feedback.integration_storage_error');
             $toastKind = 'error';
+        } elseif ($flashError === 'mail_settings_invalid') {
+            $toastMessage = $locale->text('feedback.mail_settings_invalid');
+            $toastKind = 'error';
+            $autoOpenModalId = 'cp-mail-modal';
+        } elseif ($flashError === 'attachments_invalid_expiry') {
+            $toastMessage = $locale->text('ui.attachments_expiry_invalid');
+            $toastKind = 'error';
+            $autoOpenModalId = 'cp-attachments-modal';
         } elseif ($flashSuccess === 'email_saved') {
             $toastMessage = $locale->text('feedback.email_saved');
             $toastKind = 'success';
@@ -59,6 +74,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
         } elseif ($flashSuccess === 'session_exited') {
             $toastMessage = $locale->text('feedback.session_exited');
             $toastKind = 'success';
+            $autoOpenModalId = 'cp-sessions-modal';
         // Admin flash messages
         } elseif ($flashSuccess === 'mail_saved') {
             $toastMessage = $locale->text('feedback.mail_saved');
@@ -163,6 +179,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
         } elseif ($flashError === 'session_not_found') {
             $toastMessage = $locale->text('feedback.session_not_found');
             $toastKind = 'error';
+            $autoOpenModalId = 'cp-sessions-modal';
         } elseif ($flashError === 'update_check_unconfigured') {
             $toastMessage = $locale->text('ui.automatic_update_checks_are_unavailable_until');
             $toastKind = 'error';
@@ -217,7 +234,11 @@ require_once __DIR__ . '/../core/HtmlJson.php';
     <?php if (!empty($mailTestError)): ?>
         <div class="max-w-2xl rounded-xl border border-red-700 bg-red-950/60 px-5 py-4">
             <p class="text-sm font-semibold text-red-300 mb-1"><?= $tr('ui.test_email_failed') ?></p>
-            <p class="text-sm text-red-200 break-words"><?= htmlspecialchars($mailTestError, ENT_QUOTES, 'UTF-8') ?></p>
+            <p class="text-sm text-red-200 break-words"><?=
+                in_array($mailTestError, ['mail_test_missing_settings', 'mail_test_delivery_failed'], true)
+                    ? $tr('feedback.' . $mailTestError)
+                    : htmlspecialchars($mailTestError, ENT_QUOTES, 'UTF-8')
+            ?></p>
         </div>
     <?php endif; ?>
 
@@ -225,155 +246,201 @@ require_once __DIR__ . '/../core/HtmlJson.php';
         <div id="cp-modal-autoload" data-modal-id="<?= htmlspecialchars($autoOpenModalId, ENT_QUOTES, 'UTF-8') ?>" class="hidden" aria-hidden="true"></div>
     <?php endif; ?>
 
-    <!-- ============================================================ -->
-    <!-- ADMINISTRATION (admin only) -->
-    <!-- ============================================================ -->
-    <?php if (!empty($isAdmin)): ?>
-    <div>
-        <h2 class="text-xl font-semibold mb-4"><?= $tr('ui.administration') ?></h2>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <a href="<?= htmlspecialchars(base_url('/reports'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1] relative">
-                <i class="fa-regular fa-flag text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.reports') ?></span>
-                <?php if (((int)($pendingReportCount ?? 0)) > 0): ?>
-                    <span class="absolute top-3 right-3 min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-xs inline-flex items-center justify-center">
-                        <?= htmlspecialchars((string)min(99, (int)($pendingReportCount ?? 0)) . (((int)($pendingReportCount ?? 0) > 99) ? '+' : ''), ENT_QUOTES, 'UTF-8') ?>
-                    </span>
+    <div class="settings-index">
+        <?php if (!empty($isAdmin)): ?>
+        <section aria-labelledby="settings-administration">
+            <h2 id="settings-administration" class="text-lg font-semibold mb-2"><?= $tr('ui.administration') ?></h2>
+            <ul class="settings-links" role="list">
+                <li>
+                    <a href="<?= htmlspecialchars(base_url('/reports'), ENT_QUOTES, 'UTF-8') ?>" class="settings-link">
+                        <i class="fa-regular fa-flag settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.reports') ?></span>
+                        <?php if (((int)($pendingReportCount ?? 0)) > 0): ?>
+                            <span class="settings-link-badge min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-xs inline-flex items-center justify-center">
+                                <?= htmlspecialchars((string)min(99, (int)($pendingReportCount ?? 0)) . (((int)($pendingReportCount ?? 0) > 99) ? '+' : ''), ENT_QUOTES, 'UTF-8') ?>
+                            </span>
+                        <?php endif; ?>
+                    </a>
+                </li>
+                <li>
+                    <a href="<?= htmlspecialchars(base_url('/users'), ENT_QUOTES, 'UTF-8') ?>" class="settings-link">
+                        <i class="fa-solid fa-user-shield settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.users') ?></span>
+                    </a>
+                </li>
+                <li>
+                    <a href="<?= htmlspecialchars(base_url('/tree'), ENT_QUOTES, 'UTF-8') ?>" class="settings-link">
+                        <i class="fa-solid fa-diagram-project settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.tree') ?></span>
+                    </a>
+                </li>
+                <li>
+                    <a href="<?= htmlspecialchars(base_url('/trash'), ENT_QUOTES, 'UTF-8') ?>" class="settings-link">
+                        <i class="fa-regular fa-trash-can settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.trash') ?></span>
+                    </a>
+                </li>
+            </ul>
+        </section>
+
+        <section aria-labelledby="settings-system">
+            <h2 id="settings-system" class="text-lg font-semibold mb-2"><?= $tr('ui.system') ?></h2>
+            <ul class="settings-links" role="list">
+                <li>
+                    <button type="button" data-modal-open="cp-mail-modal" aria-haspopup="dialog" aria-controls="cp-mail-modal" class="settings-link">
+                        <i class="fa-solid fa-envelope settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.mail') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-display-defaults-modal" aria-haspopup="dialog" aria-controls="cp-display-defaults-modal" class="settings-link">
+                        <i class="fa fa-globe settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.site_display_defaults') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-accounts-modal" aria-haspopup="dialog" aria-controls="cp-accounts-modal" class="settings-link">
+                        <i class="fa-solid fa-users-gear settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.accounts') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-attachments-modal" aria-haspopup="dialog" aria-controls="cp-attachments-modal" class="settings-link">
+                        <i class="fa-solid fa-paperclip settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.attachments') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-security-modal" aria-haspopup="dialog" aria-controls="cp-security-modal" class="settings-link">
+                        <i class="fa-solid fa-shield-halved settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.security') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-errors-modal" aria-haspopup="dialog" aria-controls="cp-errors-modal" class="settings-link">
+                        <i class="fa-solid fa-bug settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.errors_logging') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-updates-modal" aria-haspopup="dialog" aria-controls="cp-updates-modal" class="settings-link">
+                        <i class="fa-solid fa-rotate settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.updates') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-announcement-modal" aria-haspopup="dialog" aria-controls="cp-announcement-modal" class="settings-link">
+                        <i class="fa-solid fa-bullhorn settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.announcement') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-push-modal" aria-haspopup="dialog" aria-controls="cp-push-modal" class="settings-link">
+                        <i class="fa-solid fa-bell settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.push_notifications') ?></span>
+                    </button>
+                </li>
+            </ul>
+        </section>
+        <?php endif; ?>
+
+        <section aria-labelledby="settings-account">
+            <h2 id="settings-account" class="text-lg font-semibold mb-2"><?= $tr('ui.account') ?></h2>
+            <ul class="settings-links" role="list">
+                <?php if (!empty($invitesEnabled)): ?>
+                <li>
+                    <button type="button" data-modal-open="cp-invites-modal" aria-haspopup="dialog" aria-controls="cp-invites-modal" class="settings-link">
+                        <i class="fa-solid fa-ticket settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.invites') ?></span>
+                    </button>
+                </li>
                 <?php endif; ?>
-            </a>
-            <a href="<?= htmlspecialchars(base_url('/users'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-user-shield text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.users') ?></span>
-            </a>
-            <a href="<?= htmlspecialchars(base_url('/tree'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-diagram-project text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.tree') ?></span>
-            </a>
-            <a href="<?= htmlspecialchars(base_url('/trash'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-regular fa-trash-can text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.trash') ?></span>
-            </a>
-        </div>
-    </div>
-    <?php endif; ?>
+                <li>
+                    <button type="button" data-modal-open="cp-username-modal" aria-haspopup="dialog" aria-controls="cp-username-modal" class="settings-link">
+                        <i class="fa-solid fa-at settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.username') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-email-modal" aria-haspopup="dialog" aria-controls="cp-email-modal" class="settings-link">
+                        <i class="fa-solid fa-envelope-open-text settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.email_address_2') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-password-modal" aria-haspopup="dialog" aria-controls="cp-password-modal" class="settings-link">
+                        <i class="fa-solid fa-lock settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.change_password') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-avatar-modal" aria-haspopup="dialog" aria-controls="cp-avatar-modal" class="settings-link">
+                        <i class="fa-solid fa-image settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.avatar') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-timezone-modal" aria-haspopup="dialog" aria-controls="cp-timezone-modal" class="settings-link">
+                        <i class="fa-solid fa-clock settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.time_zone') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-sessions-modal" aria-haspopup="dialog" aria-controls="cp-sessions-modal" class="settings-link">
+                        <i class="fa-solid fa-right-from-bracket settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.sessions') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-2fa-modal" aria-haspopup="dialog" aria-controls="cp-2fa-modal" class="settings-link">
+                        <i class="fa-solid fa-mobile-screen settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.two_factor_short') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-notifications-modal" aria-haspopup="dialog" aria-controls="cp-notifications-modal" class="settings-link">
+                        <i class="fa-solid fa-bell settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.notifications') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-call-video-modal" aria-haspopup="dialog" aria-controls="cp-call-video-modal" class="settings-link">
+                        <i class="fa-solid fa-video settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.call_video_quality') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <a href="<?= htmlspecialchars(base_url('/apikeys'), ENT_QUOTES, 'UTF-8') ?>" class="settings-link">
+                        <i class="fa-solid fa-key settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.api_keys') ?></span>
+                    </a>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-preferences-modal" aria-haspopup="dialog" aria-controls="cp-preferences-modal" class="settings-link">
+                        <i class="fa-solid fa-sliders settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.preferences') ?></span>
+                    </button>
+                </li>
+            </ul>
+        </section>
 
-    <!-- ============================================================ -->
-    <!-- SYSTEM (admin only) -->
-    <!-- ============================================================ -->
-    <?php if (!empty($isAdmin)): ?>
-    <div>
-        <h2 class="text-xl font-semibold mb-4"><?= $tr('ui.system') ?></h2>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <button type="button" data-modal-open="cp-mail-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-envelope text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.mail') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-display-defaults-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa fa-globe text-xl" aria-hidden="true"></i>
-                <span><?= $tr('ui.site_display_defaults') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-accounts-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-users-gear text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.accounts') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-attachments-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-paperclip text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.attachments') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-security-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-shield-halved text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.security') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-errors-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-bug text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.errors_logging') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-updates-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-rotate text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.updates') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-announcement-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-bullhorn text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.announcement') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-push-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-bell text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.push_notifications') ?></span>
-            </button>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- ============================================================ -->
-    <!-- ACCOUNT (all users) -->
-    <!-- ============================================================ -->
-    <div>
-        <h2 class="text-xl font-semibold mb-4"><?= $tr('ui.account') ?></h2>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <?php if (!empty($invitesEnabled)): ?>
-            <button type="button" data-modal-open="cp-invites-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-ticket text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.invites') ?></span>
-            </button>
-            <?php endif; ?>
-            <button type="button" data-modal-open="cp-username-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-at text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.username') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-email-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-envelope-open-text text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.email_address_2') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-password-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-lock text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.change_password') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-avatar-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-image text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.avatar') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-timezone-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-clock text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.time_zone') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-sessions-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-right-from-bracket text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.sessions') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-2fa-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-mobile-screen text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.two_factor_short') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-notifications-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-bell text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.notifications') ?></span>
-            </button>
-            <a href="<?= htmlspecialchars(base_url('/apikeys'), ENT_QUOTES, 'UTF-8') ?>" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-key text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.api_keys') ?></span>
-            </a>
-            <button type="button" data-modal-open="cp-preferences-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-sliders text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.preferences') ?></span>
-            </button>
-        </div>
-    </div>
-
-    <!-- ============================================================ -->
-    <!-- MORE (all users) -->
-    <!-- ============================================================ -->
-    <div>
-        <h2 class="text-xl font-semibold mb-4"><?= $tr('ui.more') ?></h2>
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <button type="button" data-modal-open="cp-browser-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-globe text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium"><?= $tr('ui.test_browser_features') ?></span>
-            </button>
-            <button type="button" data-modal-open="cp-about-modal" class="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 flex flex-col items-center justify-center gap-2 hover:bg-zinc-800 transition cursor-pointer aspect-[2/1]">
-                <i class="fa-solid fa-circle-info text-2xl text-emerald-400"></i>
-                <span class="text-sm text-zinc-200 font-medium text-center"><?= $tr('ui.about') ?></span>
-            </button>
-        </div>
+        <section aria-labelledby="settings-more">
+            <h2 id="settings-more" class="text-lg font-semibold mb-2"><?= $tr('ui.more') ?></h2>
+            <ul class="settings-links" role="list">
+                <li>
+                    <button type="button" data-modal-open="cp-browser-modal" aria-haspopup="dialog" aria-controls="cp-browser-modal" class="settings-link">
+                        <i class="fa-solid fa-globe settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.test_browser_features') ?></span>
+                    </button>
+                </li>
+                <li>
+                    <button type="button" data-modal-open="cp-about-modal" aria-haspopup="dialog" aria-controls="cp-about-modal" class="settings-link">
+                        <i class="fa-solid fa-circle-info settings-link-icon" aria-hidden="true"></i>
+                        <span><?= $tr('ui.about') ?></span>
+                    </button>
+                </li>
+            </ul>
+        </section>
     </div>
 </div>
 
@@ -414,27 +481,37 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <h3 class="text-xl font-semibold"><?= $tr('ui.mail') ?></h3>
                 <button type="button" data-modal-close="cp-mail-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
-            <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.smtp_settings_used_to_send_verification') ?></p>
+            <p class="text-sm text-zinc-400 mb-5"><?= $tr('ui.mail_settings_apply_to_account') ?></p>
             <form method="POST" action="<?= htmlspecialchars(base_path('/admin/mail'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-4">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div class="sm:col-span-2">
-                        <label for="mail_host" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.host') ?></label>
-                        <input type="text" id="mail_host" name="mail_host" value="<?= htmlspecialchars((string)($mail_host ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="smtp.example.com" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                <div>
+                    <label for="mail_transport" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.mail_transport') ?></label>
+                    <select id="mail_transport" name="mail_transport" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                        <option value="smtp" <?= ($mail_transport ?? 'smtp') !== 'php' ? 'selected' : '' ?>><?= $tr('ui.mail_transport_smtp') ?></option>
+                        <option value="php" <?= ($mail_transport ?? 'smtp') === 'php' ? 'selected' : '' ?>><?= $tr('ui.mail_transport_php') ?></option>
+                    </select>
+                </div>
+                <p id="php-mail-help" class="text-sm text-zinc-400"><?= $tr('ui.mail_transport_php_help') ?></p>
+                <fieldset id="smtp-credentials" class="space-y-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="sm:col-span-2">
+                            <label for="mail_host" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.host') ?></label>
+                            <input type="text" id="mail_host" name="mail_host" value="<?= htmlspecialchars((string)($mail_host ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="smtp.example.com" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                        </div>
+                        <div>
+                            <label for="mail_port" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.port') ?></label>
+                            <input type="number" id="mail_port" name="mail_port" value="<?= htmlspecialchars((string)($mail_port ?? '587'), ENT_QUOTES, 'UTF-8') ?>" placeholder="587" min="1" max="65535" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                        </div>
                     </div>
                     <div>
-                        <label for="mail_port" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.port') ?></label>
-                        <input type="number" id="mail_port" name="mail_port" value="<?= htmlspecialchars((string)($mail_port ?? '587'), ENT_QUOTES, 'UTF-8') ?>" placeholder="587" min="1" max="65535" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                        <label for="mail_user" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.username') ?></label>
+                        <input type="text" id="mail_user" name="mail_user" value="<?= htmlspecialchars((string)($mail_user ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="user@example.com" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
                     </div>
-                </div>
-                <div>
-                    <label for="mail_user" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.username') ?></label>
-                    <input type="text" id="mail_user" name="mail_user" value="<?= htmlspecialchars((string)($mail_user ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="user@example.com" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
-                </div>
-                <div>
-                    <label for="mail_pass" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.password') ?></label>
-                    <input type="password" id="mail_pass" name="mail_pass" value="" placeholder="<?= $tr('ui.leave_blank_to_keep_current_password') ?>" autocomplete="new-password" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
-                </div>
+                    <div>
+                        <label for="mail_pass" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.password') ?></label>
+                        <input type="password" id="mail_pass" name="mail_pass" value="" placeholder="<?= $tr('ui.leave_blank_to_keep_current_password') ?>" autocomplete="new-password" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                    </div>
+                </fieldset>
                 <div>
                     <label for="mail_from" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.from_address') ?></label>
                     <input type="text" id="mail_from" name="mail_from" value="<?= htmlspecialchars((string)($mail_from ?? ''), ENT_QUOTES, 'UTF-8') ?>" placeholder="noreply@example.com" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
@@ -577,7 +654,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <div>
                     <p class="text-xs uppercase tracking-wide text-zinc-500 mb-2"><?= $tr('ui.files') ?></p>
                     <div class="flex flex-wrap gap-3">
-                        <?php foreach ([['pdf', 'PDF'], ['odt', 'ODT'], ['doc', 'DOC'], ['docx', 'DOCX'], ['zip', 'ZIP'], ['7z', '7Z']] as [$ext, $label]): ?>
+                        <?php foreach ([['pdf', 'PDF'], ['odt', 'ODT'], ['doc', 'DOC'], ['docx', 'DOCX'], ['xls', 'XLS'], ['xlsx', 'XLSX'], ['zip', 'ZIP'], ['7z', '7Z']] as [$ext, $label]): ?>
                         <label class="flex items-center gap-2.5 rounded-xl border border-zinc-700 bg-zinc-800/30 px-4 py-3 cursor-pointer">
                             <input type="checkbox" name="type_<?= $ext ?>" value="1" <?= $typeCheck($ext) ?> class="w-4 h-4 accent-emerald-500">
                             <span class="text-zinc-100 text-sm"><?= $label ?></span>
@@ -588,6 +665,12 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <div>
                     <label for="cp_attachments_maximum_file_size_mb" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.maximum_file_size_mb') ?></label>
                     <input type="number" id="cp_attachments_maximum_file_size_mb" name="attachments_maximum_file_size_mb" value="<?= (int)($attachments_maximum_file_size_mb ?? 10) ?>" min="1" max="512" class="w-32 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100">
+                    <label class="flex items-center gap-2 mt-4">
+                        <input type="checkbox" name="attachments_expiry_enabled" value="1" <?= ($attachments_expiry_enabled ?? true) ? 'checked' : '' ?>>
+                        <?= $tr('ui.attachments_expiry_enabled') ?>
+                    </label>
+                    <label for="attachments_expiry_hours" class="block mt-3 text-sm text-zinc-400"><?= $tr('ui.attachments_expiry_hours') ?></label>
+                    <input id="attachments_expiry_hours" name="attachments_expiry_hours" value="<?= htmlspecialchars($attachments_expiry_hours ?? '24,720', ENT_QUOTES, 'UTF-8') ?>" maxlength="96" required class="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2">
                     <p class="text-xs text-zinc-500 mt-1"><?= $tr('ui.upload_limit_php', [
                         'upload' => 'upload_max_filesize', 'post' => 'post_max_size',
                     ]) ?></p>
@@ -629,7 +712,8 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                             <div class="rounded-xl border border-zinc-700 bg-zinc-800/30 px-4 py-3 flex items-center justify-between gap-4">
                                 <span class="text-zinc-200 font-mono"><?= htmlspecialchars((string)$bannedIp->ip_address, ENT_QUOTES, 'UTF-8') ?></span>
                                 <span class="text-zinc-100 text-sm">
-                                    <?= (int)($bannedIp->minutes_left ?? 0) ?> minute<?= ((int)($bannedIp->minutes_left ?? 0) === 1) ? '' : 's' ?> left
+                                    <?php $minutesLeft = (int)($bannedIp->minutes_left ?? 0); ?>
+                                    <?= $tr($minutesLeft === 1 ? 'ui.time_remaining_minute_one' : 'ui.time_remaining_minute_other', ['count' => $minutesLeft]) ?>
                                 </span>
                             </div>
                         <?php endforeach; ?>
@@ -819,7 +903,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <button type="button" data-modal-close="cp-invites-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
             <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <p class="text-sm text-zinc-400">Generated: <?= (int)$inviteCount ?> / <?= (int)$inviteLimit ?></p>
+                <p class="text-sm text-zinc-400"><?= $tr('ui.invite_generated_count', ['count' => (int)$inviteCount, 'limit' => (int)$inviteLimit]) ?></p>
                 <form method="POST" action="<?= htmlspecialchars(base_path('/settings/invites/generate'), ENT_QUOTES, 'UTF-8') ?>">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                     <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg disabled:bg-zinc-700 disabled:text-zinc-400 disabled:cursor-not-allowed" <?= $inviteCount >= $inviteLimit ? 'disabled' : '' ?>>
@@ -909,7 +993,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             <?php if (!empty($pendingEmailChange)): ?>
                 <div class="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 mb-4">
                     <?= $tr('ui.email_change_pending_for') ?> <span class="font-semibold"><?= htmlspecialchars($pendingEmailChange->new_email, ENT_QUOTES, 'UTF-8') ?></span>.
-                    Enter the verification code within <?= (int)$pendingEmailMinutes ?> minute<?= $pendingEmailMinutes === 1 ? '' : 's' ?>.
+                    <?= $tr($pendingEmailMinutes === 1 ? 'ui.email_verify_within_one' : 'ui.email_verify_within_other', ['count' => (int)$pendingEmailMinutes]) ?>
                 </div>
             <?php endif; ?>
             <form method="POST" action="<?= htmlspecialchars(base_path('/settings/account/email'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-3">
@@ -993,7 +1077,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 </div>
                 <div class="flex flex-wrap gap-3">
                     <label id="avatar-upload-label" class="cursor-pointer bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-lg text-sm select-none">
-                        <span id="avatar-upload-label-text"><?= $currentAvatarUrl ? 'Change avatar' : 'Upload avatar' ?></span>
+                        <span id="avatar-upload-label-text"><?= $tr($currentAvatarUrl ? 'ui.avatar_change' : 'ui.avatar_upload') ?></span>
                         <input id="avatar-file-input" type="file" accept="image/jpeg,image/png" class="hidden">
                     </label>
                     <button id="avatar-delete-btn" type="button" class="<?= $currentAvatarUrl ? '' : 'hidden ' ?>px-4 py-2 rounded-lg text-sm bg-zinc-800 border border-zinc-600 hover:border-red-500 hover:text-red-400 text-zinc-300">
@@ -1050,7 +1134,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                         aria-expanded="false"
                         aria-describedby="timezone-help-text timezone-selected-label"
                     >
-                    <p id="timezone-selected-label" class="text-xs text-emerald-300">Selected: <?= htmlspecialchars((string)($selectedTimezoneLabel ?? ('UTC (' . (string)($userTimezone ?? 'UTC+0') . ')')), ENT_QUOTES, 'UTF-8') ?></p>
+                    <p id="timezone-selected-label" class="text-xs text-emerald-300"><?= $tr('ui.timezone_selected', ['timezone' => $selectedTimezoneLabel ?? ('UTC (' . (string)($userTimezone ?? 'UTC+0') . ')')]) ?></p>
                     <div id="timezone-options" class="max-h-64 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-800/70 p-1.5 space-y-1" role="listbox" aria-label="<?= $tr('ui.time_zone_options') ?>">
                         <?php foreach (($timezoneEntries ?? []) as $index => $timezoneEntry): ?>
                             <?php
@@ -1086,13 +1170,13 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 </div>
 
 <!-- Sessions Modal -->
-<div id="cp-sessions-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true">
+<div id="cp-sessions-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true" aria-labelledby="cp-sessions-title">
     <div class="<?= $modalBackdropClass ?>" data-modal-close="cp-sessions-modal"></div>
     <div class="<?= $modalCenterClass ?>">
         <div class="<?= $modalBoxClass ?>" data-modal-box>
             <div class="mb-4 flex items-center justify-between">
-                <h3 class="text-xl font-semibold"><?= $tr('ui.sessions') ?></h3>
-                <button type="button" data-modal-close="cp-sessions-modal" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
+                <h3 id="cp-sessions-title" class="text-xl font-semibold"><?= $tr('ui.sessions') ?></h3>
+                <button type="button" data-modal-close="cp-sessions-modal" data-modal-autofocus aria-label="<?= $tr('ui.close') ?>" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
             </div>
             <div class="space-y-2 text-sm">
                 <?php if (empty($sessions)): ?>
@@ -1101,23 +1185,24 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                     <?php foreach ($sessions as $session): ?>
                         <?php
                             $loggedInLabel = \Causette\Localization\DisplayPreferences::formatTimestamp((string)$session->logged_in_at);
+                            $isCurrentSession = !empty($session->is_current);
                         ?>
                         <div class="bg-zinc-800 rounded-lg px-3 py-3 flex items-start justify-between gap-3">
                             <div class="space-y-1">
                                 <p class="text-zinc-100">
                                     <span class="text-zinc-400"><?= $tr('ui.logged_in') ?></span>
                                     <?= htmlspecialchars((string)$loggedInLabel, ENT_QUOTES, 'UTF-8') ?>
-                                    <?php if (!empty($session->is_current)): ?>
+                                    <?php if ($isCurrentSession): ?>
                                         <span class="ml-2 text-emerald-400 text-xs"><?= $tr('ui.current_session') ?></span>
                                     <?php endif; ?>
                                 </p>
                                 <p class="text-zinc-300"><span class="text-zinc-400"><?= $tr('ui.ip') ?></span> <?= htmlspecialchars((string)$session->ip_address, ENT_QUOTES, 'UTF-8') ?></p>
-                                <p class="text-zinc-300"><span class="text-zinc-400"><?= $tr('ui.browser') ?></span> <?= htmlspecialchars((string)$session->browser, ENT_QUOTES, 'UTF-8') ?></p>
+                                <p class="text-zinc-300"><span class="text-zinc-400"><?= $tr('ui.browser') ?></span> <?= $session->browser === 'Unknown browser' ? $tr('ui.browser_unknown') : htmlspecialchars((string)$session->browser, ENT_QUOTES, 'UTF-8') ?></p>
                             </div>
-                            <form method="POST" action="<?= htmlspecialchars(base_path('/settings/sessions/exit'), ENT_QUOTES, 'UTF-8') ?>" data-confirm-message="<?= $tr('ui.confirm_end_session') ?>">
+                            <form method="POST" action="<?= htmlspecialchars(base_path('/settings/sessions/exit'), ENT_QUOTES, 'UTF-8') ?>" data-confirm-message="<?= $tr($isCurrentSession ? 'ui.confirm_sign_out_current_browser' : 'ui.confirm_end_session') ?>">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
                                 <input type="hidden" name="session_id" value="<?= (int)$session->id ?>">
-                                <button type="submit" class="text-red-300 hover:text-red-200 underline decoration-red-400 whitespace-nowrap"><?= $tr('ui.exit_session') ?></button>
+                                <button type="submit" class="text-right text-red-300 hover:text-red-200 underline decoration-red-400"><?= $tr($isCurrentSession ? 'ui.sign_out' : 'ui.exit_session') ?></button>
                             </form>
                         </div>
                     <?php endforeach; ?>
@@ -1303,7 +1388,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <label class="flex items-center justify-between gap-4 rounded-xl border border-zinc-700 bg-zinc-800/30 px-4 py-3 cursor-pointer">
                     <div>
                         <span class="block text-zinc-100"><?= $tr('ui.enable_top_loading_bar') ?></span>
-                        <span class="block text-xs text-zinc-500 mt-0.5"><?= $tr('ui.shows_the_3px_top_progress_bar') ?></span>
+                        <span class="block text-xs text-zinc-500 mt-0.5"><?= $tr('ui.search_progress_bar_description') ?></span>
                     </div>
                     <input type="checkbox" name="top_loading_bar_enabled" value="1" <?= !empty($topLoadingBarEnabled) ? 'checked' : '' ?> class="w-6 h-6 accent-emerald-500 shrink-0">
                 </label>
@@ -1342,6 +1427,33 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 <!-- ==================== MORE MODALS ==================== -->
 
 <!-- Test Browser Features Modal -->
+<div id="cp-call-video-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true" aria-labelledby="cp-call-video-title">
+    <div class="<?= $modalBackdropClass ?>" data-modal-close="cp-call-video-modal"></div>
+    <div class="<?= $modalCenterClass ?>">
+        <div class="<?= $modalBoxClass ?>" data-modal-box>
+            <div class="mb-4 flex items-center justify-between">
+                <h3 id="cp-call-video-title" class="text-xl font-semibold"><?= $tr('ui.call_video_quality') ?></h3>
+                <button type="button" data-modal-close="cp-call-video-modal" aria-label="<?= $tr('ui.close') ?>" class="rounded-lg px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200">&times;</button>
+            </div>
+            <?php foreach (['camera' => 'ui.webcam_quality', 'screen' => 'ui.screen_share_quality'] as $media => $label): ?>
+                <form method="post" action="<?= htmlspecialchars(base_path('/settings/call-video'), ENT_QUOTES, 'UTF-8') ?>" class="mt-4 space-y-2">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
+                    <input type="hidden" name="media" value="<?= $media ?>">
+                    <label for="cp-call-video-<?= $media ?>" class="block text-sm font-medium"><?= $tr($label) ?></label>
+                    <div class="flex flex-wrap items-stretch gap-2">
+                        <select id="cp-call-video-<?= $media ?>" name="quality" class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-3 py-2">
+                            <?php foreach (\Causette\Calls\CallVideoPreferences::labels($media) as $quality => $qualityLabel): ?>
+                                <option value="<?= $quality ?>"<?= $callVideoDefaults[$media] === $quality ? ' selected' : '' ?>><?= $tr($qualityLabel) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="submit" class="rounded-xl bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500"><?= $tr('ui.save') ?></button>
+                    </div>
+                </form>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+
 <div id="cp-browser-modal" class="<?= $modalOverlayClass ?>" role="dialog" aria-modal="true">
     <div class="<?= $modalBackdropClass ?>" data-modal-close="cp-browser-modal"></div>
     <div class="<?= $modalCenterClass ?>">
@@ -1422,9 +1534,46 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 <!-- ============================================================ -->
 <script data-page-script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>">
 (function () {
+    var settingsLabels = <?= \Causette\View\HtmlJson::encode(array_intersect_key($locale->catalog('browser'), array_flip([
+        'avatar_change', 'avatar_invalid_type', 'avatar_remove_failed',
+        'avatar_removed', 'avatar_too_large', 'avatar_updated',
+        'avatar_upload', 'avatar_upload_failed', 'delete',
+        'deleting', 'deselect_all', 'invite_code_copied',
+        'select_all',
+    ]))) ?>;
+
     // ---- Generic modal open/close ----
     var openButtons = document.querySelectorAll('[data-modal-open]');
+    document.querySelectorAll('[data-modal-box]').forEach(function (box) {
+        var heading = box.querySelector('h3');
+        var modal = box.closest('[role="dialog"]');
+        if (!heading || !modal) return;
+        var back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'mb-4 inline-flex items-center gap-2 text-sm causette-accent hover:underline';
+        back.setAttribute('data-modal-close', modal.id);
+        var arrow = document.createElement('i');
+        arrow.className = 'fa-solid fa-arrow-left';
+        arrow.setAttribute('aria-hidden', 'true');
+        back.append(arrow, <?= \Causette\View\HtmlJson::encode($locale->text('ui.back_to_settings')) ?>);
+        heading.parentElement.after(back);
+    });
     var closeButtons = document.querySelectorAll('[data-modal-close]');
+    var mailTransport = document.getElementById('mail_transport');
+    if (mailTransport) {
+        var smtpCredentials = document.getElementById('smtp-credentials');
+        var phpMailHelp = document.getElementById('php-mail-help');
+        var mailFrom = document.getElementById('mail_from');
+        var updateMailTransport = function () {
+            var usePhp = mailTransport.value === 'php';
+            smtpCredentials.hidden = usePhp;
+            smtpCredentials.disabled = usePhp;
+            phpMailHelp.hidden = !usePhp;
+            mailFrom.required = usePhp;
+        };
+        mailTransport.addEventListener('change', updateMailTransport);
+        updateMailTransport();
+    }
 
     function openModal(modalId) {
         var modal = document.getElementById(modalId);
@@ -1450,12 +1599,18 @@ require_once __DIR__ . '/../core/HtmlJson.php';
     function closeModal(modalId) {
         var modal = document.getElementById(modalId);
         if (!modal) return;
+        var wasOpen = !modal.classList.contains('hidden');
         modal.classList.add('hidden');
 
         if (!Array.from(document.querySelectorAll('[role="dialog"]')).some(function (el) {
             return !el.classList.contains('hidden');
         })) {
             document.body.classList.remove('overflow-hidden');
+        }
+        if (wasOpen) {
+            Array.from(openButtons).find(function (button) {
+                return button.getAttribute('data-modal-open') === modalId;
+            })?.focus();
         }
     }
 
@@ -1492,6 +1647,23 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             }
         });
         document.body.classList.remove('overflow-hidden');
+    });
+
+    var sessionsModal = document.getElementById('cp-sessions-modal');
+    sessionsModal.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeModal(sessionsModal.id);
+        }
+        if (event.key !== 'Tab') return;
+        var controls = sessionsModal.querySelectorAll('button:not([disabled])');
+        var firstControl = controls[0];
+        var lastControl = controls[controls.length - 1];
+        if (event.target === (event.shiftKey ? firstControl : lastControl)) {
+            event.preventDefault();
+            (event.shiftKey ? lastControl : firstControl).focus();
+        }
     });
 
     // ---- Auto-open modal from flash ----
@@ -1568,7 +1740,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             avatarPreviewWrap.insertBefore(img, avatarUploadSpinner);
         }
         img.src = url;
-        avatarUploadLabelText.textContent = 'Change avatar';
+        avatarUploadLabelText.textContent = settingsLabels.avatar_change;
         if (avatarDeleteBtn) avatarDeleteBtn.classList.remove('hidden');
     }
 
@@ -1582,7 +1754,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             div.textContent = avatarPreviewWrap.dataset.initial || '?';
             avatarPreviewWrap.insertBefore(div, avatarUploadSpinner);
         }
-        avatarUploadLabelText.textContent = 'Upload avatar';
+        avatarUploadLabelText.textContent = settingsLabels.avatar_upload;
         if (avatarDeleteBtn) avatarDeleteBtn.classList.add('hidden');
     }
 
@@ -1593,7 +1765,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 
             var allowed = ['image/jpeg', 'image/png'];
             if (!allowed.includes(file.type)) {
-                showToast('Avatar must be a JPG or PNG image.', 'error');
+                showToast(settingsLabels.avatar_invalid_type, 'error');
                 avatarFileInput.value = '';
                 return;
             }
@@ -1614,18 +1786,18 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             .then(function (data) {
                 if (data && data.success && data.avatar_url) {
                     setAvatarImg(data.avatar_url);
-                    showToast('Avatar updated.', 'success');
+                    showToast(settingsLabels.avatar_updated, 'success');
                 } else {
                     var errorMap = {
-                        'avatar_invalid_type': 'Avatar must be a JPG or PNG image.',
-                        'avatar_too_large': 'Image is too large. Maximum size is 2048 \u00d7 2048 pixels.',
-                        'avatar_upload_failed': 'Avatar upload failed. Please try again.'
+                        'avatar_invalid_type': settingsLabels.avatar_invalid_type,
+                        'avatar_too_large': settingsLabels.avatar_too_large,
+                        'avatar_upload_failed': settingsLabels.avatar_upload_failed
                     };
-                    showToast(errorMap[data && data.error] || 'Avatar upload failed. Please try again.', 'error');
+                    showToast(errorMap[data && data.error] || settingsLabels.avatar_upload_failed, 'error');
                 }
             })
             .catch(function () {
-                showToast('Avatar upload failed. Please try again.', 'error');
+                showToast(settingsLabels.avatar_upload_failed, 'error');
             })
             .finally(function () {
                 if (avatarUploadSpinner) avatarUploadSpinner.classList.add('hidden');
@@ -1645,7 +1817,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
     if (avatarDeleteConfirmBtn) {
         avatarDeleteConfirmBtn.addEventListener('click', function () {
             avatarDeleteConfirmBtn.disabled = true;
-            avatarDeleteConfirmBtn.textContent = 'Deleting\u2026';
+            avatarDeleteConfirmBtn.textContent = settingsLabels.deleting;
 
             var formData = new URLSearchParams();
             formData.append('csrf_token', window.CSRF_TOKEN || (document.querySelector('meta[name="csrf-token"]') || {}).getAttribute?.('content') || '');
@@ -1662,7 +1834,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             .then(function (data) {
                 if (data && data.success) {
                     clearAvatarImg();
-                    showToast('Avatar removed.', 'success');
+                    showToast(settingsLabels.avatar_removed, 'success');
                     if (deleteAvatarModal) {
                         deleteAvatarModal.classList.add('hidden');
                         if (!Array.from(document.querySelectorAll('[role="dialog"]')).some(function (el) {
@@ -1672,15 +1844,15 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                         }
                     }
                 } else {
-                    showToast('Could not remove avatar. Please try again.', 'error');
+                    showToast(settingsLabels.avatar_remove_failed, 'error');
                 }
             })
             .catch(function () {
-                showToast('Could not remove avatar. Please try again.', 'error');
+                showToast(settingsLabels.avatar_remove_failed, 'error');
             })
             .finally(function () {
                 avatarDeleteConfirmBtn.disabled = false;
-                avatarDeleteConfirmBtn.textContent = 'Delete';
+                avatarDeleteConfirmBtn.textContent = settingsLabels.delete;
             });
         });
     }
@@ -1691,7 +1863,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             var code = btn.getAttribute('data-copy-value');
             if (code && navigator.clipboard) {
                 navigator.clipboard.writeText(code).then(function () {
-                    showToast('Invite code copied.', 'success');
+                    showToast(settingsLabels.invite_code_copied, 'success');
                 });
             }
         });
@@ -1713,9 +1885,9 @@ require_once __DIR__ . '/../core/HtmlJson.php';
     var attachBtn = document.getElementById('cp-attachments-select-all-btn');
     var attachForm = document.getElementById('cp-attachments-type-form');
     if (attachBtn && attachForm) {
-        var getBoxes = function () { return Array.from(attachForm.querySelectorAll('input[type="checkbox"]')); };
+        var getBoxes = function () { return Array.from(attachForm.querySelectorAll('input[type="checkbox"][name^="type_"]')); };
         var allChecked = function () { return getBoxes().every(function (cb) { return cb.checked; }); };
-        var updateAttachBtn = function () { attachBtn.textContent = allChecked() ? 'Deselect all' : 'Select all'; };
+        var updateAttachBtn = function () { attachBtn.textContent = allChecked() ? settingsLabels.deselect_all : settingsLabels.select_all; };
         updateAttachBtn();
         attachBtn.addEventListener('click', function () {
             var check = !allChecked();

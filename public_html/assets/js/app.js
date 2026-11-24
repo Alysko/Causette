@@ -67,15 +67,17 @@ let callDurationBarState = null;
 let openAdminUserMenuId = 0;
 const REPORT_REASON_MAX_LENGTH = 200;
 const NOTIFICATION_SOUND_FILE_BY_BUCKET = {
-    poke: '/assets/sounds/poke.wav',
-    new_message: '/assets/sounds/newmessage.wav',
-    call: '/assets/sounds/callringing.wav',
-    other: '/assets/sounds/notification.wav'
+    poke: appPath('/assets/sounds/poke.wav'),
+    new_message: appPath('/assets/sounds/newmessage.wav'),
+    call: appPath('/assets/sounds/callringing.wav'),
+    other: appPath('/assets/sounds/notification.wav')
 };
 const notificationSoundAudioByBucket = new Map();
 
 const MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 72;
-const CHAT_STATUS_DOT_CLASSES = ['bg-emerald-500', 'bg-amber-500', 'bg-red-500', 'bg-zinc-500'];
+const CHAT_STATUS_DOT_CLASSES = ['bg-emerald-500', 'bg-amber-500', 'bg-red-500', 'bg-sky-500', 'bg-zinc-500'];
+let lastPresenceInteraction = Date.now();
+let systemPresenceIdle = false;
 const CHAT_STATUS_FALLBACK_POLL_MS = 15000;
 let lastPersonalStatusFallbackAt = 0;
 let personalStatusFallbackInFlight = false;
@@ -85,16 +87,6 @@ let pendingReportTargetId = 0;
 let pendingAdminUserAction = null;
 let pendingProfilePostDeleteId = 0;
 const TIMEZONE_PROMPT_SESSION_KEY_PREFIX = 'timezone_prompt_seen_';
-
-const DEFAULT_EMOJI_KEYS = [
-    '1F600', '1F603', '1F604', '1F601', '1F606', '1F605', '1F923', '1F602', '1F642', '1F609',
-    '1F60A', '1F607', '1F970', '1F60D', '1F60E', '1F618', '1F617', '1F619', '1F61A', '1F973',
-    '1F60B', '1F61B', '1F61C', '1F92A', '1F61D', '1F911', '1F917', '1F92D', '1F92B', '1F914',
-    '1FAE1', '1F910', '1F928', '1F610', '1F611', '1F636', '1FAE5', '1F60F', '1F612', '1F644',
-    '1F62C', '1F62E-200D-1F4A8', '1F925', '1F60C', '1F614', '1F62A', '1F924', '1F634', '1F637', '1F912',
-    '1F915', '1F922', '1F92E', '1F927', '1F975', '1F976', '1F974', '1F635', '1F92F', '1F635-200D-1F4AB',
-    '1F920', '1F973', '1F60E', '1F47B', '1F4A9', '2764', '1F90D', '1F44D', '1F44E', '1F44F'
-];
 
 const EMOJI_KEYWORD_RULES = [
     { pattern: /^1F1E[6-9A-F]-1F1E[6-9A-F]$/i, keywords: ['flag', 'country'] },
@@ -122,7 +114,7 @@ let sidebarPollIntervalId = null;
 let notificationPollIntervalId = null;
 let typingBeforeUnloadBound = false;
 let clientNavigationBound = false;
-let clientNavigationInFlight = false;
+let clientNavigation = null;
 let currentClientRenderedUrl = '';
 let serverConnectionFailureCount = 0;
 let serverConnectionOverlayVisible = false;
@@ -139,6 +131,7 @@ let topProgressActiveLoads = 0;
 let topProgressValue = 0;
 let topProgressTrickleIntervalId = null;
 let topProgressHideTimeoutId = null;
+const SEARCH_PROGRESS_DELAY_MS = 400;
 
 function isTopProgressEnabled() {
     return window.TOP_LOADING_BAR_ENABLED !== false;
@@ -275,38 +268,39 @@ function clearServerConnectionRetryTimer() {
 }
 
 function pauseShellPollingForConnectionLoss() {
-    clearRouteScopedIntervals();
+    clearInterval(chatPollIntervalId);
+    clearInterval(sidebarPollIntervalId);
+    clearInterval(notificationPollIntervalId);
+    chatPollIntervalId = sidebarPollIntervalId = notificationPollIntervalId = null;
     shellPollingPausedForConnectionLoss = true;
 }
 
-function resumeShellPollingAfterConnectionLoss() {
-    if (!shellPollingPausedForConnectionLoss || !isServerConnectionOverlayEnabled()) {
-        return;
-    }
-
-    const hasChatMessages = Boolean(document.getElementById('messages'));
-    if (hasChatMessages && !chatPollIntervalId) {
-        chatPollIntervalId = setInterval(() => {
-            if (serverConnectionOverlayVisible) return;
-            pollMessages().catch(() => {});
-        }, 3000);
-    }
-
-    const hasNotificationHistory = Boolean(document.getElementById('notification-history-button'));
-    if (hasNotificationHistory && !notificationPollIntervalId) {
+function startShellPolling() {
+    if (serverConnectionOverlayVisible) return;
+    if (!notificationPollIntervalId && document.getElementById('notification-history-button')) {
         notificationPollIntervalId = setInterval(() => {
-            if (serverConnectionOverlayVisible) return;
-            fetchNotifications().catch(() => {});
+            if (!clientNavigation) fetchNotifications().catch(() => {});
         }, 5000);
     }
 
     if (!sidebarPollIntervalId) {
         sidebarPollIntervalId = setInterval(() => {
-            if (serverConnectionOverlayVisible) return;
-            loadSidebarChats().catch(() => {});
+            if (!clientNavigation) loadSidebarChats().catch(() => {});
         }, 5000);
     }
+}
 
+function startChatPolling() {
+    if (serverConnectionOverlayVisible || chatPollIntervalId || !document.getElementById('messages')) return;
+    chatPollIntervalId = setInterval(() => {
+        if (!clientNavigation) pollMessages({ background: true }).catch(() => {});
+    }, 3000);
+}
+
+function resumeShellPollingAfterConnectionLoss() {
+    if (!shellPollingPausedForConnectionLoss || !isServerConnectionOverlayEnabled()) return;
+    startChatPolling();
+    startShellPolling();
     shellPollingPausedForConnectionLoss = false;
 }
 
@@ -381,7 +375,7 @@ async function attemptServerConnectionRecovery() {
 
     serverConnectionRetryInFlight = true;
     try {
-        await fetch('/api/notifications/recent', {
+        await fetch(appPath('/api/notifications/recent'), {
             method: 'GET',
             headers: {
                 Accept: 'application/json',
@@ -430,10 +424,41 @@ function bindServerConnectionEvents() {
     });
 }
 
+function isSearchProgressRequest(input, options) {
+    if (!isTopProgressEnabled() || String(options?.method ?? input?.method ?? 'GET').toUpperCase() !== 'GET') {
+        return false;
+    }
+    try {
+        const target = new URL(input?.url ?? input, window.location.href);
+        if (target.origin !== window.location.origin) return false;
+        const route = appRoute(target.pathname);
+        return route === '/api/messages/search' || route === '/api/posts/search';
+    } catch {
+        return false;
+    }
+}
+
 (function() {
     const _fetch = window.fetch;
     window.fetch = async function(...args) {
+        let progressShown = false;
+        let progressTimer = null;
+        if (isSearchProgressRequest(...args)) {
+            progressTimer = setTimeout(() => {
+                progressShown = isTopProgressEnabled();
+                if (progressShown) startTopProgressLoad();
+            }, SEARCH_PROGRESS_DELAY_MS);
+        }
         try {
+            if (window.CURRENT_USER_ID && (systemPresenceIdle || Date.now() - lastPresenceInteraction >= 60000)) {
+                const [input, options] = args;
+                const target = new URL(input?.url ?? input, window.location.href);
+                if (target.origin === window.location.origin && appRoute(target.pathname).startsWith('/api/')) {
+                    const headers = new Headers(options?.headers ?? input?.headers);
+                    headers.set('X-Causette-Presence', 'idle');
+                    args[1] = { ...options, headers };
+                }
+            }
             const response = await _fetch.apply(this, args);
             handleServerConnectionSuccess();
             if (!versionUpdateDetected) {
@@ -444,8 +469,11 @@ function bindServerConnectionEvents() {
             }
             return response;
         } catch (error) {
-            registerServerConnectionFailure(error);
+            if (error?.name !== 'AbortError') registerServerConnectionFailure(error);
             throw error;
+        } finally {
+            if (progressTimer !== null) clearTimeout(progressTimer);
+            if (progressShown) finishTopProgressLoad();
         }
     };
 })();
@@ -475,20 +503,10 @@ function runRouteLifecycleHooks(type, detail = {}) {
     document.dispatchEvent(new CustomEvent(`prologue:route-${type}`, { detail }));
 }
 
-function clearRouteScopedIntervals() {
+function clearRouteScopedState() {
     if (chatPollIntervalId) {
         clearInterval(chatPollIntervalId);
         chatPollIntervalId = null;
-    }
-
-    if (sidebarPollIntervalId) {
-        clearInterval(sidebarPollIntervalId);
-        sidebarPollIntervalId = null;
-    }
-
-    if (notificationPollIntervalId) {
-        clearInterval(notificationPollIntervalId);
-        notificationPollIntervalId = null;
     }
 
     if (typeof messageInteractionHandlersBound !== 'undefined') {
@@ -496,11 +514,30 @@ function clearRouteScopedIntervals() {
     }
 }
 
+function appPath(path) {
+    const basePath = window.CAUSETTE_BASE_PATH || '';
+    if (!basePath || typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) {
+        return path;
+    }
+
+    // Callers pass app-relative routes. Resolved links go directly to navigateApp.
+    return basePath + path;
+}
+
+function appRoute(pathname) {
+    const basePath = window.CAUSETTE_BASE_PATH || '';
+    if (!basePath) return pathname;
+    if (pathname === basePath) return '/';
+    return pathname.startsWith(basePath + '/') ? pathname.slice(basePath.length) : null;
+}
+
 function shouldHandleClientNavigationForUrl(targetUrl) {
     if (!window.CURRENT_USER_ID) return false;
+    if (targetUrl.origin !== window.location.origin) return false;
     if (targetUrl.searchParams.has('lang')) return false;
 
-    const pathname = String(targetUrl.pathname || '');
+    const pathname = appRoute(targetUrl.pathname);
+    if (pathname === null) return false;
     const blockedPrefixes = [
         '/auth', '/install', '/update', '/login', '/register', '/forgot-password', '/reset-password', '/credential-upgrade',
     ];
@@ -541,6 +578,7 @@ function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
             script.remove();
         }
     }
+    if (options.beforeReplace?.() === false) return false;
     currentMain.replaceWith(nextMain);
     for (const original of pageScripts) {
         const script = document.createElement('script');
@@ -557,75 +595,114 @@ function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
     if (options.updateHistory !== false && window.history && typeof window.history.pushState === 'function') {
         window.history.pushState({}, '', targetUrl.pathname + targetUrl.search + targetUrl.hash);
     }
+    updateSidebarCurrentPage(targetUrl.pathname);
 
     return true;
 }
 
+function setNavigationStatus(targetUrl) {
+    const main = document.getElementById('app-main-content');
+    const status = document.getElementById('app-route-status');
+    if (targetUrl) {
+        main?.setAttribute('aria-busy', 'true');
+        if (status) {
+            status.textContent = appRoute(targetUrl.pathname)?.startsWith('/c/')
+                ? status.dataset.chatLabel
+                : status.dataset.pageLabel;
+        }
+    } else {
+        main?.removeAttribute('aria-busy');
+        if (status) status.textContent = '';
+    }
+}
+
 async function navigateApp(url, options = {}) {
-    const targetUrl = new URL(url, window.location.origin);
+    const targetUrl = new URL(url, window.location.href);
     const renderedUrlString = String(currentClientRenderedUrl || (window.location.pathname + window.location.search + window.location.hash));
     const currentUrl = new URL(renderedUrlString, window.location.origin);
+    const source = options.source || 'navigate';
+    const updateHistory = options.updateHistory !== false;
 
-    const samePath = targetUrl.pathname === currentUrl.pathname;
-    const sameSearch = targetUrl.search === currentUrl.search;
-    const sameHash = targetUrl.hash === currentUrl.hash;
-    if (!options.force && samePath && sameSearch && sameHash) {
+    if (targetUrl.href === currentUrl.href && (!options.force || source === 'popstate')) {
+        clientNavigation?.controller.abort();
+        clientNavigation = null;
+        setNavigationStatus(null);
         return true;
     }
 
     if (!shouldHandleClientNavigationForUrl(targetUrl)) {
-        window.location.href = targetUrl.pathname + targetUrl.search + targetUrl.hash;
-        return false;
+        clientNavigation?.controller.abort();
+        window.location.href = targetUrl.href;
+        return true;
     }
 
-    if (clientNavigationInFlight) {
-        return false;
+    if (clientNavigation?.url === targetUrl.href && clientNavigation.updateHistory === updateHistory) {
+        return true;
     }
 
-    clientNavigationInFlight = true;
-    startTopProgressLoad();
+    clientNavigation?.controller.abort();
+    const controller = new AbortController();
+    const navigation = { controller, url: targetUrl.href, updateHistory };
+    clientNavigation = navigation;
+    setNavigationStatus(targetUrl);
     const fromUrl = currentUrl.pathname + currentUrl.search + currentUrl.hash;
     const toUrl = targetUrl.pathname + targetUrl.search + targetUrl.hash;
+    const detail = { from: fromUrl, to: toUrl, source };
 
     try {
-        runRouteLifecycleHooks('before', { from: fromUrl, to: toUrl, source: options.source || 'navigate' });
-
-        const response = await fetch(targetUrl.pathname + targetUrl.search + targetUrl.hash, {
+        const response = await fetch(toUrl, {
             method: 'GET',
             mode: 'same-origin',
+            signal: controller.signal,
             headers: {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         });
 
-        if (!response.ok) {
+        if (controller.signal.aborted) return true;
+        if (!response.ok || response.redirected) {
             window.location.href = toUrl;
-            return false;
+            return true;
         }
 
         const htmlText = await response.text();
+        if (controller.signal.aborted) return true;
         const policy = response.headers.get('Content-Security-Policy');
-        const swapped = replaceMainContentFromHtml(htmlText, policy, targetUrl, { updateHistory: options.updateHistory !== false });
+        const swapped = replaceMainContentFromHtml(htmlText, policy, targetUrl, {
+            updateHistory,
+            beforeReplace() {
+                runRouteLifecycleHooks('before', detail);
+                if (controller.signal.aborted) return false;
+                clearRouteScopedState();
+                return true;
+            }
+        });
+        if (controller.signal.aborted) return true;
         if (!swapped) {
             window.location.href = toUrl;
-            return false;
+            return true;
         }
 
-        clearRouteScopedIntervals();
-        await init();
-        currentClientRenderedUrl = targetUrl.pathname + targetUrl.search + targetUrl.hash;
-        runRouteLifecycleHooks('after', { from: fromUrl, to: toUrl, source: options.source || 'navigate' });
+        currentClientRenderedUrl = toUrl;
+        init();
+        currentClientRenderedUrl = window.location.pathname + window.location.search + window.location.hash;
+        runRouteLifecycleHooks('after', detail);
         return true;
     } catch (error) {
+        if (controller.signal.aborted) return true;
         if (isLikelyServerConnectionError(error)) {
+            const message = document.getElementById('app-route-status')?.dataset.errorLabel;
+            if (message && !serverConnectionOverlayVisible) showToast(message, 'error');
             return false;
         }
 
         window.location.href = toUrl;
-        return false;
+        return true;
     } finally {
-        finishTopProgressLoad();
-        clientNavigationInFlight = false;
+        if (clientNavigation === navigation) {
+            clientNavigation = null;
+            setNavigationStatus(null);
+        }
     }
 }
 
@@ -646,12 +723,11 @@ function bindClientNavigation() {
         if (anchor.getAttribute('target') === '_blank') return;
 
         const href = anchor.getAttribute('href') || '';
-        if (!href || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) {
+        if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) {
             return;
         }
 
-        const targetUrl = new URL(href, window.location.origin);
-        if (targetUrl.origin !== window.location.origin) return;
+        const targetUrl = new URL(href, window.location.href);
         if (!shouldHandleClientNavigationForUrl(targetUrl)) return;
 
         event.preventDefault();
@@ -672,6 +748,7 @@ function bindClientNavigation() {
 }
 
 async function reloadAppView(options = {}) {
+    if (clientNavigation) return true;
     const targetUrl = window.location.pathname + window.location.search + window.location.hash;
     return navigateApp(targetUrl, {
         source: options.source || 'reload',
@@ -686,13 +763,13 @@ function normalizeChatType(type) {
     return value === 'group' ? 'group' : 'personal';
 }
 
-async function postForm(url, data) {
+async function postForm(route, data) {
     if (versionUpdateDetected) return { success: false };
 
     const formData = new URLSearchParams();
     Object.entries(data).forEach(([k, v]) => formData.append(k, v));
 
-    const res = await fetch(url, {
+    const res = await fetch(appPath(route), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -718,7 +795,7 @@ function formatNumber(value) {
 function getProfileUrlByUserNumber(userNumber) {
     const rawUserNumber = String(userNumber || '').replace(/\D/g, '').slice(0, 16);
     if (!rawUserNumber) return '';
-    return `/u/${formatNumber(rawUserNumber)}`;
+    return appPath(`/u/${formatNumber(rawUserNumber)}`);
 }
 
 function getProfileUrlForUser(user) {
@@ -742,6 +819,11 @@ function uiText(key, parameters = {}) {
     const label = window.CAUSETTE_UI?.labels?.[key];
     return (typeof label === 'string' ? label : key).replace(/\{([a-z_]+)\}/g,
         (token, name) => Object.hasOwn(parameters, name) ? String(parameters[name]) : token);
+}
+
+function presenceLabel(status, fallback = 'offline') {
+    const normalized = ['online', 'offline', 'busy', 'paused'].includes(status) ? status : fallback;
+    return uiText(`presence_${normalized}`);
 }
 
 function uiLanguage() {
@@ -927,17 +1009,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
 function formatFileSize(bytes) {
     const value = Number(bytes || 0);
-    if (!Number.isFinite(value) || value <= 0) return '0 KB';
+    if (!Number.isFinite(value) || value <= 0) return uiText('file_size_kb', { size: 0 });
 
-    if (value >= 1024 * 1024) {
-        return `${(value / (1024 * 1024)).toFixed(2)} MB`;
-    }
-
-    return `${(value / 1024).toFixed(1)} KB`;
+    const useMegabytes = value >= 1024 * 1024;
+    const decimals = useMegabytes ? 2 : 1;
+    const size = new Intl.NumberFormat(uiLanguage(), {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+    }).format(value / (useMegabytes ? 1024 * 1024 : 1024));
+    return uiText(useMegabytes ? 'file_size_mb' : 'file_size_kb', { size });
 }
 
 function getAttachmentCategory(ext) {
-    return ['png', 'jpg', 'jpeg', 'webp'].includes(String(ext).toLowerCase()) ? 'image' : 'file';
+    const extension = String(ext).toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'webp'].includes(extension)) return 'image';
+    return ['mp4', 'webm'].includes(extension) ? 'video' : 'file';
 }
 
 function normalizeAttachment(attachment) {
@@ -948,7 +1034,7 @@ function normalizeAttachment(attachment) {
 
     return {
         id,
-        original_name: String(attachment.original_name || 'Attachment'),
+        original_name: String(attachment.original_name || uiText('attachment_label')),
         file_name: String(attachment.file_name || ''),
         file_extension: String(attachment.file_extension || ''),
         mime_type: String(attachment.mime_type || ''),
@@ -965,9 +1051,11 @@ function normalizeAttachment(attachment) {
 
 function formatAttachmentExpiryLabel(expirySeconds) {
     const seconds = Number(expirySeconds || 0);
-    if (seconds === 3600) return '1h';
-    if (seconds === 86400) return '24h';
-    return 'None';
+    if (seconds === 2592000) return uiText('attachment_expiry_one_month');
+    if (seconds === 86400) return uiText('attachment_expiry_one_day');
+    if (seconds > 0 && seconds % 86400 === 0) return uiText('attachment_expiry_days', { count: seconds / 86400 });
+    if (seconds > 0) return uiText('attachment_expiry_hours', { count: Math.ceil(seconds / 3600) });
+    return uiText('attachment_no_expiry');
 }
 
 function renderMessageAttachments(attachments, canDelete = false) {
@@ -980,7 +1068,7 @@ function renderMessageAttachments(attachments, canDelete = false) {
         .filter(Boolean)
         .map((attachment) => {
             if (attachment.is_deleted) {
-                const reason = attachment.delete_reason === 'expired' ? 'Expired attachment' : 'Deleted attachment';
+                const reason = attachment.delete_reason === 'expired' ? uiText('attachment_expired') : uiText('attachment_deleted');
                 return `
                     <div class="w-44 bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
                         <div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-900/70 flex flex-col items-center justify-center gap-1.5">
@@ -998,17 +1086,15 @@ function renderMessageAttachments(attachments, canDelete = false) {
                 ? `<button type="button" class="text-red-300 hover:text-red-200 js-attachment-delete" data-attachment-id="${attachment.id}" title="${escapeHtml(uiText('delete_attachment'))}" aria-label="${escapeHtml(uiText('delete_attachment'))}"><i class="fa-solid fa-trash"></i></button>`
                 : '';
 
-            if (category === 'image') {
+            if (category === 'image' || category === 'video') {
+                const preview = category === 'video'
+                    ? `<video controls playsinline preload="none" src="${escapeHtml(attachment.url)}" aria-label="${escapeHtml(attachment.original_name)}" class="w-full rounded-lg bg-black aspect-video"></video>`
+                    : `<button type="button" class="js-lightbox-trigger block w-full" data-image-url="${escapeHtml(attachment.url)}" data-image-title="${escapeHtml(attachment.original_name)}">
+                            <img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.original_name)}" class="w-full h-24 object-cover rounded-lg border border-zinc-700" loading="lazy" decoding="async">
+                        </button>`;
                 return `
-                    <div class="w-44 bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
-                        <button
-                            type="button"
-                            class="js-lightbox-trigger block w-full"
-                            data-image-url="${escapeHtml(attachment.url)}"
-                            data-image-title="${escapeHtml(attachment.original_name)}"
-                        >
-                            <img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.original_name)}" title="${escapeHtml(attachment.original_name)}" class="w-full h-24 object-cover rounded-lg border border-zinc-700" loading="lazy" decoding="async">
-                        </button>
+                    <div class="${category === 'video' ? 'w-72 max-w-full' : 'w-44'} bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
+                        ${preview}
                         <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">
                             <span>${escapeHtml(formatFileSize(attachment.file_size))}</span>
                             <div class="flex items-center gap-2">
@@ -1139,7 +1225,7 @@ function maybePromptForNewGroupName() {
     }
 }
 
-async function init() {
+function init() {
     bindGlobalCallBarInteractions();
 
     const chatView = document.getElementById('chat-view');
@@ -1167,13 +1253,12 @@ async function init() {
         localUsername = String(chatView.dataset.currentUsername || '');
         peerUsername = String(chatView.dataset.peerUsername || '');
         const localLabel = document.getElementById('local-username-label');
-        if (localLabel) localLabel.textContent = localUsername || 'You';
+        if (localLabel) localLabel.textContent = localUsername || uiText('you');
         updateRemoteUsernameLabel();
 
         pendingAttachments = Array.isArray(window.PENDING_ATTACHMENTS)
             ? window.PENDING_ATTACHMENTS.map(normalizeAttachment).filter(Boolean)
             : [];
-        initializeOpenMojiCatalog();
         applyEmojiRenderingToExistingMessages();
         applyInitialChatScrollPosition();
         bindEmojiDrawer();
@@ -1199,20 +1284,8 @@ async function init() {
         if (typeof window.maybeJoinGroupCallFromPokeIntent === 'function') {
             window.maybeJoinGroupCallFromPokeIntent().catch(() => {});
         }
-        if (chatPollIntervalId) {
-            clearInterval(chatPollIntervalId);
-        }
-        if (document.getElementById('messages')) {
-            chatPollIntervalId = setInterval(() => {
-                if (serverConnectionOverlayVisible) return;
-                pollMessages().catch(() => {});
-            }, 3000);
-        }
-    }
-
-    if (Number(currentUserId || 0) > 0) {
-        initGlobalCallPersistence();
-        initCallLeaveBeacon();
+        startChatPolling();
+        clearCurrentChatMessageNotifications().catch(() => {});
     }
 
     const messageForm = document.getElementById('message-form');
@@ -1222,9 +1295,9 @@ async function init() {
             event.preventDefault();
             const input = document.getElementById('message-input');
             const quotedMessageInput = document.getElementById('quoted-message-id');
-            const content = input?.value?.trim();
+            const content = input?.value?.trim() ?? '';
             const chat = currentChat;
-            if (!content || !chat) return;
+            if (!input || !chat || (!content && pendingAttachments.length === 0)) return;
             if (!isCurrentChatView(chat, messageForm)) {
                 if (attachmentError) {
                     attachmentError.textContent = uiText('chat_context_changed');
@@ -1289,6 +1362,8 @@ async function init() {
 
         const flushTypingStatusBeacon = () => {
             if (!typingActive || !currentChat) return;
+            typingActive = false;
+            clearTypingStopTimer();
 
             const payload = new URLSearchParams({
                 csrf_token: getCsrfToken(),
@@ -1296,7 +1371,7 @@ async function init() {
                 is_typing: '0'
             });
 
-            navigator.sendBeacon('/api/chats/typing', payload);
+            navigator.sendBeacon(appPath('/api/chats/typing'), payload);
         };
 
         if (!typingBeforeUnloadBound) {
@@ -1349,44 +1424,32 @@ async function init() {
     bindTimezoneCombobox();
     bindTimezoneSuggestionModal();
     bindStatusMenu();
+    bindPresenceActivity();
     bindNotificationSettingsToggles();
     bindNotificationSoundPreviewButtons();
     bindBrowserPermissionChecks();
+}
 
-    const hasNotificationHistory = Boolean(document.getElementById('notification-history-button'));
-    if (hasNotificationHistory) {
+function initAppShell() {
+    if (Number(currentUserId || 0) > 0) {
+        initGlobalCallPersistence().catch(() => {});
+        initCallLeaveBeacon();
+    }
+    if (document.getElementById('notification-history-button')) {
         if (window.BROWSER_NOTIFICATIONS_ENABLED && typeof Notification !== 'undefined' && Notification.permission === 'default') {
             Notification.requestPermission();
         }
 
         if (typeof window.initWebPushNotifications === 'function') {
-            await window.initWebPushNotifications().catch(() => {});
+            window.initWebPushNotifications().catch(() => {});
         }
-
-        await fetchNotifications().catch(() => {});
-        if (typeof clearCurrentChatMessageNotifications === 'function') {
-            await clearCurrentChatMessageNotifications().catch(() => {});
-        }
-        if (notificationPollIntervalId) {
-            clearInterval(notificationPollIntervalId);
-        }
-        notificationPollIntervalId = setInterval(() => {
-            if (serverConnectionOverlayVisible) return;
-            fetchNotifications().catch(() => {});
-        }, 5000);
+        if (!serverConnectionOverlayVisible) fetchNotifications().catch(() => {});
     }
 
     if (!serverConnectionOverlayVisible) {
         loadSidebarChats().catch(() => {});
     }
-    if (sidebarPollIntervalId) {
-        clearInterval(sidebarPollIntervalId);
-    }
-    sidebarPollIntervalId = setInterval(() => {
-        if (serverConnectionOverlayVisible) return;
-        loadSidebarChats().catch(() => {});
-    }, 5000);
-
+    startShellPolling();
 }
 
 function bindTrashDeleteModal() {
@@ -1540,7 +1603,7 @@ function bindTimezoneCombobox() {
         if (!offset || !label) return;
 
         hiddenInput.value = offset;
-        selectedLabel.textContent = `Selected: ${label}`;
+        selectedLabel.textContent = uiText('timezone_selected', { timezone: label });
         updateSelectedOptionStyles(offset);
         window.USER_TIMEZONE = offset;
     };
@@ -1814,9 +1877,95 @@ function bindAccountMenu() {
 }
 
 function syncMobileOverlayBackdrop() {
+    const mobile = window.innerWidth < 1024;
     const backdrop = document.getElementById('mobile-overlay-backdrop');
-    const openOverlay = document.querySelector('#app-sidebar.mobile-open, #notification-history-panel.mobile-open');
-    backdrop?.classList.toggle('visible', window.innerWidth < 1024 && openOverlay !== null);
+    const sidebarOpen = mobile && document.getElementById('app-sidebar')?.classList.contains('mobile-open') === true;
+    const notificationsOpen = mobile && document.getElementById('notification-history-panel')?.classList.contains('mobile-open') === true;
+    document.getElementById('sidebar-toggle-mobile')?.setAttribute('aria-expanded', String(sidebarOpen));
+    backdrop?.classList.toggle('visible', sidebarOpen || notificationsOpen);
+}
+
+function bindSidebarResize() {
+    const sidebar = document.getElementById('app-sidebar');
+    const handle = document.getElementById('sidebar-resize-handle');
+    if (!sidebar || !handle) return;
+
+    const storageKey = `causette.sidebar.width.${currentUserId}`;
+    const desktop = window.matchMedia('(min-width: 1024px)');
+    const width = () => Math.round(sidebar.getBoundingClientRect().width);
+    const limits = () => {
+        const style = window.getComputedStyle(sidebar);
+        return ['--sidebar-min-width', '--sidebar-max-width'].map(name => parseInt(style.getPropertyValue(name), 10));
+    };
+    const updateAria = () => {
+        if (!desktop.matches) return;
+        const [min, max] = limits();
+        handle.setAttribute('aria-valuemin', String(min));
+        handle.setAttribute('aria-valuemax', String(max));
+        handle.setAttribute('aria-valuenow', String(width()));
+    };
+
+    let ratio = 0;
+    try {
+        ratio = Number(window.localStorage.getItem(storageKey));
+    } catch {}
+    if (ratio > 0 && ratio <= 1) sidebar.style.setProperty('--sidebar-width', `${ratio * 100}vw`);
+
+    const persistWidth = () => {
+        try {
+            if (ratio) window.localStorage.setItem(storageKey, String(ratio));
+            else window.localStorage.removeItem(storageKey);
+        } catch {}
+    };
+    const setWidth = (value, min, max) => {
+        const bounded = Math.max(min, Math.min(max, value));
+        ratio = bounded / window.innerWidth;
+        sidebar.style.setProperty('--sidebar-width', `${ratio * 100}vw`);
+        handle.setAttribute('aria-valuenow', String(Math.round(bounded)));
+    };
+    const resetWidth = () => {
+        ratio = 0;
+        sidebar.style.removeProperty('--sidebar-width');
+        persistWidth();
+        updateAria();
+    };
+
+    let drag = null;
+    handle.addEventListener('pointerdown', (event) => {
+        if (!desktop.matches || !event.isPrimary || event.button !== 0) return;
+        event.preventDefault();
+        const [min, max] = limits();
+        drag = { id: event.pointerId, x: event.clientX, width: width(), min, max };
+        handle.focus({ preventScroll: true });
+        handle.setPointerCapture(event.pointerId);
+        handle.dataset.resizing = 'true';
+    });
+    handle.addEventListener('pointermove', (event) => {
+        if (event.pointerId !== drag?.id) return;
+        setWidth(drag.width + event.clientX - drag.x, drag.min, drag.max);
+    });
+    handle.addEventListener('lostpointercapture', (event) => {
+        if (event.pointerId !== drag?.id) return;
+        drag = null;
+        delete handle.dataset.resizing;
+        persistWidth();
+    });
+    handle.addEventListener('dblclick', resetWidth);
+    handle.addEventListener('keydown', (event) => {
+        if (!desktop.matches) return;
+        const [min, max] = limits();
+        const target = { ArrowLeft: width() - 16, ArrowRight: width() + 16, Home: min, End: max };
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            resetWidth();
+        } else if (Object.hasOwn(target, event.key)) {
+            event.preventDefault();
+            setWidth(target[event.key], min, max);
+            persistWidth();
+        }
+    });
+    window.addEventListener('resize', updateAria);
+    updateAria();
 }
 
 function bindSidebarToggle() {
@@ -1827,7 +1976,7 @@ function bindSidebarToggle() {
     if (toggleBtn.dataset.bound === '1') return;
     toggleBtn.dataset.bound = '1';
 
-    const isMobileLayout = () => window.innerWidth < 1024;
+    const mobileLayout = window.matchMedia('(max-width: 1023px)');
 
     // Sync mobile top bar height to CSS variable for notification panel positioning
     const mobileTopBar = document.getElementById('mobile-top-bar');
@@ -1837,30 +1986,44 @@ function bindSidebarToggle() {
         window.addEventListener('resize', syncHeight);
     }
 
-    const setSidebarOpen = (open) => {
+    const setSidebarOpen = (open, restoreFocus = false) => {
+        const wasOpen = sidebar.classList.contains('mobile-open');
         sidebar.classList.toggle('mobile-open', open);
         syncMobileOverlayBackdrop();
+        if (open && !wasOpen) sidebar.focus({ preventScroll: true });
+        if (!open && wasOpen && restoreFocus) toggleBtn.focus({ preventScroll: true });
     };
 
     toggleBtn.addEventListener('click', () => {
-        if (!isMobileLayout()) return;
+        if (!mobileLayout.matches) return;
         const isOpen = sidebar.classList.contains('mobile-open');
         window.collapseNotificationPanel?.();
-        setSidebarOpen(!isOpen);
+        setSidebarOpen(!isOpen, true);
     });
 
     backdrop.addEventListener('click', () => {
-        setSidebarOpen(false);
+        setSidebarOpen(false, true);
         window.collapseNotificationPanel?.(true);
+    });
+
+    sidebar.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || !sidebar.classList.contains('mobile-open')) return;
+        event.preventDefault();
+        setSidebarOpen(false, true);
+    });
+    mobileLayout.addEventListener('change', () => {
+        if (!mobileLayout.matches) setSidebarOpen(false);
     });
 
     // Auto-close sidebar on mobile when a navigation link or chat item is clicked
     sidebar.addEventListener('click', (event) => {
-        if (!isMobileLayout()) return;
+        if (!mobileLayout.matches) return;
         if (!sidebar.classList.contains('mobile-open')) return;
-        const anchor = event.target instanceof Element ? event.target.closest('a[href], [data-chat-id]') : null;
-        if (anchor) {
-            setSidebarOpen(false);
+        const action = event.target instanceof Element
+            ? event.target.closest('a[href], [data-chat-id], [data-app-action="create-group-chat"]')
+            : null;
+        if (action) {
+            setSidebarOpen(false, true);
         }
     });
 }
@@ -1925,6 +2088,7 @@ function bindAppActions() {
         'decline-incoming-call': () => declineIncomingCallWaiting(),
         'switch-incoming-call': () => switchToIncomingCallWaiting(),
         'toggle-call-participants': () => toggleCallParticipantsPanel(),
+        'toggle-call-self-view': () => toggleCallSelfView(),
         'open-call-settings': () => openCallSettingsModal(),
         'close-call-settings': () => closeCallSettingsModal(),
         'set-call-overlay': (data) => setCallOverlayMode(data.mode),
@@ -1932,7 +2096,9 @@ function bindAppActions() {
         'toggle-mute': () => toggleMute(),
         'toggle-video': () => toggleVideoInCall(),
         'toggle-screen-share': () => toggleScreenShare(),
-        'start-screen-share': (data) => startScreenShare(data.quality),
+        'start-screen-share': (data) => startScreenShare(
+            data.quality, Boolean(document.getElementById('remember-screenshare-quality')?.checked)
+        ),
         'close-screen-share': () => closeScreenShareModal(),
         'clear-notifications': () => clearAllNotifications(),
         'new-post': () => openNewPostModal(),
@@ -1997,8 +2163,10 @@ function startAppInitOnce() {
     bindAppActions();
     bindNotificationHistory();
     bindSidebarToggle();
+    bindSidebarResize();
     bindAccountMenu();
-    init().catch(() => {});
+    init();
+    initAppShell();
 }
 
 window.navigateApp = navigateApp;

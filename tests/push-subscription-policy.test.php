@@ -50,6 +50,7 @@ class WebPushService
 class PushSubscription
 {
     public static int $writes = 0;
+    public static string $result = self::SAVED;
     public const SAVED = 'saved';
     public const LIMIT = 'limit';
     public const CONFLICT = 'conflict';
@@ -57,7 +58,7 @@ class PushSubscription
     public static function upsertForUser(...$params): string
     {
         self::$writes++;
-        return self::SAVED;
+        return self::$result;
     }
 
     public static function countForUser(int $id): int
@@ -81,6 +82,22 @@ foreach ([
         if ($response->status !== $status || PushSubscription::$writes !== $writes) {
             throw new RuntimeException("Subscription validation returned HTTP {$response->status} and "
                 . PushSubscription::$writes . " writes. Expected HTTP $status and $writes writes.");
+        }
+    }
+}
+\Causette\Localization\Locale::initializeForAccount('fr', 'en');
+$_POST['endpoint'] = 'https://fcm.googleapis.com/fcm/send/fixture-device';
+foreach ([
+    PushSubscription::LIMIT => 'Limite d’abonnements aux notifications push atteinte',
+    PushSubscription::CONFLICT => 'Cet abonnement aux notifications push est indisponible',
+] as $result => $message) {
+    PushSubscription::$result = $result;
+    try {
+        (new PushController())->subscribe();
+        throw new RuntimeException('Expected the subscription conflict to be reported');
+    } catch (FixtureResponse $response) {
+        if ($response->status !== 409 || $response->payload !== ['error' => $message]) {
+            throw new RuntimeException('Expected localized subscription feedback: ' . $message);
         }
     }
 }

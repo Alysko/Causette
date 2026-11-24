@@ -14,6 +14,7 @@ const SESSION_TOKEN = 'fixture-session-token';
 
 $versionMetadata = require __DIR__ . '/../public_html/version.php';
 define('APP_VERSION', $versionMetadata['app_version']);
+define('CAUSETTE_DATABASE_VERSION', $versionMetadata['database_version']);
 define('CAUSETTE_UPDATE_SOURCES', $versionMetadata['compatible_database_versions']);
 
 final class StopRequest extends RuntimeException
@@ -64,7 +65,7 @@ final class Setting
 
     public static function advanceDatabaseVersion(string $expected, string $target): bool
     {
-        if (!self::$allowAdvance || $expected !== self::$version || $target !== APP_VERSION) {
+        if (!self::$allowAdvance || $expected !== self::$version || $target !== CAUSETTE_DATABASE_VERSION) {
             throw new LogicException('Unexpected write from the update page');
         }
         self::$attempts++;
@@ -80,7 +81,7 @@ final class FixtureUpdateController extends UpdateController
 
     protected function advanceVersion(string $version): bool
     {
-        return Setting::advanceDatabaseVersion($version, APP_VERSION);
+        return Setting::advanceDatabaseVersion($version, CAUSETTE_DATABASE_VERSION);
     }
 
     protected function reactionUpgradeProgress(): ?int
@@ -92,6 +93,9 @@ final class FixtureUpdateController extends UpdateController
     {
         if (!$this->allowForm || $view !== 'update' || ($data['csrf'] ?? null) !== FORM_TOKEN) {
             throw new LogicException('Unexpected update form');
+        }
+        if ($data['appVersion'] !== APP_VERSION || !$data['openMojiUpgrade'] || !$data['groupNotificationsUpgrade'] || !$data['apiLimitsUpgrade']) {
+            throw new LogicException('The form must display the release and all required migration steps.');
         }
 
         throw new StopRequest('', 200);
@@ -128,7 +132,8 @@ $cases += [
     'authentication from another session cannot apply updates' => ['runUpdate', 'admin', true, true, '1.0.1', FORM_TOKEN, true, 403, -5, 'another-session', '1'],
     'authentication dated in the future cannot apply updates' => ['runUpdate', 'admin', true, true, '1.0.1', FORM_TOKEN, true, 403, 60, SESSION_TOKEN, '1'],
     'backup acknowledgment is required' => ['runUpdate', 'admin', true, true, '1.0.1', FORM_TOKEN, true, 400, -5, SESSION_TOKEN],
-    'the current version cannot be replayed' => ['runUpdate', 'admin', true, true, APP_VERSION, FORM_TOKEN, true, 404, -5, SESSION_TOKEN, '1'],
+    'the current schema cannot be replayed after a release-only upgrade' => ['runUpdate', 'admin', true, true, CAUSETTE_DATABASE_VERSION, FORM_TOKEN, true, 404, -5, SESSION_TOKEN, '1'],
+    'the release number is not a supported database marker' => ['showUpdate', 'admin', true, true, APP_VERSION, FORM_TOKEN, true, 409],
     'an administrator can apply the supported update' => ['runUpdate', 'admin', true, true, '1.0.1', FORM_TOKEN, true, 302, -5, SESSION_TOKEN, '1', true],
     'a concurrent change cannot be overwritten' => ['runUpdate', 'admin', true, true, '1.0.1', FORM_TOKEN, true, 409, -5, SESSION_TOKEN, '1', false],
 ];

@@ -1,6 +1,9 @@
 <?php $tr = \Causette\Localization\Locale::current()->html(...); ?>
 <div class="p-8 overflow-auto">
-    <h1 class="text-3xl font-bold mb-6"><?= $tr('ui.users') ?></h1>
+    <div class="mb-6 space-y-2">
+        <h1 class="text-3xl font-bold"><?= $tr('ui.users') ?></h1>
+        <?php require __DIR__ . '/partials/back-to-settings.php'; ?>
+    </div>
 
     <?php $userList = $users ?? []; ?>
 
@@ -40,7 +43,7 @@
                         <div class="flex items-center justify-between gap-3">
                             <div class="flex items-center gap-3 min-w-0">
                                 <?php if ($managedAvatar): ?>
-                                    <img src="<?= htmlspecialchars($managedAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= htmlspecialchars($managedUser->username, ENT_QUOTES, 'UTF-8') ?> avatar" class="w-10 h-10 rounded-full object-cover border border-zinc-700">
+                                    <img src="<?= htmlspecialchars($managedAvatar, ENT_QUOTES, 'UTF-8') ?>" alt="<?= $tr('ui.user_avatar', ['name' => $managedUser->username]) ?>" class="w-10 h-10 rounded-full object-cover border border-zinc-700">
                                 <?php else: ?>
                                     <div class="w-10 h-10 rounded-full border border-zinc-700 flex items-center justify-center font-semibold text-sm <?= htmlspecialchars(User::avatarColorClasses($managedUser->user_number), ENT_QUOTES, 'UTF-8') ?>">
                                         <?= htmlspecialchars(User::avatarInitial($managedUser->username), ENT_QUOTES, 'UTF-8') ?>
@@ -50,11 +53,11 @@
                                     <div class="font-medium truncate"><?= htmlspecialchars($managedUser->username, ENT_QUOTES, 'UTF-8') ?></div>
                                     <div class="text-xs text-zinc-400"><?= htmlspecialchars(User::formatUserNumber($managedUser->user_number), ENT_QUOTES, 'UTF-8') ?></div>
                                     <div class="text-xs <?= htmlspecialchars($managedUser->effective_status_text_class ?? 'text-zinc-500', ENT_QUOTES, 'UTF-8') ?> mt-0.5">
-                                        <?= htmlspecialchars($managedUser->effective_status_label ?? 'Offline', ENT_QUOTES, 'UTF-8') ?>
+                                        <?= $tr('ui.' . (User::normalizePresenceStatus($managedUser->effective_status ?? null) ?? 'offline')) ?>
                                     </div>
                                     <div class="mt-1 flex flex-wrap items-center gap-2">
                                         <span id="admin-user-role-badge-<?= (int)$managedUser->id ?>" class="text-[11px] px-2 py-0.5 rounded-full <?= $managedIsAdmin ? 'bg-emerald-700 text-emerald-100' : 'bg-zinc-700 text-zinc-200' ?>">
-                                            <?= htmlspecialchars($managedIsAdmin ? 'admin' : 'user', ENT_QUOTES, 'UTF-8') ?>
+                                            <?= $tr($managedIsAdmin ? 'browser.role_admin' : 'browser.role_user') ?>
                                         </span>
                                         <span id="admin-user-banned-badge-<?= (int)$managedUser->id ?>" class="text-[11px] px-2 py-0.5 rounded-full bg-red-800 text-red-100 <?= $managedIsBanned ? '' : 'hidden' ?>"><?= $tr('ui.banned') ?></span>
                                     </div>
@@ -65,8 +68,8 @@
                                 <button type="button" class="bg-zinc-700 hover:bg-zinc-600 text-sm px-3 py-1.5 rounded-lg" data-app-action="toggle-admin-user-menu" data-user-id="<?= (int)$managedUser->id ?>"><?= $tr('ui.actions') ?></button>
                                 <div id="admin-user-menu-<?= (int)$managedUser->id ?>" data-admin-user-menu class="hidden absolute right-0 mt-2 w-56 bg-zinc-900 border border-zinc-700 rounded-xl p-3 z-30 space-y-3">
                                     <div class="space-y-2">
-                                        <button type="button" id="admin-user-role-action-<?= (int)$managedUser->id ?>" class="w-full text-left text-sm px-3 py-2 rounded-lg <?= $managedIsAdmin ? 'bg-amber-700 hover:bg-amber-600 text-amber-100' : 'bg-emerald-700 hover:bg-emerald-600 text-emerald-100' ?>" data-app-action="confirm-admin-user-role" data-user-id="<?= (int)$managedUser->id ?>"><?= $managedIsAdmin ? 'Demote' : 'Promote' ?></button>
-                                        <button type="button" id="admin-user-ban-action-<?= (int)$managedUser->id ?>" class="w-full text-left bg-amber-700 hover:bg-amber-600 text-amber-100 text-sm px-3 py-2 rounded-lg" data-app-action="confirm-admin-user-ban" data-user-id="<?= (int)$managedUser->id ?>"><?= $managedIsBanned ? 'Unban' : 'Ban' ?></button>
+                                        <button type="button" id="admin-user-role-action-<?= (int)$managedUser->id ?>" class="w-full text-left text-sm px-3 py-2 rounded-lg <?= $managedIsAdmin ? 'bg-amber-700 hover:bg-amber-600 text-amber-100' : 'bg-emerald-700 hover:bg-emerald-600 text-emerald-100' ?>" data-app-action="confirm-admin-user-role" data-user-id="<?= (int)$managedUser->id ?>"><?= $tr($managedIsAdmin ? 'browser.demote' : 'browser.promote') ?></button>
+                                        <button type="button" id="admin-user-ban-action-<?= (int)$managedUser->id ?>" class="w-full text-left bg-amber-700 hover:bg-amber-600 text-amber-100 text-sm px-3 py-2 rounded-lg" data-app-action="confirm-admin-user-ban" data-user-id="<?= (int)$managedUser->id ?>"><?= $tr($managedIsBanned ? 'browser.unban' : 'browser.ban') ?></button>
                                         <button type="button" class="w-full text-left bg-red-700 hover:bg-red-600 text-red-100 text-sm px-3 py-2 rounded-lg" data-app-action="delete-admin-user" data-user-id="<?= (int)$managedUser->id ?>"><?= $tr('ui.delete_user') ?></button>
                                     </div>
                                 </div>

@@ -14,12 +14,14 @@ class AttachmentController extends Controller {
         'odt'  => 'application/vnd.oasis.opendocument.text',
         'doc'  => 'application/msword',
         'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'xls'  => 'application/vnd.ms-excel',
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'zip'  => 'application/zip',
         '7z'   => 'application/x-7z-compressed',
     ];
 
-    // Extensions that must be downloaded rather than rendered inline
-    private const DOWNLOAD_EXTENSIONS = ['mp4', 'webm', 'pdf', 'odt', 'doc', 'docx', 'zip', '7z'];
+    private const VIDEO_EXTENSIONS = ['mp4', 'webm'];
+    private const INLINE_EXTENSIONS = ['jpg', 'png', 'webp', ...self::VIDEO_EXTENSIONS];
 
     public function serve($params) {
         header('Cache-Control: private, no-store');
@@ -36,7 +38,7 @@ class AttachmentController extends Controller {
             ErrorHandler::abort(404, 'Not found');
         }
 
-        if (!preg_match('/^\d{16}\.(jpg|png|webp|mp4|webm|pdf|odt|doc|docx|zip|7z)$/', $filename, $m)) {
+        if (!preg_match('/\A\d{16}\.([a-z0-9]+)\z/', $filename, $m) || !isset(self::EXT_CONTENT_TYPE[$m[1]])) {
             ErrorHandler::abort(404, 'Not found');
         }
 
@@ -107,19 +109,69 @@ class AttachmentController extends Controller {
             ErrorHandler::abort(404, 'Not found');
         }
 
-        $contentType = self::EXT_CONTENT_TYPE[$ext] ?? 'application/octet-stream';
+        $file = fopen($filePath, 'rb');
+        if ($file === false || ($stat = fstat($file)) === false) {
+            ErrorHandler::abort(404, 'Not found');
+        }
+        $size = $stat['size'];
+        $range = null;
+        if (in_array($ext, self::VIDEO_EXTENSIONS, true)) {
+            header('Accept-Ranges: bytes');
+            $header = $_SERVER['HTTP_RANGE'] ?? '';
+            if ($header !== '') {
+                $range = self::parseVideoRange($header, $size);
+                if ($range === null) {
+                    fclose($file);
+                    header('Content-Range: bytes */' . $size);
+                    http_response_code(416);
+                    exit;
+                }
+                [$first, $last] = $range;
+                http_response_code(206);
+                header("Content-Range: bytes $first-$last/$size");
+            }
+        }
+        header('Content-Type: ' . self::EXT_CONTENT_TYPE[$ext]);
+        header('X-Content-Type-Options: nosniff');
+        $remaining = $range === null ? $size : $last - $first + 1;
+        header('Content-Length: ' . $remaining);
 
-        header('Content-Type: ' . $contentType);
-        header('Content-Length: ' . filesize($filePath));
-
-        if (in_array($ext, self::DOWNLOAD_EXTENSIONS, true)) {
+        if (!in_array($ext, self::INLINE_EXTENSIONS, true)) {
             $downloadName = ((string)$record->original_name !== '')
                 ? preg_replace('/[^A-Za-z0-9 _.-]/', '_', (string)$record->original_name)
                 : preg_replace('/[^A-Za-z0-9 _.-]/', '_', $filename);
             header('Content-Disposition: attachment; filename="' . $downloadName . '"');
         }
 
-        readfile($filePath);
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        if ($range !== null) {
+            fseek($file, $first);
+        }
+        while ($remaining > 0 && !feof($file)) {
+            $chunk = fread($file, min(65536, $remaining));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            echo $chunk;
+            $remaining -= strlen($chunk);
+        }
+        fclose($file);
         exit;
+    }
+
+    /** @return array{int, int}|null */
+    public static function parseVideoRange(string $header, int $size): ?array {
+        if ($size <= 0 || !preg_match('/\Abytes=(\d{0,19})-(\d{0,19})\z/', trim($header), $parts)) {
+            return null;
+        }
+        [, $start, $end] = $parts;
+        if ($start === '') {
+            return (int)$end > 0 ? [max(0, $size - (int)$end), $size - 1] : null;
+        }
+        $first = (int)$start;
+        $last = $end === '' ? $size - 1 : min($size - 1, (int)$end);
+        return $first <= $last ? [$first, $last] : null;
     }
 }

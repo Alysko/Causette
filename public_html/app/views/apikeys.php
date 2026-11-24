@@ -24,7 +24,10 @@ require_once __DIR__ . '/../core/HtmlJson.php';
 <div class="p-8 overflow-auto space-y-6">
 
     <div class="flex items-center justify-between flex-wrap gap-4">
-        <h1 class="text-3xl font-bold"><?= $tr('ui.api_keys') ?></h1>
+        <div class="space-y-2">
+            <h1 class="text-3xl font-bold"><?= $tr('ui.api_keys') ?></h1>
+            <?php require __DIR__ . '/partials/back-to-settings.php'; ?>
+        </div>
         <div class="flex gap-3">
             <a href="<?= htmlspecialchars(base_url('/apikeys/docs')) ?>"
                class="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-700 transition">
@@ -60,7 +63,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                     $expiresAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp($key->expires_at);
                 }
                 $createdAtLabel = \Causette\Localization\DisplayPreferences::formatTimestamp((string)$key->created_at);
-                $ipLabel = ($key->allowed_ips === null || $key->allowed_ips === '') ? 'Any' : $key->allowed_ips;
+                $ipLabel = ($key->allowed_ips === null || $key->allowed_ips === '') ? $locale->text('ui.ip_unrestricted') : $key->allowed_ips;
             ?>
                 <div class="rounded-2xl border <?= $isExpired ? 'border-zinc-800 opacity-60' : 'border-zinc-700' ?> bg-zinc-900 p-5">
                     <div class="flex items-start justify-between gap-4 flex-wrap">
@@ -68,19 +71,19 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                             <div class="flex items-center gap-3 flex-wrap">
                                 <h3 class="text-lg font-semibold truncate"><?= htmlspecialchars($key->name) ?></h3>
                                 <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium <?= $key->type === 'bot' ? 'bg-blue-500/20 text-blue-300' : 'bg-purple-500/20 text-purple-300' ?>">
-                                    <?= $key->type === 'bot' ? 'Bot' : 'User' ?>
+                                    <?= $tr($key->type === 'bot' ? 'ui.bot' : 'ui.user') ?>
                                 </span>
                                 <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium <?= $isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300' ?>">
-                                    <?= $isActive ? 'Active' : 'Expired' ?>
+                                    <?= $tr($isActive ? 'ui.api_key_active' : 'ui.api_key_expired_status') ?>
                                 </span>
                             </div>
                             <div class="flex items-center gap-4 text-sm text-zinc-400 flex-wrap">
                                 <span class="font-mono text-zinc-500"><?= htmlspecialchars($key->key_prefix) ?>...</span>
-                                <span><i class="fa-regular fa-calendar mr-1"></i>Created: <?= htmlspecialchars($createdAtLabel) ?></span>
+                                <span><i class="fa-regular fa-calendar mr-1"></i><?= $tr('ui.api_key_created_on', ['date' => $createdAtLabel]) ?></span>
                                 <?php if ($expiresAtLabel !== ''): ?>
-                                    <span><i class="fa-regular fa-clock mr-1"></i><?= $isExpired ? 'Expired' : 'Expires' ?>: <?= htmlspecialchars($expiresAtLabel) ?></span>
+                                    <span><i class="fa-regular fa-clock mr-1"></i><?= $tr($isExpired ? 'ui.api_key_expired_on' : 'ui.api_key_expires_on', ['date' => $expiresAtLabel]) ?></span>
                                 <?php endif; ?>
-                                <span><i class="fa-solid fa-globe mr-1"></i>IPs: <?= htmlspecialchars(mb_strlen($ipLabel) > 40 ? mb_substr($ipLabel, 0, 40) . '...' : $ipLabel) ?></span>
+                                <span><i class="fa-solid fa-globe mr-1"></i><?= $tr('ui.api_key_ips', ['addresses' => mb_strlen($ipLabel) > 40 ? mb_substr($ipLabel, 0, 40) . '...' : $ipLabel]) ?></span>
                             </div>
                         </div>
                         <?php if ($isActive): ?>
@@ -160,7 +163,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                                 <label class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-700/50 cursor-pointer">
                                     <input type="checkbox" name="chat_ids[]" value="<?= (int)$gc->id ?>"
                                            class="rounded border-zinc-600 bg-zinc-700 text-emerald-500 focus:ring-emerald-500">
-                                    <span class="text-sm text-zinc-200 truncate"><?= htmlspecialchars($gc->title ?: 'Unnamed Group') ?></span>
+                                    <span class="text-sm text-zinc-200 truncate"><?= $gc->title ? htmlspecialchars($gc->title, ENT_QUOTES, 'UTF-8') : $tr('ui.group_unnamed') ?></span>
                                     <span class="text-xs text-zinc-500 ml-auto shrink-0"><?= htmlspecialchars(User::formatUserNumber($gc->chat_number)) ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -264,7 +267,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                                 <label class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-700/50 cursor-pointer">
                                     <input type="checkbox" name="chat_ids[]" value="<?= (int)$gc->id ?>"
                                            class="ak-manage-chat-cb rounded border-zinc-600 bg-zinc-700 text-emerald-500 focus:ring-emerald-500">
-                                    <span class="text-sm text-zinc-200 truncate"><?= htmlspecialchars($gc->title ?: 'Unnamed Group') ?></span>
+                                    <span class="text-sm text-zinc-200 truncate"><?= $gc->title ? htmlspecialchars($gc->title, ENT_QUOTES, 'UTF-8') : $tr('ui.group_unnamed') ?></span>
                                     <span class="text-xs text-zinc-500 ml-auto shrink-0"><?= htmlspecialchars(User::formatUserNumber($gc->chat_number)) ?></span>
                                 </label>
                             <?php endforeach; ?>
@@ -454,11 +457,11 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                     if (keyDisplay) keyDisplay.value = result.api_key;
                     openModal('ak-created-modal');
                 } else {
-                    showToast(result.error || 'Failed to create API key', 'error');
+                    showToast(result.error || uiText('api_key_create_failed'), 'error');
                 }
             })
             .catch(function () {
-                showToast('An error occurred', 'error');
+                showToast(uiText('unexpected_error'), 'error');
             });
         });
     }
@@ -478,19 +481,19 @@ require_once __DIR__ . '/../core/HtmlJson.php';
         expireConfirmBtn.addEventListener('click', function () {
             if (pendingExpireKeyId <= 0) return;
 
-            postForm(<?= \Causette\View\HtmlJson::encode(base_url('/apikeys/expire')) ?>, {
+            postForm('/apikeys/expire', {
                 csrf_token: getCsrfToken(),
                 key_id: String(pendingExpireKeyId)
             }).then(function (result) {
                 if (result.success) {
                     closeModal('ak-expire-modal');
-                    showToast('API key expired successfully', 'success');
+                    showToast(uiText('api_key_expired'), 'success');
                     setTimeout(function () { location.reload(); }, 800);
                 } else {
-                    showToast(result.error || 'Failed to expire key', 'error');
+                    showToast(result.error || uiText('api_key_expire_failed'), 'error');
                 }
             }).catch(function () {
-                showToast('An error occurred', 'error');
+                showToast(uiText('unexpected_error'), 'error');
             });
         });
     }
@@ -546,14 +549,14 @@ require_once __DIR__ . '/../core/HtmlJson.php';
             .then(function (result) {
                 if (result.success) {
                     closeModal('ak-manage-modal');
-                    showToast('API key updated successfully', 'success');
+                    showToast(uiText('api_key_updated'), 'success');
                     setTimeout(function () { location.reload(); }, 800);
                 } else {
-                    showToast(result.error || 'Failed to update API key', 'error');
+                    showToast(result.error || uiText('api_key_update_failed'), 'error');
                 }
             })
             .catch(function () {
-                showToast('An error occurred', 'error');
+                showToast(uiText('unexpected_error'), 'error');
             });
         });
     }

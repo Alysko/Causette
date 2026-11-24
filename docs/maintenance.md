@@ -2,6 +2,30 @@
 
 These procedures target a Causette installation with a dedicated HTTPS document root and a sibling private storage directory. Use a separate test site with synthetic data for a restore rehearsal.
 
+## Configure calls across networks
+
+Causette exchanges WebRTC signaling through ordinary HTTPS requests. Browsers try a direct media connection by default. A direct connection may fail across separate networks, strict firewalls or certain NAT configurations.
+
+To use a STUN service, add a `webrtc_stun_servers` setting in the site's `settings` table through the database manager. The value is a comma-separated list of up to four `stun:` or `stuns:` URLs, with optional ports. The browser connects to those services and discloses its network address.
+
+Networks where direct media cannot connect can use an existing external TURN relay that supports coturn's TURN REST authentication. Use a dedicated relay realm or service for the site. With the hosting file manager, create `storage/webrtc-turn.json` with mode `0600`. Generate 32 random bytes in a password manager and encode them as 64 hexadecimal characters. Use the same text as the shared TURN REST secret on the relay and in this file.
+
+```json
+{
+  "urls": [
+    "turn:relay.example.test:3478?transport=udp",
+    "turns:relay.example.test:443?transport=tcp"
+  ],
+  "shared_secret": "<64 hex characters>"
+}
+```
+
+Use one or two URLs with a DNS name, port and explicit transport. A `turns:` URL uses TCP and requires a valid relay certificate. Each joined account gets a pseudonymous ticket for the active call. The browser requests the next ticket after 20 minutes, and each ticket can start new allocations for at most 30 minutes. Manage relay allocation, bandwidth and destination policies with the relay operator. The relay can observe IP addresses and traffic volume, and relayed media consumes the service's bandwidth. Choose limits and costs before enabling it. Protect the configuration file alongside other private keys in backups. [coturn TURN REST settings](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf)
+
+Moving a group to trash stops Causette from issuing or renewing its relay tickets. Tickets issued before archiving retain their original expiry at the relay.
+
+Signaling messages expire for recipients after two minutes. Writes periodically remove an expired batch during ordinary activity. A quiet installation can retain expired rows until new signaling writes trigger cleanup. Camera, screen and microphone data travel between browsers through the WebRTC connection.
+
 ## Save a backup
 
 1. Use the hosting panel to block application traffic before exporting. Pause any scheduled requests and allow active requests to finish. Keep the database and files together as a single backup set.
@@ -13,7 +37,13 @@ Keep the private configuration and `storage/integration-keys.json` with the matc
 
 ## Apply a code-only update
 
-Use this workflow when the incoming package lists the installed database version as compatible in `public_html/version.php`. The 1.0.2 validation package accepts Causette 1.0.1 with the private JSON runtime configuration. Use the preceding F01 validation ZIP as the starting point for a rehearsal. This update uses the existing schema.
+Compare `database_version` in the installed database with `database_version` in the incoming `public_html/version.php`. When they match, keep the existing document root and apply the release as described below. Then sign in normally and verify the new application version and a sample conversation. Causette 1.1.3 uses database version 1.0.6.
+
+Keep a fixed installation directory with `public_html/` and private `storage/` next to each other. The subdomain always points to `public_html/`. Save a backup outside both directories and verify that the hosting panel preserves any site-specific PHP and access rules. On a Basic-protected recipe, keep those rules in the installation directory's own `.htaccess` if the host supports inheritance. Confirm that an anonymous request receives HTTP 401 and that the operator can sign in over HTTPS.
+
+For an overlay-compatible release, extract the ZIP in the installation directory, where both directories are visible. The distributed `storage/` entries contain static emoji files and empty-directory placeholders. They can be extracted alongside the existing private configuration and uploads. Remove the uploaded archive after the update. If the incoming manifest drops or renames public files, replace the contents of `public_html/` using the file manager so obsolete files do not remain reachable. Keep the document root path and live `storage/` in place.
+
+Older packages through 1.0.6 used `app_version` as the required database marker. A package can list older source markers in `compatible_database_versions`. Follow its migration instructions when it needs database changes. The historical 1.0.2 validation package used the sequence below to update the stored marker on a Causette 1.0.1 installation with private JSON configuration.
 
 1. Block application traffic through the hosting panel and save a backup. Confirm the package identity and supported source version before changing files.
 2. Extract the incoming package in a private staging directory. Use the file manager to replace the site's `public_html/` with the incoming public directory, including its hidden rewrite file. Preserve the live sibling `storage/`, the database and the host's TLS, PHP and access-control settings.
@@ -32,6 +62,24 @@ The 1.0.4 updater accepts a private JSON installation at 1.0.1, 1.0.2 or 1.0.3. 
 4. If interrupted, keep the site restricted and reopen the same page. The updater checks which table changes committed before retrying and opens the site after both checks are in place and the database marker reaches 1.0.4. Verify old reactions and add and remove a new reaction on a message and a post before revoking any temporary `ALTER` grant and reopening traffic.
 
 Use the original files and matching database backup together for rollback. A database with newer reaction codes may not fit the older constraints.
+
+## Update to 1.0.5
+
+The 1.0.5 updater accepts a private JSON installation at versions 1.0.1 through 1.0.4. It performs the reaction migration when starting below 1.0.4. It creates `api_rate_limits` inside the protected update when the table is missing. If the table already exists, the updater checks it and preserves its rows. The scoped database user needs `CREATE` only when the table must be created. Keep the site restricted and reopen the update screen if the operation stops.
+
+## Update to 1.0.6
+
+The protected updater accepts private JSON installations at versions 1.0.1 through 1.0.5. It appends the three group request notification types and preserves existing notification rows. It also applies the reaction and API rate-limit table changes when needed. If the update stops, keep the site restricted and reopen the update screen. Completed schema changes are checked before the version advances.
+
+## Update to Causette 1.2.0
+
+Back up the database, application files and private storage, and restrict site access during the update. Extract the ZIP in the installation directory that contains `public_html/` and `storage/`. Keep those two directory paths and the live private contents in place.
+
+Sign in as a verified administrator and use the protected `/update` form. The database user needs `ALTER` on `message_reactions` and `post_reactions` to widen the emoji code columns. The updater retains existing reactions and advances the database marker to 1.0.7 after both tables are ready. If interrupted, reopen the form with the same package in place. Older schemas also need the permissions for any previous migration that has yet to run.
+
+Before reopening the site, verify that an old reaction is still displayed and a new compound emoji can be added to a message and a post. Enable MP4 and WebM in the admin attachment settings on installations that restrict uploads to images. Upload a short video and play it from the conversation as another authorized member.
+
+Grant the scoped database user `ALTER` on `notifications`, and on `message_reactions` and `post_reactions` when upgrading from before 1.0.4. MySQL additionally requires `CREATE` and `INSERT` on each altered table. Ensure `CREATE` is available for `api_rate_limits` if that table is missing. [MySQL ALTER TABLE](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html) · [MariaDB ALTER TABLE](https://mariadb.com/docs/server/reference/sql-statements/data-definition/alter/alter-table)
 
 ## Protect existing credentials
 
@@ -62,6 +110,8 @@ Use the same backup point for the database, files and private configuration when
 
 ## Verify attachment access and account recovery
 
+Administrators can enable XLS and XLSX under **Settings → Administration → Attachments**. Both formats are downloaded using their original filenames. The upload checks the detected [registered media type](https://www.iana.org/assignments/media-types) for the selected extension. Existing file-type settings are preserved.
+
 On the disposable site, download a private group's attachment as a member. Remove the test account from the group and verify that the same URL no longer grants access. A signed-in non-member can still read attachments linked to messages in a public group. Causette sends `Cache-Control: private, no-store` with attachment responses. Copies previously saved or cached on a device may remain accessible on that device.
 
 Attachment storage defaults to 256 MiB per account, 512 MiB per conversation and 1 GiB per site. Each account can have 12 pending uploads. Each recorded attachment uses at least 4 KiB of its quotas, including attachments that share a file. Files awaiting expiry cleanup still count. The host's disk usage includes any untracked files left by earlier versions or bulk maintenance. A busy storage operation returns a retry message.
@@ -75,6 +125,15 @@ To check a voluntary password change, sign in to a synthetic account in two brow
 To check password recovery, sign in again in both profiles and enable **Remember me** in one. Complete the reset from a third profile. Both previous sessions and the persistent sign-in cookie should be rejected. Sign in again with the new password. Password changes and resets also clear recorded trusted locations and invalidate outstanding recovery and login challenges for that account.
 
 When resetting a password, select **Revoke all API keys, including bot keys** if a key may have been exposed. Leaving the box unchecked preserves existing integrations. Selecting it expires all active keys owned by the account as part of the reset. Create replacement keys after signing in again and update any affected integration.
+
+## Choose the mail transport
+
+In **Settings → Administration → Mail**, choose **Custom SMTP server** or **PHP default (hosting provider)**. Existing installations use their current SMTP settings until an administrator selects PHP mail.
+
+- **Custom SMTP server** needs the host, port, username, password and sender. Port 465 uses implicit TLS. Other configured ports use STARTTLS. Leave the password field empty to keep the stored credential.
+- **PHP default** hands messages to the host's configured [`mail()` transport](https://www.php.net/manual/en/function.mail.php). Enter an address the hosting provider permits as a sender. Causette keeps the saved SMTP settings available for switching back.
+
+The test button sends to the address on the administrator’s account. Account emails and email second factors use the selected transport. Verify receipt in the mailbox. A delivery failure prevents completion of a sign-in that requires an email code.
 
 ## Verify second-factor sign-in
 
@@ -90,7 +149,7 @@ When updating a legacy installation, ask anyone with a pending verification or a
 
 Check that the private site's `url` matches its public HTTPS address exactly. In an installed legacy PHP configuration, supply a literal `$CONFIG_APP_URL` and the optional `$CONFIG_APP_SUBFOLDER`, or use the equivalent hosting environment values. Recovery mail uses this configured public address.
 
-With a synthetic account, request a recovery email and open its link. Confirm the host, port and path before submitting the form. The reset page loads its stylesheet from the same site and forbids scripts. Keep recovery-link queries out of exported logs and restrict access to the hosting logs that record them.
+With a synthetic account, request a recovery email using its username, then repeat using its email address. Both go to the address recorded for the account and share the same rate limit. Open the latest link and confirm the host, port and path before submitting the form. The reset page loads its stylesheet from the same site and forbids scripts. Keep recovery-link queries out of exported logs and restrict access to the hosting logs that record them.
 
 Check that a plain HTTP page request redirects to the configured HTTPS address without its query string. Plain HTTP form submissions are refused, so enter credentials on the HTTPS page. For a proxied site, confirm that a forwarded scheme from an unapproved client has no effect and that the approved proxy serves the HTTPS page without redirecting it again. Verify `Secure`, `HttpOnly` and the expected path on the session cookies.
 
@@ -100,13 +159,15 @@ An interactive session expires after 30 minutes without an authenticated request
 
 **Remember me** permits restoration for at most 30 days after sign-in and expires after seven days without authenticated activity. Each successful restoration replaces both the prior session binding and the remembered credential. The new remembered credential keeps the original absolute expiry. The database stores digests and expiry metadata. After upgrading from the previous token format, sign in again to create new credentials.
 
-To rehearse revocation, sign in to the disposable HTTPS site with **Remember me** and check the session in Settings. Use **Exit** to sign out and verify that reopening a protected page requires sign-in. Settings also lets you terminate another browser's session. A still-valid remembered browser remains listed there even after its interactive session expires. A remembered login session and a browser trusted for MFA are separate controls.
+To rehearse revocation, sign in to the disposable HTTPS site with **Remember me** in two browsers and open **Settings → Sessions**. Choose **Exit session** for the other browser. Confirm that its entry disappears from the list and that the other browser needs to sign in again. Choose **Sign out** on the current session and verify that reopening a protected page also requires sign-in. A still-valid remembered browser remains listed even after its interactive session expires. A remembered login session and a browser trusted for MFA are separate controls.
 
 ## Configure and diagnose Web Push
 
 In the administration settings, open **Push Notifications**, configure the matching P-256 VAPID public key and private PEM, and select the browser services this site can use. Clearing all providers switches off Web Push. Disabling a provider pauses its existing subscriptions. Leave optional push unconfigured if your hosting plan cannot make direct HTTPS connections. Existing in-app notifications and polling continue independently.
 
 Causette recognizes Chromium at `fcm.googleapis.com`, Firefox at `updates.push.services.mozilla.com`, Safari at `web.push.apple.com`, and Edge WNS at one-label subdomains of `notify.windows.com`. It permits their subscription URL forms on port 443 and resolves the provider again for every attempt. It rejects any answer set with a non-public address and pins one validated address for cURL. TLS hostname and certificate verification remain enabled. Requests bypass proxies and redirects, and send an empty wake-up body with VAPID. The service worker retrieves the notification from Causette.
+
+Each installation uses its own service worker scope. For a mounted site, serve `service-worker.js`, the notification endpoint and local notification icons under the same public mount. Notification links open inside that scope. Turn on Web Push from the mounted site after moving it to a new public path so the browser registers a subscription for the new scope.
 
 Each account can register four devices. A permanently failed device can free a slot when a replacement registers. Existing registrations remain associated with their accounts. To replace an expired browser subscription or change the configured VAPID key, disable and re-enable push in that browser. Automatic registration refreshes preserve the retry cooldown.
 

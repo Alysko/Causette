@@ -35,6 +35,12 @@ function node(tagName) {
         append(...children) {
             this.children.push(...children);
         },
+        getAttribute(name) {
+            return this[name];
+        },
+        querySelector() {
+            return null;
+        },
         replaceChildren(...children) {
             this.value = '';
             this.children = children;
@@ -56,6 +62,7 @@ function fixture(i18n = {}) {
     };
     const context = createContext({
         URL,
+        appPath: (path) => path,
         window: { CAUSETTE_CHAT_I18N: i18n, CAUSETTE_POLL_LIMITS: { minOptions: 2, maxOptions: 10 } },
         currentChat: { id: 1, type: 'group', is_group_member: true },
         currentUserId: 7,
@@ -63,6 +70,7 @@ function fixture(i18n = {}) {
             getElementById: element,
             createDocumentFragment: () => node('#fragment'),
             createElement: node,
+            createTextNode: (text) => text,
         },
         getProfileUrlByUserNumber: (number) => '/u/' + number,
         escapeHtml: (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
@@ -94,6 +102,166 @@ test('pinned messages use text nodes and preserve supported rich content', () =>
     assert.equal(element('pinned-message-goto').disabled, true);
 });
 
+test('ArrowUp in the empty composer opens the newest eligible own message', () => {
+    const { context, element } = fixture();
+    const composer = element('message-input');
+    const messages = element('messages');
+    const listeners = {};
+    const opened = [];
+    let editing = false;
+    const message = (id, user, { bot = false, editable = true } = {}) => {
+        const button = { click() { opened.push(id); } };
+        return {
+            dataset: { messageUserId: String(user) },
+            querySelector: (selector) => ({
+                '[data-bot-badge]': bot ? {} : null,
+                '.js-edit-link': editable ? button : null,
+            })[selector],
+        };
+    };
+    const rows = [message(1, 7), message(2, 7), message(3, 8), message(4, 7, { bot: true })];
+    messages.querySelectorAll = () => rows;
+    messages.querySelector = () => editing ? {} : null;
+    messages.addEventListener = () => {};
+    composer.addEventListener = (name, handler) => { listeners[name] = handler; };
+    context.bindMessageEditAndDelete();
+    const press = (options = {}) => {
+        let prevented = false;
+        listeners.keydown?.({
+            key: 'ArrowUp', preventDefault() { prevented = true; }, ...options,
+        });
+        return prevented;
+    };
+
+    assert.equal(press(), true);
+    assert.deepEqual(opened, [2]);
+    for (const option of ['isComposing', 'shiftKey', 'ctrlKey', 'altKey', 'metaKey', 'repeat', 'defaultPrevented']) {
+        assert.equal(press({ [option]: true }), false, option);
+    }
+    composer.value = 'Brouillon';
+    assert.equal(press(), false);
+    composer.value = '';
+    editing = true;
+    assert.equal(press(), false);
+    editing = false;
+    rows.push(message(5, 7, { editable: false }));
+    assert.equal(press(), false, 'Do not silently edit an older message when the last one is locked');
+    assert.deepEqual(opened, [2]);
+});
+
+test('the unread sidebar filter persists and tracks updated unread counts for all chat types', () => {
+    const { context, element } = fixture();
+    const list = element('chat-sidebar-list');
+    let stored = 'unread';
+    context.window.localStorage = {
+        getItem: () => stored,
+        setItem: (_, value) => { stored = value; },
+    };
+    list.contains = () => false;
+    const toggle = element('chat-sidebar-mode-toggle');
+    const unreadButton = node('button');
+    unreadButton.dataset.chatSidebarMode = 'unread';
+    toggle.querySelectorAll = () => [unreadButton];
+    context.HTMLElement = Object;
+    context.buildSidebarChatNode = (chat) => String(chat.chat_number);
+    context.uiText = (key) => ({ no_unread_chats: 'Aucune conversation non lue' })[key] ?? key;
+    runInContext(`
+        sidebarMode = getStoredSidebarMode();
+        sidebarChatsCache = [
+            { chat_number: 1, type: 'group', unread_count: 0 },
+            { chat_number: 2, type: 'personal', unread_count: '2' },
+            { chat_number: 3, type: 'group', unread_count: 1 },
+        ];
+        renderSidebarList();
+    `, context);
+    assert.equal(unreadButton['aria-pressed'], 'true');
+    assert.deepEqual(Array.from(list.children), ['2', '3']);
+
+    runInContext(`
+        sidebarChatsCache[1].unread_count = 0;
+        renderSidebarList();
+    `, context);
+    assert.deepEqual(Array.from(list.children), ['3']);
+    runInContext(`
+        sidebarChatsCache[2].unread_count = 0;
+        setStoredSidebarMode(sidebarMode);
+        renderSidebarList();
+    `, context);
+    assert.equal(stored, 'unread');
+    assert.equal(list.textContent, 'Aucune conversation non lue');
+});
+
+test('a sidebar refresh keeps existing group links until the displayed list changes', () => {
+    const { context, element } = fixture();
+    const list = element('chat-sidebar-list');
+    list.contains = () => false;
+    element('chat-sidebar-mode-toggle').querySelectorAll = () => [];
+    context.uiText = String;
+    context.buildSidebarChatNode = chat => ({ number: chat.chat_number, unread: chat.unread_count });
+
+    const render = (unread) => {
+        runInContext(`sidebarChatsCache = [{ chat_number: '1', type: 'group', unread_count: ${unread} }]; renderSidebarList();`, context);
+        return list.children[0];
+    };
+
+    const firstLink = render(0);
+    assert.equal(render(0), firstLink, 'An unchanged response must not detach a group link');
+    const updatedLink = render(1);
+    assert.notEqual(updatedLink, firstLink);
+    assert.equal(updatedLink.unread, 1);
+});
+
+test('sidebar filters label conversation types only when the list can contain both', () => {
+    const { context, element } = fixture();
+    const list = element('chat-sidebar-list');
+    list.contains = () => false;
+    element('chat-sidebar-mode-toggle').querySelectorAll = () => [];
+    context.window.location = { pathname: '/' };
+    context.formatNumber = String;
+    context.uiText = (key) => ({sidebar_group: 'Groupe', sidebar_direct: 'MP'})[key] ?? key;
+    runInContext(`sidebarChatsCache = [
+        { chat_number: 1, chat_title: 'Alpha', type: 'group' },
+        { chat_number: 2, chat_title: 'Camille', type: 'personal' },
+    ]; renderSidebarList();`, context);
+    assert.match(list.textContent, /AlphaGroupe/);
+    assert.match(list.textContent, /CamilleMP/);
+    runInContext("sidebarMode = 'group'; renderSidebarList();", context);
+    assert.equal(list.children.length, 1);
+    assert.doesNotMatch(list.textContent, /Groupe/);
+    runInContext("sidebarMode = 'pm'; renderSidebarList();", context);
+    assert.equal(list.children.length, 1);
+    assert.doesNotMatch(list.textContent, /MP/);
+});
+
+test('sidebar and live typing text follow the selected language', () => {
+    const { context, element } = fixture();
+    context.window.location = { pathname: '/' };
+    context.formatNumber = Number;
+    context.uiLanguage = () => 'fr';
+    context.uiText = (key, values = {}) => ({
+        you: 'Vous',
+        sidebar_chat_number: `Conversation ${values.number}`,
+        sidebar_custom_empty: `Aucune conversation dans « ${values.category} »`,
+        typing_one: `${values.name} écrit`,
+        typing_many: `${values.names} écrivent`,
+    })[key] ?? key;
+    const row = context.buildSidebarChatNode({
+        chat_number: '42', type: 'personal', last_message: 'Hello!', last_message_user_id: 7,
+    });
+    assert.match(row.textContent, /Conversation 42.*Vous: Hello!/);
+
+    const list = element('chat-sidebar-list');
+    list.contains = () => false;
+    element('chat-sidebar-mode-toggle').querySelectorAll = () => [];
+    runInContext("sidebarMode = 'custom'; sidebarCustomLabel = 'Équipe'; renderSidebarList();", context);
+    assert.equal(list.textContent, 'Aucune conversation dans « Équipe »');
+
+    context.renderTypingIndicator([{ username: 'Lina' }]);
+    assert.equal(element('typing-indicator').textContent, 'Lina écrit...');
+    context.renderTypingIndicator([{ username: 'Lina' }, { username: 'Sam <3' }]);
+    assert.equal(element('typing-indicator').textContent, 'Lina et Sam <3 écrivent...');
+});
+
 test('a bot message is labeled even next to messages by its owner', () => {
     const { context, element } = fixture();
     const container = element('messages');
@@ -117,6 +285,33 @@ test('a bot message is labeled even next to messages by its owner', () => {
     assert.match(bot, /&lt;b&gt;member&lt;\/b&gt;/);
     assert.doesNotMatch(bot, /href="\/u\/|Member avatar|<b>member<\/b>/);
     assert.equal((markup.match(/href="\/u\//g) || []).length, 2);
+});
+
+test('combined system events use singular and plural labels in the selected language', () => {
+    const { context, element } = fixture({
+        labels: {
+            system_events_show_one: 'Afficher {count} autre événement',
+            system_events_show_other: 'Afficher {count} autres événements',
+            system_events_hide_one: 'Masquer {count} événement',
+            system_events_hide_other: 'Masquer {count} événements',
+        },
+        language: 'fr',
+    });
+    const container = element('messages');
+    context.document.createRange = () => ({ createContextualFragment: (markup) => markup });
+    context.MESSAGE_SCROLL_BOTTOM_THRESHOLD_PX = 72;
+    const event = (id) => ({ id, is_system_event: true, event_type: 'group_created', content: 'Événement' });
+    const events = [event(1), event(2), event(3), event(4)];
+
+    context.renderMessages(events.slice(0, 3), { scrollMode: 'bottom' });
+    assert.match(container.children[0], /Afficher 1 autre événement/);
+    context.renderMessages(events, { scrollMode: 'bottom' });
+    assert.match(container.children[0], /Afficher 2 autres événements/);
+
+    const groupKey = context.buildSystemEventGroupKey(1, events);
+    context.setSystemEventGroupExpanded(1, groupKey, true);
+    context.renderMessages(events, { scrollMode: 'bottom' });
+    assert.match(container.children[0], /Masquer 2 événements/);
 });
 
 test('an attachment response from a previous conversation leaves the current draft alone', async () => {
@@ -264,4 +459,90 @@ test('a completed refresh cannot update a conversation opened after it started',
     await refresh;
     assert.deepEqual(updated, []);
     assert.equal(context.currentChat.pinned_message, undefined);
+});
+
+test('an incoming message does not discard an active edit', async () => {
+    const { context, element } = fixture();
+    let editing = true;
+    const rendered = [];
+    element('messages').querySelector = (selector) => selector === '.js-edit-input' && editing ? {} : null;
+    context.fetch = async () => ({ ok: true, json: async () => ({ messages: [{ id: 4, content: 'New message' }] }) });
+    context.renderMessages = (messages) => rendered.push(messages[0].id);
+    context.renderPinnedMessageBanner = () => {};
+    context.renderActivePollBanner = () => {};
+    context.updatePersonalChatHeaderStatusFromMessages = () => {};
+    context.renderTypingIndicator = () => {};
+    context.refreshChatCallStatusBar = () => {};
+
+    await context.pollMessages();
+    assert.deepEqual(rendered, []);
+    editing = false;
+    await context.pollMessages();
+    assert.deepEqual(rendered, [4]);
+});
+
+test('a successful edit closes the editor before refreshing the message', async () => {
+    const { context } = fixture();
+    const input = { value: ' Nouveau texte ', isConnected: true };
+    const body = { dataset: { originalContent: '' } };
+    context.document.querySelector = () => ({
+        querySelector: (selector) => selector === '.js-edit-input' ? input : body,
+    });
+    context.getCsrfToken = () => 'fixture';
+    context.postForm = async (path, payload) => {
+        assert.equal(path, '/api/messages/edit');
+        assert.equal(payload.message_id, 4);
+        assert.equal(payload.content, 'Nouveau texte');
+        assert.equal(payload.csrf_token, 'fixture');
+        return { success: true };
+    };
+    let refreshed = false;
+    context.pollMessages = async () => {
+        assert.equal(body.dataset.originalContent, undefined);
+        refreshed = true;
+    };
+    await context.submitEditMessage(4);
+    assert.equal(refreshed, true);
+});
+
+test('a failed edit preserves the draft and allows one retry at a time', async () => {
+    const { context } = fixture();
+    let focused = false;
+    const input = { value: 'Nouvelle phrase', isConnected: true, focus() { focused = true; } };
+    const body = { dataset: { originalContent: 'Old text' } };
+    context.document.querySelector = () => ({
+        querySelector: (selector) => selector === '.js-edit-input' ? input : body,
+    });
+    context.getCsrfToken = () => 'fixture';
+    context.uiText = () => 'Impossible d’enregistrer';
+    const errors = [];
+    context.showToast = (message) => errors.push(message);
+    context.pollMessages = () => assert.fail('A failed edit must keep the editor open');
+    for (const failure of [
+        () => { throw new Error('Offline'); },
+        () => ({ error: 'Le délai est dépassé' }),
+        () => ({ success: false }),
+        () => ({ success: true, raw: '<p>Sign-in page</p>' }),
+    ]) {
+        let resolveRequest;
+        const network = new Promise((resolve) => { resolveRequest = resolve; });
+        let requests = 0;
+        context.postForm = async () => {
+            requests++;
+            await network;
+            return failure();
+        };
+        const pending = context.submitEditMessage(4);
+        const readOnlyWhileSaving = input.readOnly;
+        const duplicate = context.submitEditMessage(4);
+        resolveRequest();
+        await Promise.all([pending, duplicate]);
+        assert.equal(body.dataset.originalContent, 'Old text');
+        assert.equal(input.value, 'Nouvelle phrase');
+        assert.equal(readOnlyWhileSaving, true);
+        assert.equal(input.readOnly, false);
+        assert.equal(requests, 1);
+        assert.equal(focused, true);
+    }
+    assert.deepEqual(errors, ['Impossible d’enregistrer', 'Le délai est dépassé', 'Impossible d’enregistrer', 'Impossible d’enregistrer']);
 });

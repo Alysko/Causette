@@ -202,16 +202,16 @@ class AdminUserController extends Controller {
         $targetUserId = (int)($_POST['user_id'] ?? 0);
         $targetRole = strtolower(trim((string)($_POST['role'] ?? '')));
         if (!in_array($targetRole, ['user', 'admin'], true)) {
-            $this->json(['error' => 'Invalid role'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_role')], 400);
         }
 
         if ($targetUserId <= 0 || $targetUserId === (int)$adminUser->id) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         $targetUser = $this->findTargetUser($targetUserId);
         if (!$targetUser) {
-            $this->json(['error' => 'User not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_not_found')], 404);
         }
 
         Database::query(
@@ -229,12 +229,12 @@ class AdminUserController extends Controller {
         $targetUserId = (int)($_POST['user_id'] ?? 0);
         $targetIsBanned = (int)($_POST['is_banned'] ?? 1) === 1 ? 1 : 0;
         if ($targetUserId <= 0 || $targetUserId === (int)$adminUser->id) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         $targetUser = $this->findTargetUser($targetUserId);
         if (!$targetUser) {
-            $this->json(['error' => 'User not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_not_found')], 404);
         }
 
         if ($targetIsBanned === 1) {
@@ -261,12 +261,12 @@ class AdminUserController extends Controller {
         $targetUserId = (int)($_POST['user_id'] ?? 0);
         $retainMessages = (int)($_POST['retain_messages'] ?? 0) === 1;
         if ($targetUserId <= 0 || $targetUserId === (int)$adminUser->id) {
-            $this->json(['error' => 'Invalid user'], 400);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.invalid_user')], 400);
         }
 
         $targetUser = $this->findTargetUser($targetUserId);
         if (!$targetUser) {
-            $this->json(['error' => 'User not found'], 404);
+            $this->json(['error' => \Causette\Localization\Locale::current()->text('response.user_not_found')], 404);
         }
 
         $pdo = Database::getInstance();
