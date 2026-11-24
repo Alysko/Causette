@@ -75,6 +75,7 @@ function fixture(i18n = {}) {
         getProfileUrlByUserNumber: (number) => '/u/' + number,
         escapeHtml: (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
         formatCompactMessageTimestamp: (value) => value,
+        formatTimelineTimestamp: (value) => value,
         normalizeChatType: (type) => type,
     });
     runInContext(source, context);

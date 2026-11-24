@@ -61,4 +61,21 @@ foreach ([['light'], null, '', 'unknown'] as $invalidTheme) {
 saveThemePreferences(1, $preferences + ['theme' => 'dark'], true);
 expectTheme(1, 'dark');
 
+DisplayPreferences::initialize(1, 'UTC+2');
+$now = new DateTimeImmutable('2026-11-25T12:00:00Z');
+foreach ([
+    ['2026-11-25 08:15:00', '', 'aujourd’hui à 10:15'],
+    ['2026-11-24 08:15:00', '', 'hier à 10:15'],
+    ['2026-11-23 08:15:00', '', 'lundi à 10:15'],
+    ['2026-11-19 08:15:00', '', 'jeudi à 10:15'],
+    ['2026-11-18 08:15:00', '', '18/11/2026 10:15'],
+    ['2026-11-25 08:16:00', '2026-11-25 08:15:00', ''],
+    ['2026-11-25 08:16:01', '2026-11-25 08:15:00', 'aujourd’hui à 10:16'],
+    ['2026-11-24 22:00:10', '2026-11-24 21:59:50', 'aujourd’hui à 00:00'],
+] as [$value, $previous, $expected]) {
+    if (DisplayPreferences::formatTimelineTimestamp($value, $previous, $now) !== $expected) {
+        throw new RuntimeException("Unexpected timeline timestamp for $value. Expected $expected.");
+    }
+}
+
 echo "Account theme defaults, isolation, valid choices, legacy saves and rejection passed.\n";

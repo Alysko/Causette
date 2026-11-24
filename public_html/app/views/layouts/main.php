@@ -626,6 +626,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     window.CAUSETTE_UI = <?= \Causette\View\HtmlJson::encode([
         'language' => $locale->language(),
         'labels' => $locale->catalog('browser'),
+        'dates' => $locale->catalog('dates'),
     ]) ?>;
     window.CAUSETTE_CALLS = <?= \Causette\View\HtmlJson::encode([
         'labels' => $locale->catalog('calls'),

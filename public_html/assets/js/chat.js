@@ -4777,6 +4777,12 @@ function handleMessageInputTyping() {
     scheduleTypingStop();
 }
 
+function renderTimelineTimestamp(timestamp, previous) {
+    const label = formatTimelineTimestamp(timestamp, previous);
+    const utc = escapeHtml(timestamp);
+    return `<span class="text-zinc-500" data-timeline-time data-utc="${utc}" data-previous-utc="${escapeHtml(previous)}" title="${utc}"${label === '' ? ' hidden' : ''}>${escapeHtml(label)}</span>`;
+}
+
 function renderMessages(messages, options = {}) {
     const box = document.getElementById('messages');
     if (!box) return;
@@ -4827,6 +4833,7 @@ function renderMessages(messages, options = {}) {
 
     let previousUserId = null;
     let previousWasSystemEvent = false;
+    let previousTimelineTimestamp = '';
     const chunks = [];
 
     renderEntries.forEach((entry) => {
@@ -4867,10 +4874,11 @@ function renderMessages(messages, options = {}) {
             const isNewSystemCluster = isStandalonePollEvent ? true : !previousWasSystemEvent;
             const isCallSystemEvent = systemEventType.startsWith('call_');
             const sysFullTimestamp = String(msg.created_at || '');
-            const sysCompactTimestamp = formatCompactMessageTimestamp(sysFullTimestamp);
             const groupKey = String(entry?.groupKey || '');
             const isCollapsibleMiddle = Boolean(entry?.isCollapsibleMiddle);
             const isHiddenByDefault = Boolean(entry?.hiddenByDefault);
+            const earlierTimelineTimestamp = previousTimelineTimestamp;
+            if (!isHiddenByDefault) previousTimelineTimestamp = sysFullTimestamp;
             const middleAttrs = isCollapsibleMiddle
                 ? ` data-system-event-group-key="${escapeHtml(groupKey)}" data-system-event-hidden="1"`
                 : '';
@@ -4907,7 +4915,7 @@ function renderMessages(messages, options = {}) {
                         <div class="text-zinc-400 text-[15px] leading-6">${renderPlainTextWithEmoji(systemContent)}</div>
                         <div class="relative mt-0.5">
                             <div class="text-xs flex items-center gap-3">
-                                <span class="text-zinc-500" data-utc="${escapeHtml(sysFullTimestamp)}" title="${escapeHtml(sysFullTimestamp)}">${escapeHtml(sysCompactTimestamp)}</span>
+                                ${renderTimelineTimestamp(sysFullTimestamp, earlierTimelineTimestamp)}
                             </div>
                         </div>
                     </div>
@@ -4929,7 +4937,8 @@ function renderMessages(messages, options = {}) {
             && messageUserId !== Number(currentUserId)
             && latestClusterIndexByUser.get(messageUserId) === index;
         const fullTimestamp = String(msg.created_at || '');
-        const compactTimestamp = formatCompactMessageTimestamp(fullTimestamp);
+        const earlierTimelineTimestamp = previousTimelineTimestamp;
+        previousTimelineTimestamp = fullTimestamp;
         const profileUrl = botName ? '' : getProfileUrlForUser(msg);
         const username = escapeHtml(bannerText(msg.username));
         const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
@@ -4987,7 +4996,7 @@ function renderMessages(messages, options = {}) {
                     <div class="relative mt-0.5">
                         ${renderReactionPickerMarkup(msg.id)}
                         <div class="text-xs flex items-center gap-3">
-                            <span class="text-zinc-500" data-utc="${escapeHtml(fullTimestamp)}" title="${escapeHtml(fullTimestamp)}">${escapeHtml(compactTimestamp)}</span>
+                            ${renderTimelineTimestamp(fullTimestamp, earlierTimelineTimestamp)}
                             ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
                             ${interactionControlsMarkup}
                             ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}

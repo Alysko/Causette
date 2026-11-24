@@ -539,6 +539,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 ];
             }
         ?>
+        <?php $previousTimelineTimestamp = ''; ?>
         <?php foreach ($displayEntries as $entry): ?>
             <?php if (($entry['type'] ?? '') === 'system_toggle'): ?>
                 <?php
@@ -584,7 +585,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     $isNewSystemCluster = $isStandalonePollEvent ? true : !$previousWasSystemEvent;
                     $isCallSystemEvent = strpos($systemEventType, 'call_') === 0;
                     $sysFullTimestamp = (string)($message->created_at ?? '');
-                    $sysCompactTimestamp = DisplayPreferences::formatTimestamp($sysFullTimestamp);
+                    $earlierTimelineTimestamp = $previousTimelineTimestamp;
+                    $sysCompactTimestamp = DisplayPreferences::formatTimelineTimestamp($sysFullTimestamp, $earlierTimelineTimestamp);
+                    if (!$isSystemEntryHiddenByDefault) $previousTimelineTimestamp = $sysFullTimestamp;
                     $systemContentRaw = \Causette\Calls\CallHistoryText::localize(
                         $systemEventType,
                         (string)($message->content ?? ''),
@@ -643,7 +646,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <div class="text-zinc-400 text-[15px] leading-6"><?= $systemContentHtml ?></div>
                         <div class="relative mt-0.5">
                             <div class="text-xs flex items-center gap-3">
-                                <span class="text-zinc-500" data-utc="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($sysCompactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="text-zinc-500" data-timeline-time data-utc="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>" data-previous-utc="<?= htmlspecialchars($earlierTimelineTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>"<?= $sysCompactTimestamp === '' ? ' hidden' : '' ?>><?= htmlspecialchars($sysCompactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
                             </div>
                         </div>
                     </div>
@@ -662,7 +665,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     && ((int)$message->user_id !== (int)$currentUserId)
                     && (($latestClusterIndexByUser[(int)$message->user_id] ?? -1) === $index);
                 $fullTimestamp = (string)($message->created_at ?? '');
-                $compactTimestamp = DisplayPreferences::formatTimestamp($fullTimestamp);
+                $earlierTimelineTimestamp = $previousTimelineTimestamp;
+                $compactTimestamp = DisplayPreferences::formatTimelineTimestamp($fullTimestamp, $earlierTimelineTimestamp);
+                $previousTimelineTimestamp = $fullTimestamp;
                 $quotedContent = (string)($message->quoted_content ?? '');
                 $quotedBotName = (string)($message->quoted_bot_name ?? '');
                 $quotedUsername = $quotedBotName !== ''
@@ -823,7 +828,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <div class="hidden js-reaction-picker mb-2" data-reaction-picker-for="<?= (int)$message->id ?>"></div>
 
                         <div class="text-xs flex items-center gap-3">
-                            <span class="text-zinc-500" data-utc="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($compactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
+                            <span class="text-zinc-500" data-timeline-time data-utc="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>" data-previous-utc="<?= htmlspecialchars($earlierTimelineTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>"<?= $compactTimestamp === '' ? ' hidden' : '' ?>><?= htmlspecialchars($compactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
                             <?php if (!empty($message->edited_at)): ?>
                                 <span class="text-zinc-500 italic"><?= $tr('ui.edited') ?></span>
                             <?php endif; ?>

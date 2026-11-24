@@ -911,13 +911,7 @@ function formatCompactMessageTimestamp(value, { relative = true, dateOnly = fals
         return uiText('just_now');
     }
 
-    const tz = String(window.USER_TIMEZONE || 'UTC+0');
-    const m = tz.match(/^UTC([+-])(\d{1,2})(?::(\d{2}))?$/);
-    const offsetMins = m
-        ? (m[1] === '+' ? 1 : -1) * (parseInt(m[2], 10) * 60 + parseInt(m[3] || '0', 10))
-        : 0;
-
-    const local = new Date(date.getTime() + offsetMins * 60 * 1000);
+    const local = new Date(date.getTime() + displayTimezoneOffset());
     const { dateFormat, timeFormat } = document.documentElement?.dataset ?? {};
     const twelveHours = timeFormat === '12h';
     if (dateFormat === 'dmy' || dateFormat === 'mdy' || dateFormat === 'ymd') {
@@ -927,10 +921,7 @@ function formatCompactMessageTimestamp(value, { relative = true, dateOnly = fals
         const year = String(local.getUTCFullYear()).padStart(4, '0');
         const formattedDate = { dmy: day + '/' + month + '/' + year, mdy: month + '/' + day + '/' + year, ymd: year + '-' + month + '-' + day }[dateFormat];
         if (dateOnly) return formattedDate;
-        const hour = local.getUTCHours();
-        const minute = twoDigits(local.getUTCMinutes());
-        return formattedDate + ' ' + twoDigits(twelveHours ? (hour % 12 || 12) : hour) + ':' + minute
-            + (twelveHours ? (hour >= 12 ? ' PM' : ' AM') : '');
+        return formattedDate + ' ' + formatTimelineClock(local);
     }
 
     const language = uiLanguage();
@@ -943,6 +934,41 @@ function formatCompactMessageTimestamp(value, { relative = true, dateOnly = fals
         timestampFormatters.set(formatterKey, new Intl.DateTimeFormat(language, options));
     }
     return timestampFormatters.get(formatterKey).format(local);
+}
+
+const DAY_IN_MS = 24 * 60 * ONE_MINUTE_IN_MS;
+
+function displayTimezoneOffset() {
+    const offset = String(window.USER_TIMEZONE || '').match(/^UTC([+-])(\d{1,2})(?::(\d{2}))?$/);
+    return offset ? (offset[1] === '+' ? 1 : -1) * (Number(offset[2]) * 60 + Number(offset[3] || 0)) * ONE_MINUTE_IN_MS : 0;
+}
+
+function formatTimelineClock(date) {
+    const twelveHours = document.documentElement?.dataset?.timeFormat === '12h';
+    const hour = date.getUTCHours();
+    const digits = (value) => String(value).padStart(2, '0');
+    return `${digits(twelveHours ? hour % 12 || 12 : hour)}:${digits(date.getUTCMinutes())}`
+        + (twelveHours ? (hour >= 12 ? ' PM' : ' AM') : '');
+}
+
+function formatTimelineTimestamp(value, previous = '', now = Date.now()) {
+    const timestamp = parseUtcTimestamp(value);
+    if (!timestamp) return String(value || '');
+    const offset = displayTimezoneOffset();
+    const local = timestamp.getTime() + offset;
+    const day = Math.floor(local / DAY_IN_MS);
+    const earlier = parseUtcTimestamp(previous);
+    if (earlier && Math.floor((earlier.getTime() + offset) / DAY_IN_MS) === day
+        && Math.abs(timestamp.getTime() - earlier.getTime()) <= ONE_MINUTE_IN_MS) return '';
+
+    const age = Math.floor((now + offset) / DAY_IN_MS) - day;
+    if (age < 0 || age >= 7) return formatCompactMessageTimestamp(value, { relative: false });
+    const localDate = new Date(local);
+    const labels = window.CAUSETTE_UI?.dates || {};
+    const label = age === 0 ? labels.today || 'today' : age === 1 ? labels.yesterday || 'yesterday'
+        : labels[`weekday_${localDate.getUTCDay() || 7}`] || '';
+    return (labels.compact_date_time || '{date}, {time}').replace('{date}', () => label)
+        .replace('{time}', () => formatTimelineClock(localDate));
 }
 
 function getUtcTimestampTargets(root = document) {
@@ -961,10 +987,12 @@ function scheduleUtcTimestampRefresh() {
     }
 
     const now = Date.now();
-    let nextRefreshDelay = Infinity;
+    const localNow = now + displayTimezoneOffset();
+    let nextRefreshDelay = document.querySelector('[data-timeline-time]')
+        ? (Math.floor(localNow / DAY_IN_MS) + 1) * DAY_IN_MS - localNow : Infinity;
 
     document.querySelectorAll('[data-utc]').forEach((el) => {
-        if (el.dataset.dateOnly !== undefined) return;
+        if (el.dataset.dateOnly !== undefined || el.dataset.timelineTime !== undefined) return;
         const date = parseUtcTimestamp(el.dataset.utc);
         if (!date) return;
 
@@ -992,6 +1020,12 @@ function scheduleUtcTimestampRefresh() {
 function refreshUtcTimestamps(root = document) {
     const targets = getUtcTimestampTargets(root);
     targets.forEach((el) => {
+        if (el.dataset.timelineTime !== undefined) {
+            const converted = formatTimelineTimestamp(el.dataset.utc, el.dataset.previousUtc);
+            el.hidden = converted === '';
+            el.textContent = converted;
+            return;
+        }
         const converted = formatCompactMessageTimestamp(el.dataset.utc, {
             dateOnly: el.dataset.dateOnly !== undefined,
         });
