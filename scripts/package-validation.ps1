@@ -6,6 +6,9 @@ param(
     [Parameter(ParameterSetName = 'Build')]
     [DateTimeOffset] $BuildTime = [DateTimeOffset]::Now,
 
+    [Parameter(ParameterSetName = 'Build')]
+    [string] $PreviousPackage,
+
     [Parameter(Mandatory, ParameterSetName = 'Verify')]
     [string] $VerifyPath,
 
@@ -83,7 +86,7 @@ function Read-PackageText([IO.Compression.ZipArchiveEntry] $Entry) {
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
-function Assert-PackageContents([IO.Compression.ZipArchive] $Archive) {
+function Assert-PackageContents([IO.Compression.ZipArchive] $Archive, [switch] $RecordEntries) {
     $entries = [Collections.Generic.Dictionary[string, IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $Archive.Entries) {
@@ -111,6 +114,7 @@ function Assert-PackageContents([IO.Compression.ZipArchive] $Archive) {
 
     [void] $entries.Remove('MANIFEST.json')
     $manifestPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $recorded = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
     foreach ($file in $manifest.files) {
         if ($file.path -isnot [string] -or !$entries.ContainsKey($file.path)) {
             throw 'The manifest names a file absent from the payload.'
@@ -123,29 +127,41 @@ function Assert-PackageContents([IO.Compression.ZipArchive] $Archive) {
         if ($file.sha256 -ne $digest -or $file.bytes -ne $entry.Length) {
             throw "Manifest content mismatch: $($file.path)"
         }
+        if ($RecordEntries) {
+            $recorded.Add($file.path, @{ sha256 = $digest; modified = $entry.LastWriteTime })
+        }
     }
     if ($manifestPaths.Count -ne $entries.Count) { throw 'The manifest does not cover every payload file.' }
+    if ($RecordEntries) { return ,$recorded }
     return "Verified Causette $appVersion validation ZIP with $($entries.Count) payload files."
 }
 
-if ($PSCmdlet.ParameterSetName -eq 'Verify') {
-    $archivePath = (Resolve-Path -LiteralPath $VerifyPath).ProviderPath
-    if (!$ExpectedSha256) {
+function Read-VerifiedPackage([string] $Path, [string] $ExpectedDigest, [switch] $RecordEntries) {
+    $archivePath = (Resolve-Path -LiteralPath $Path).ProviderPath
+    if (!$ExpectedDigest) {
         $archiveName = [regex]::Escape([IO.Path]::GetFileName($archivePath))
         $checksum = [IO.File]::ReadAllText("$archivePath.sha256")
         if ($checksum -notmatch "\A([0-9a-fA-F]{64})  $archiveName\r?\n?\z") {
             throw 'The SHA-256 sidecar must identify this archive.'
         }
-        $ExpectedSha256 = $Matches[1]
+        $ExpectedDigest = $Matches[1]
     }
     $stream = [IO.File]::OpenRead($archivePath)
     try {
         $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))
-        if ($digest -ne $ExpectedSha256) { throw 'Archive SHA-256 mismatch.' }
+        if ($digest -ne $ExpectedDigest) { throw 'Archive SHA-256 mismatch.' }
         $stream.Position = 0
         $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Read, $true)
-        try { Assert-PackageContents $archive } finally { $archive.Dispose() }
+        try {
+            $verified = Assert-PackageContents $archive -RecordEntries:$RecordEntries
+            if ($RecordEntries) { return @{ sha256 = $digest.ToLowerInvariant(); entries = $verified } }
+            return $verified
+        } finally { $archive.Dispose() }
     } finally { $stream.Dispose() }
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'Verify') {
+    Read-VerifiedPackage $VerifyPath $ExpectedSha256
     return
 }
 
@@ -158,9 +174,8 @@ if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath $checksumP
     throw 'Choose a new output path. An archive or checksum already exists there.'
 }
 
-# ZIP timestamps have two-second precision. A real build date lets FTP clients
-# replace files from earlier builds when they compare modification times.
 $archiveTime = $BuildTime.AddTicks(-($BuildTime.Ticks % (2 * [TimeSpan]::TicksPerSecond)))
+$previous = if ($PreviousPackage) { Read-VerifiedPackage $PreviousPackage -RecordEntries }
 
 function Assert-RegularSource([string] $FullPath, [Collections.Generic.HashSet[string]] $CheckedDirectories) {
     if ([IO.File]::GetAttributes($FullPath).HasFlag([IO.FileAttributes]::ReparsePoint)) {
@@ -175,9 +190,19 @@ function Assert-RegularSource([string] $FullPath, [Collections.Generic.HashSet[s
     }
 }
 
-function Write-ArchiveEntry($Archive, [string] $Path, [byte[]] $Bytes) {
+function Write-ArchiveEntry($Archive, [string] $Path, [byte[]] $Bytes, [string] $Digest) {
+    $timestamp = $archiveTime
+    if ($previous -and $previous.entries.ContainsKey($Path)) {
+        $old = $previous.entries[$Path]
+        if ($old.sha256 -eq $Digest) {
+            $timestamp = $old.modified
+        } elseif ($old.modified.DateTime -ge $archiveTime.DateTime) {
+            # FTP compares the times after extraction, at ZIP's two-second precision.
+            $timestamp = $old.modified.AddSeconds(2)
+        }
+    }
     $entry = $Archive.CreateEntry($Path, [IO.Compression.CompressionLevel]::Optimal)
-    $entry.LastWriteTime = $archiveTime
+    $entry.LastWriteTime = $timestamp
     $stream = $entry.Open()
     try { $stream.Write($Bytes) } finally { $stream.Dispose() }
 }
@@ -249,7 +274,7 @@ try {
                 $appVersion = Read-AppVersion ([Text.Encoding]::UTF8.GetString($bytes))
             }
             $sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
-            Write-ArchiveEntry $archive $path $bytes
+            Write-ArchiveEntry $archive $path $bytes $sha256
             $files.Add([ordered] @{
                 path = $path
                 bytes = $bytes.Length
@@ -258,11 +283,12 @@ try {
         }
         $sbomPath = 'SBOM.cdx.json'
         $sbomBytes = [Text.Encoding]::UTF8.GetBytes((New-PackageSbom $appVersion $baseCommit) + "`n")
-        Write-ArchiveEntry $archive $sbomPath $sbomBytes
+        $sbomDigest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($sbomBytes)).ToLowerInvariant()
+        Write-ArchiveEntry $archive $sbomPath $sbomBytes $sbomDigest
         $files.Add([ordered] @{
             path = $sbomPath
             bytes = $sbomBytes.Length
-            sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($sbomBytes)).ToLowerInvariant()
+            sha256 = $sbomDigest
         })
         $manifest = [ordered] @{
             format = 1
@@ -273,8 +299,10 @@ try {
             builtAt = $archiveTime.ToString('o')
             buildTool = "PowerShell $($PSVersionTable.PSVersion)"
             files = $files.ToArray()
-        } | ConvertTo-Json -Depth 5
-        Write-ArchiveEntry $archive 'MANIFEST.json' ([Text.Encoding]::UTF8.GetBytes($manifest + "`n"))
+        }
+        if ($previous) { $manifest.previousPackageSha256 = $previous.sha256 }
+        $manifestJson = $manifest | ConvertTo-Json -Depth 5
+        Write-ArchiveEntry $archive 'MANIFEST.json' ([Text.Encoding]::UTF8.GetBytes($manifestJson + "`n"))
     } finally {
         $archive.Dispose()
     }

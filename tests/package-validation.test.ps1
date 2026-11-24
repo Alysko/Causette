@@ -140,16 +140,29 @@ try {
         $stylesheet = 'public_html/assets/css/causette.css'
         Write-Fixture 'public_html/index.php' '<?php echo "candidate overlay";'
         Write-Fixture $stylesheet 'Updated stylesheet fixture'
-        & $builder -OutputPath $overlay -BuildTime $baselineTime.AddMinutes(2)
+        $newPath = 'public_html/assets/js/new.js'
+        Write-Fixture $newPath 'New runtime fixture'
+        & $builder -OutputPath $overlay -BuildTime $baselineTime -PreviousPackage $baseline
+        & $builder -VerifyPath $overlay
         $destinationTree = Join-Path $fixture 'installed'
         $overlayTree = Join-Path $fixture 'incoming'
         [IO.Compression.ZipFile]::ExtractToDirectory($baseline, $destinationTree)
         [IO.Compression.ZipFile]::ExtractToDirectory($overlay, $overlayTree)
-        foreach ($path in @('public_html/index.php', $stylesheet, 'public_html/version.php')) {
+        foreach ($path in @('public_html/index.php', $stylesheet)) {
             $existing = Get-Item -LiteralPath (Join-Path $destinationTree $path)
             $incoming = Get-Item -LiteralPath (Join-Path $overlayTree $path)
             Assert-True ($incoming.LastWriteTimeUtc -gt $existing.LastWriteTimeUtc) "A newer package must be eligible for overwrite after extraction: $path."
         }
+        foreach ($path in @('public_html/version.php', 'storage/emojis/2615.svg', 'LICENSE', 'SBOM.cdx.json')) {
+            $existing = Get-Item -LiteralPath (Join-Path $destinationTree $path)
+            $incoming = Get-Item -LiteralPath (Join-Path $overlayTree $path)
+            Assert-True ($incoming.LastWriteTimeUtc -eq $existing.LastWriteTimeUtc) "An unchanged file must retain its previous package timestamp: $path."
+        }
+        $newEntry = Get-Item -LiteralPath (Join-Path $overlayTree $newPath)
+        $baselineEntry = Get-Item -LiteralPath (Join-Path $destinationTree 'LICENSE')
+        Assert-True ($newEntry.LastWriteTimeUtc -eq $baselineEntry.LastWriteTimeUtc) 'New files use the recorded build time.'
+        $overlayManifest = Get-Content -Raw -LiteralPath (Join-Path $overlayTree 'MANIFEST.json') | ConvertFrom-Json
+        Assert-True ($overlayManifest.previousPackageSha256 -eq (Get-FileHash -LiteralPath $baseline).Hash) 'The overlay must identify its verified baseline.'
     }
 
     $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
