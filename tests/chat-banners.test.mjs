@@ -483,6 +483,48 @@ test('a completed refresh cannot update a conversation opened after it started',
     assert.equal(context.currentChat.pinned_message, undefined);
 });
 
+test('background refreshes pass the rendered timeline revision and still apply live typing', async () => {
+    const { context, element } = fixture();
+    const revision = 'a'.repeat(64);
+    const changed = 'b'.repeat(64);
+    const rendered = [];
+    const typing = [];
+    let editing = false;
+    element('messages').querySelector = () => editing ? {} : null;
+    context.renderMessages = (messages) => rendered.push(messages[0].content);
+    context.renderPinnedMessageBanner = () => {};
+    context.renderActivePollBanner = () => {};
+    context.updatePersonalChatHeaderStatusFromMessages = () => {};
+    context.renderTypingIndicator = (users) => typing.push(users[0]?.username);
+    context.refreshChatCallStatusBar = () => {};
+    const responses = [
+        [undefined, { timeline_revision: revision, messages: [{ id: 8, content: 'First text' }] }],
+        [revision, { timeline_revision: revision, typing_users: [{ username: 'Lina' }] }],
+        [revision, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+        [revision, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+        [undefined, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+    ];
+    context.fetch = async (path, options) => {
+        assert.equal(path, '/api/messages/1');
+        const [expectedRevision, data] = responses.shift();
+        assert.equal(options?.headers?.['X-Causette-Timeline'], expectedRevision);
+        return { ok: true, json: async () => data };
+    };
+
+    await context.pollMessages({ background: true });
+    await context.pollMessages({ background: true });
+    assert.deepEqual(typing, [undefined, 'Lina']);
+    assert.deepEqual(rendered, ['First text']);
+    editing = true;
+    await context.pollMessages({ background: true });
+    assert.deepEqual(rendered, ['First text']);
+    editing = false;
+    await context.pollMessages({ background: true });
+    await context.pollMessages({ forceRender: true });
+    assert.deepEqual(rendered, ['First text', 'Changed text', 'Changed text']);
+    assert.equal(responses.length, 0);
+});
+
 test('an incoming message does not discard an active edit', async () => {
     const { context, element } = fixture();
     let editing = true;

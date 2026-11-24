@@ -201,7 +201,8 @@ test('changing poll units converts the current duration and keeps it in range', 
 
 test('group creation is available inside the shared desktop and mobile sidebar', () => {
     const layout = readFileSync(new URL('../public_html/app/views/layouts/main.php', import.meta.url), 'utf8');
-    const sidebar = layout.slice(layout.indexOf('id="app-sidebar"'), layout.indexOf('id="app-main-content"'));
+    const sidebarStart = layout.indexOf('id="app-sidebar"');
+    const sidebar = layout.slice(sidebarStart, layout.indexOf('</aside>', sidebarStart));
     assert.ok(/<button[^>]+data-app-action="create-group-chat"/.test(sidebar));
 });
 

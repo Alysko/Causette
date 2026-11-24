@@ -859,7 +859,8 @@ class ApiController extends Controller {
 
         if ($this->supportsSystemEvents()) {
             $systemEvents = Database::query(
-                "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event FROM chat_system_events WHERE chat_id = ?",
+                "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event
+                 FROM chat_system_events WHERE chat_id = ? ORDER BY created_at DESC, id DESC LIMIT 200",
                 [$chatId]
             )->fetchAll();
 
@@ -929,12 +930,17 @@ class ApiController extends Controller {
             $activePoll = $this->enrichActivePollPermissions($activePoll, $chatRow, $chatId, (int)$userId, $isCurrentUserAdmin);
         }
 
+        $timeline = ChatResponse::messages($messages);
+        $revision = hash('sha256', json_encode($timeline, JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR));
         $response = [
-            'messages' => ChatResponse::messages($messages),
+            'timeline_revision' => $revision,
             'typing_users' => $typingUsers,
             'pinned_message' => $pinnedMessage,
             'active_poll' => $activePoll,
         ];
+        if (($_SERVER['HTTP_X_CAUSETTE_TIMELINE'] ?? '') !== $revision) {
+            $response['messages'] = $timeline;
+        }
         if ($isGroupChat) {
             $response['group_edit_window'] = $groupEditWindow;
             $response['group_delete_window'] = $groupDeleteWindow;

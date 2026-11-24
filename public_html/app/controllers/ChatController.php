@@ -704,7 +704,8 @@ class ChatController extends Controller {
 
         if ($this->supportsSystemEvents()) {
             $systemEvents = Database::query(
-                "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event FROM chat_system_events WHERE chat_id = ?",
+                "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event
+                 FROM chat_system_events WHERE chat_id = ? ORDER BY created_at DESC, id DESC LIMIT 100",
                 [(int)$chat->id]
             )->fetchAll();
 
@@ -1503,7 +1504,8 @@ class ChatController extends Controller {
             $chatRow = Database::query("SELECT type FROM chats WHERE id = ?", [$chatId])->fetch();
             if ($chatRow && Chat::isGroupType($chatRow->type ?? null)) {
                 $systemEvents = Database::query(
-                    "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event FROM chat_system_events WHERE chat_id = ?",
+                    "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event
+                     FROM chat_system_events WHERE chat_id = ? ORDER BY created_at DESC, id DESC LIMIT 200",
                     [(int)$chatId]
                 )->fetchAll();
                 $combined = array_merge($messages, $systemEvents);

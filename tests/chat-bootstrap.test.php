@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../public_html/app/core/Model.php';
+require_once __DIR__ . '/../public_html/app/core/Controller.php';
 require_once __DIR__ . '/../public_html/app/models/Attachment.php';
 require_once __DIR__ . '/../public_html/app/models/Message.php';
 require_once __DIR__ . '/../public_html/app/models/User.php';
@@ -14,14 +15,39 @@ final class Setting
             'attachments_accepted_file_types' => 'png,jpg',
             'attachments_maximum_file_size_mb', 'system_messages_auto_combine_2' => '1',
             'attachments_expiry_enabled', 'attachments_expiry_hours' => null,
+            'display_defaults', 'display_preferences_2', 'webrtc_stun_servers' => null,
             default => throw new RuntimeException('Unexpected setting in chat view: ' . $key),
         };
     }
+
+    public static function getMany(array $keys): array { return []; }
 }
 
 function base_url(string $path): string { return $path; }
+function base_path(string $path): string { return $path; }
 
-function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, ?object $activePoll, array $messages = [], bool $asAdmin = false): string
+final class Auth
+{
+    public static function user(): object
+    {
+        return (object) ['id' => 2, 'username' => 'fixture', 'user_number' => '1000000000000002', 'role' => 'user'];
+    }
+}
+
+final class Database
+{
+    public static function query(string $query, array $bindings = []): object
+    {
+        return new class { public function fetchColumn(): false { return false; } };
+    }
+}
+
+final class ChatViewFixture extends Controller
+{
+    public function render(array $data): void { $this->view('chat', $data); }
+}
+
+function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, ?object $activePoll, array $messages = [], bool $asAdmin = false, bool $withLayout = false): string
 {
     $chat = (object) ['id' => 101, 'chat_number' => '1000000000000001', 'type' => 'group', 'created_by' => 1];
     $chatTitle = 'Fixture chat';
@@ -32,7 +58,12 @@ function renderChatBootstrap(array $pendingAttachments, ?object $pinnedMessage, 
 
     ob_start();
     try {
-        require __DIR__ . '/../public_html/app/views/chat.php';
+        if ($withLayout) {
+            $userTimezone = 'UTC+0';
+            (new ChatViewFixture())->render(get_defined_vars());
+        } else {
+            require __DIR__ . '/../public_html/app/views/chat.php';
+        }
         return (string) ob_get_contents();
     } finally {
         ob_end_clean();
@@ -143,6 +174,21 @@ foreach ([
         || strpbrk($json, "<>&'") !== false) {
         throw new RuntimeException('The chat catalog must be safely embedded in the selected language: ' . $language);
     }
+}
+
+define('APP_VERSION', (require __DIR__ . '/../public_html/version.php')['app_version']);
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$full = renderChatBootstrap([], (object) $pin, (object) $poll, withLayout: true);
+$_SERVER['HTTP_X_CAUSETTE_VIEW'] = 'main';
+$fragment = renderChatBootstrap([], (object) $pin, (object) $poll, withLayout: true);
+$mainElement = '~<main id="app-main-content"[^>]*>.*?</main>~s';
+preg_match($mainElement, $full, $fullMain);
+preg_match($mainElement, $fragment, $fragmentMain);
+if (!$fullMain || !$fragmentMain || $fullMain[0] !== $fragmentMain[0]
+    || !str_contains($full, 'id="app-sidebar"') || str_contains($fragment, 'id="app-sidebar"')
+    || str_contains($fragment, 'window.OPENMOJI_FILES')
+    || substr_count($fragment, 'data-app-script=') !== substr_count($full, 'data-app-script=')) {
+    throw new RuntimeException('Conversation navigation must return the same main view and script version markers without the authenticated shell.');
 }
 
 echo "Chat bootstrap checks passed.\n";

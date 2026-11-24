@@ -650,13 +650,15 @@ async function navigateApp(url, options = {}) {
     const detail = { from: fromUrl, to: toUrl, source };
 
     try {
+        const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+        if (appRoute(targetUrl.pathname)?.startsWith('/c/')) {
+            headers['X-Causette-View'] = 'main';
+        }
         const response = await fetch(toUrl, {
             method: 'GET',
             mode: 'same-origin',
             signal: controller.signal,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
+            headers,
         });
 
         if (controller.signal.aborted) return true;

@@ -2,8 +2,7 @@
 
 let messageInteractionHandlersBound = false;
 let openReactionPickerMessageId = 0;
-let lastRenderedChatId = 0;
-let lastRenderedMessagesSignature = '';
+const renderedMessageTimelines = new WeakMap();
 const expandedSystemEventGroupsByChat = new Map();
 let pendingPinReplaceMessageId = 0;
 let pinnedBannerLastScrollTop = 0;
@@ -4090,20 +4089,28 @@ async function pollMessages(options = {}) {
     if (!chat || !messagesList) return;
     if (options.background && backgroundMessagePolls.has(chat)) return;
     if (options.background) backgroundMessagePolls.add(chat);
+    const rendered = renderedMessageTimelines.get(messagesList);
+    const knownRevision = !options.forceRender && rendered?.chat === chat ? rendered.revision : null;
     const sequence = ++messageRefreshSequence;
     const bannerRevision = chatBannerRevision;
     let data;
     try {
-        const res = await fetch(appPath(`/api/messages/${chat.id}`));
+        const res = await fetch(appPath(`/api/messages/${chat.id}`), knownRevision
+            ? { headers: { 'X-Causette-Timeline': knownRevision } } : undefined);
         if (!res.ok) return;
         data = await res.json();
     } finally {
         if (options.background) backgroundMessagePolls.delete(chat);
     }
     if (currentChat !== chat || document.getElementById('messages') !== messagesList
-        || sequence < lastAppliedMessageRefresh || !Array.isArray(data?.messages)) return;
+        || sequence < lastAppliedMessageRefresh) return;
+    const messages = Array.isArray(data?.messages) ? data.messages : null;
+    const revision = typeof data?.timeline_revision === 'string' && /^[a-f0-9]{64}$/.test(data.timeline_revision)
+        ? data.timeline_revision : null;
+    const latestRendered = renderedMessageTimelines.get(messagesList);
+    if (!messages && (!knownRevision || revision !== knownRevision
+        || latestRendered?.chat !== chat || latestRendered?.revision !== revision)) return;
     lastAppliedMessageRefresh = sequence;
-    const messages = data.messages;
     const typingUsers = Array.isArray(data.typing_users) ? data.typing_users : [];
     const pinnedMessage = normalizePinnedMessage(data.pinned_message);
     const activePoll = normalizeActivePoll(data.active_poll);
@@ -4121,23 +4128,17 @@ async function pollMessages(options = {}) {
         currentChat.can_send_messages = Boolean(data.can_send_message);
         currentChat.message_restriction_reason = nextRestrictionReason;
     }
-    const forceRender = options.forceRender === true;
-    const activeChatId = Number(currentChat.id || 0);
-    const nextMessagesSignature = buildMessagesSignature(messages);
-    const hasNewMessageState = (
-        forceRender
-        || activeChatId !== lastRenderedChatId
-        || nextMessagesSignature !== lastRenderedMessagesSignature
-    );
-
-    // Keep the active editor in place until the user saves or cancels.
-    if (hasNewMessageState && !document.getElementById('messages')?.querySelector('.js-edit-input')) {
-        renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
-        lastRenderedChatId = activeChatId;
-        lastRenderedMessagesSignature = nextMessagesSignature;
+    if (messages) {
+        const signature = revision ?? buildMessagesSignature(messages);
+        const changed = options.forceRender || latestRendered?.chat !== chat || latestRendered.signature !== signature;
+        // A revision can be reused only once the matching timeline is visible.
+        if (changed && !messagesList.querySelector('.js-edit-input')) {
+            renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
+            renderedMessageTimelines.set(messagesList, { chat, signature, revision });
+        }
+        updatePersonalChatHeaderStatusFromMessages(messages);
     }
 
-    updatePersonalChatHeaderStatusFromMessages(messages);
     renderTypingIndicator(typingUsers);
     // A refresh already in flight may predate a successful pin or poll action.
     if (bannerRevision === chatBannerRevision) {

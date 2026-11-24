@@ -28,7 +28,7 @@ function navigationFixture() {
         CustomEvent: class {},
         AbortController, URL, setTimeout, clearTimeout, clearInterval,
         fetch: (url, options) => new Promise(resolve => {
-            requests.push({ url, signal: options.signal, resolve });
+            requests.push({ url, signal: options.signal, headers: options.headers, resolve });
         }),
     });
     runInContext(app.slice(0, app.indexOf('window.sendFriendRequest =')), context);
@@ -56,6 +56,20 @@ test('a group click acknowledges loading before the server responds', async () =
     assert.deepEqual(duringRequest, { label: 'Opening conversation…', busy: 'true' });
     assert.equal(status.textContent, '');
     assert.equal(attributes.has('aria-busy'), false);
+});
+
+test('conversation navigation requests the main fragment under the installed base path', async () => {
+    const { context, requests, reply } = navigationFixture();
+    const opening = context.navigateApp(firstChat);
+    const chatRequest = requests[0];
+    reply(chatRequest);
+    await opening;
+    const settings = context.navigateApp('/community/settings');
+    const settingsRequest = requests[1];
+    reply(settingsRequest);
+    await settings;
+    assert.equal(chatRequest.headers['X-Causette-View'], 'main');
+    assert.equal(settingsRequest.headers['X-Causette-View'], undefined);
 });
 
 test('the latest requested group wins even when the previous response arrives afterward', async () => {
