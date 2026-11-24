@@ -23,7 +23,13 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/reactions.css') ?>">
+    <?php require __DIR__ . '/../partials/typography.php'; ?>
 </head>
+<?php if ($renderMainOnly ?? false): ?>
+<body>
+    <?php require __DIR__ . '/../partials/app-main.php'; ?>
+</body>
+<?php else: ?>
 <?php
     $currentUser = $pageViewer;
     $appFontSizePreference = 'default';
@@ -320,9 +326,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
             </div>
         </aside>
 
-        <main id="app-main-content" class="flex-1 flex flex-col min-w-0">
-            <?= $content ?>
-        </main>
+        <?php require __DIR__ . '/../partials/app-main.php'; ?>
 
         <div id="sidebar-custom-rename-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
             <div class="h-full w-full flex items-center justify-center">
@@ -623,6 +627,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     window.CAUSETTE_UI = <?= \Causette\View\HtmlJson::encode([
         'language' => $locale->language(),
         'labels' => $locale->catalog('browser'),
+        'dates' => $locale->catalog('dates'),
     ]) ?>;
     window.CAUSETTE_CALLS = <?= \Causette\View\HtmlJson::encode([
         'labels' => $locale->catalog('calls'),
@@ -641,7 +646,9 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     window.NOTIFICATION_SIDEBAR_EXPANDED = <?= $notificationSidebarExpanded ? 'true' : 'false' ?>;
     window.USER_TIMEZONE = <?= \Causette\View\HtmlJson::encode($userTimezone) ?>;
     window.CURRENT_USER_ID = <?= \Causette\View\HtmlJson::encode((int)($currentUser->id ?? 0)) ?>;
+    window.CURRENT_USER_NUMBER = <?= \Causette\View\HtmlJson::encode((string)($currentUser->user_number ?? '')) ?>;
     window.CURRENT_USERNAME = <?= \Causette\View\HtmlJson::encode((string)($currentUser->username ?? '')) ?>;
+    window.CURRENT_USER_AVATAR_URL = <?= \Causette\View\HtmlJson::encode($currentUserAvatarUrl ?? '') ?>;
     window.TOP_LOADING_BAR_ENABLED = <?= $topLoadingBarEnabled ? 'true' : 'false' ?>;
     window.SYSTEM_MESSAGES_AUTO_COMBINE_ENABLED = <?= $systemMessagesAutoCombineEnabled ? 'true' : 'false' ?>;
     window.CURRENT_USER_PRESENCE_STATUS = <?= \Causette\View\HtmlJson::encode(User::normalizePresenceStatus($currentUser->presence_status ?? null) ?? 'online') ?>;
@@ -652,6 +659,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     window.OPENMOJI_METADATA = <?= \Causette\View\HtmlJson::encode($openMojiMetadata) ?>;
     window.CAUSETTE_EMOJI_ANNOTATIONS_URL = <?= \Causette\View\HtmlJson::encode($locale->language() === 'fr' ? base_path('/assets/locales/emoji-fr.json') : null) ?>;
 </script>
+<?php endif; ?>
 <?php foreach ($scripts as $script): ?>
     <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" data-app-script="<?= $script ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/' . $script) ?>"></script>
 <?php endforeach; ?>

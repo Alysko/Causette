@@ -28,6 +28,8 @@ class Controller {
         require $viewFile;
         $content = ob_get_clean();
 
+        $renderMainOnly = $view === 'chat' && $pageViewer && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+            && ($_SERVER['HTTP_X_CAUSETTE_VIEW'] ?? '') === 'main';
         require __DIR__ . '/../views/layouts/main.php';
     }
 

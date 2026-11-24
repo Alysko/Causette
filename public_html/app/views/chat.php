@@ -379,7 +379,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <?= nl2br(htmlspecialchars($renderStoredMentionsToPlain($initialPinnedMessageContent, $pinnedMessage->mention_map ?? []), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?>
                 </div>
             </div>
-            <div class="flex items-center gap-4 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+            <div class="message-actions flex items-center gap-4 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
                 <button type="button" id="pinned-message-goto" class="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200" title="<?= $chatLabel('goto_pin') ?>" aria-label="<?= $chatLabel('goto_pin') ?>">
                     <i class="fa-solid fa-highlighter" aria-hidden="true"></i>
                     <span class="hidden md:inline"><?= $chatLabel('goto_pin') ?></span>
@@ -539,6 +539,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 ];
             }
         ?>
+        <?php $previousTimelineTimestamp = ''; ?>
         <?php foreach ($displayEntries as $entry): ?>
             <?php if (($entry['type'] ?? '') === 'system_toggle'): ?>
                 <?php
@@ -584,7 +585,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     $isNewSystemCluster = $isStandalonePollEvent ? true : !$previousWasSystemEvent;
                     $isCallSystemEvent = strpos($systemEventType, 'call_') === 0;
                     $sysFullTimestamp = (string)($message->created_at ?? '');
-                    $sysCompactTimestamp = DisplayPreferences::formatTimestamp($sysFullTimestamp);
+                    $earlierTimelineTimestamp = $previousTimelineTimestamp;
+                    $sysCompactTimestamp = DisplayPreferences::formatTimelineTimestamp($sysFullTimestamp, $earlierTimelineTimestamp);
+                    if (!$isSystemEntryHiddenByDefault) $previousTimelineTimestamp = $sysFullTimestamp;
                     $systemContentRaw = \Causette\Calls\CallHistoryText::localize(
                         $systemEventType,
                         (string)($message->content ?? ''),
@@ -643,7 +646,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <div class="text-zinc-400 text-[15px] leading-6"><?= $systemContentHtml ?></div>
                         <div class="relative mt-0.5">
                             <div class="text-xs flex items-center gap-3">
-                                <span class="text-zinc-500" data-utc="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($sysCompactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="text-zinc-500" data-timeline-time data-utc="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>" data-previous-utc="<?= htmlspecialchars($earlierTimelineTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($sysFullTimestamp, ENT_QUOTES, 'UTF-8') ?>"<?= $sysCompactTimestamp === '' ? ' hidden' : '' ?>><?= htmlspecialchars($sysCompactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
                             </div>
                         </div>
                     </div>
@@ -662,7 +665,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     && ((int)$message->user_id !== (int)$currentUserId)
                     && (($latestClusterIndexByUser[(int)$message->user_id] ?? -1) === $index);
                 $fullTimestamp = (string)($message->created_at ?? '');
-                $compactTimestamp = DisplayPreferences::formatTimestamp($fullTimestamp);
+                $earlierTimelineTimestamp = $previousTimelineTimestamp;
+                $compactTimestamp = DisplayPreferences::formatTimelineTimestamp($fullTimestamp, $earlierTimelineTimestamp);
+                $previousTimelineTimestamp = $fullTimestamp;
                 $quotedContent = (string)($message->quoted_content ?? '');
                 $quotedBotName = (string)($message->quoted_bot_name ?? '');
                 $quotedUsername = $quotedBotName !== ''
@@ -684,8 +689,6 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                 <?= htmlspecialchars(User::avatarInitial($message->username), ENT_QUOTES, 'UTF-8') ?>
                             </div>
                         <?php endif; ?>
-                    <?php else: ?>
-                        <div class="w-10 h-10"></div>
                     <?php endif; ?>
                 </div>
                 <div class="min-w-0 flex-1">
@@ -715,7 +718,50 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <div class="text-zinc-300 leading-5 truncate" title="<?= htmlspecialchars($quotedDisplayContent, ENT_QUOTES, 'UTF-8') ?>"><?= nl2br(htmlspecialchars($quotedDisplayContent, ENT_QUOTES, 'UTF-8')) ?></div>
                         </div>
                     <?php endif; ?>
-                    <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="<?= htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8') ?>" data-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><?= nl2br(htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8')) ?></div>
+                    <div class="message-body">
+                        <div class="message-text text-zinc-200 js-message-content" data-raw-content="<?= htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8') ?>" data-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><?= nl2br(htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8')) ?></div>
+                        <?php if (!$isReadOnlyPublicViewer): ?>
+                            <div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('browser.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
+                                <?php if (empty($message->is_quoted)): ?>
+                                    <?php
+                                        $canEditThis = false;
+                                        if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
+                                            if ($isPersonalChat || $isCurrentUserAdmin) {
+                                                $canEditThis = true;
+                                            } else {
+                                                $ew = $groupEditWindow ?? 'never';
+                                                if ($ew === 'forever') { $canEditThis = true; }
+                                                elseif ($ew !== 'never' && (int)$ew > 0) { $canEditThis = (time() - strtotime($message->created_at)) <= (int)$ew; }
+                                            }
+                                        }
+                                    ?>
+                                    <?php if ($canEditThis): ?>
+                                    <button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="<?= $tr('ui.edit') ?>" aria-label="<?= $tr('ui.edit') ?>" data-edit-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <?php if (empty($message->is_quoted)): ?>
+                                    <?php
+                                        $canDeleteThis = false;
+                                        if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
+                                            if ($isPersonalChat || $isCurrentUserAdmin) {
+                                                $canDeleteThis = true;
+                                            } else {
+                                                $dw = $groupDeleteWindow ?? 'never';
+                                                if ($dw === 'forever') { $canDeleteThis = true; }
+                                                elseif ($dw !== 'never' && (int)$dw > 0) { $canDeleteThis = (time() - strtotime($message->created_at)) <= (int)$dw; }
+                                            }
+                                        }
+                                    ?>
+                                    <?php if ($canDeleteThis): ?>
+                                    <button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="<?= $tr('ui.delete') ?>" aria-label="<?= $tr('ui.delete') ?>" data-delete-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="<?= $chatLabel('pin') ?>" aria-label="<?= $chatLabel('pin') ?>" data-pin-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="<?= $tr('ui.react') ?>" aria-label="<?= $tr('ui.react') ?>" data-react-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                     <?php
                         $canDeleteAttachmentThisMessage = false;
                         if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
@@ -798,7 +844,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                         <a href="<?= $attachmentUrl ?>" download="<?= $attachmentDownloadName ?>" class="block w-full">
                                             <div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-1.5">
                                                 <i class="fa-solid fa-file text-2xl text-zinc-400"></i>
-                                                <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.<?= htmlspecialchars($attachmentExt, ENT_QUOTES, 'UTF-8') ?></span>
+                                                <span class="text-xs font-semibold text-zinc-300 uppercase">.<?= htmlspecialchars($attachmentExt, ENT_QUOTES, 'UTF-8') ?></span>
                                             </div>
                                         </a>
                                         <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">
@@ -819,54 +865,13 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                             <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
-                    <div class="relative mt-0.5">
+                    <div class="relative">
                         <div class="hidden js-reaction-picker mb-2" data-reaction-picker-for="<?= (int)$message->id ?>"></div>
 
-                        <div class="text-xs flex items-center gap-3">
-                            <span class="text-zinc-500" data-utc="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($compactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
+                        <div class="message-meta text-xs flex items-center gap-3">
+                            <span class="text-zinc-500" data-timeline-time data-utc="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>" data-previous-utc="<?= htmlspecialchars($earlierTimelineTimestamp, ENT_QUOTES, 'UTF-8') ?>" title="<?= htmlspecialchars($fullTimestamp, ENT_QUOTES, 'UTF-8') ?>"<?= $compactTimestamp === '' ? ' hidden' : '' ?>><?= htmlspecialchars($compactTimestamp, ENT_QUOTES, 'UTF-8') ?></span>
                             <?php if (!empty($message->edited_at)): ?>
                                 <span class="text-zinc-500 italic"><?= $tr('ui.edited') ?></span>
-                            <?php endif; ?>
-                            <?php if (!$isReadOnlyPublicViewer): ?>
-                            <div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('browser.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
-                                <?php if (empty($message->is_quoted)): ?>
-                                    <?php
-                                        $canEditThis = false;
-                                        if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
-                                            if ($isPersonalChat || $isCurrentUserAdmin) {
-                                                $canEditThis = true;
-                                            } else {
-                                                $ew = $groupEditWindow ?? 'never';
-                                                if ($ew === 'forever') { $canEditThis = true; }
-                                                elseif ($ew !== 'never' && (int)$ew > 0) { $canEditThis = (time() - strtotime($message->created_at)) <= (int)$ew; }
-                                            }
-                                        }
-                                    ?>
-                                    <?php if ($canEditThis): ?>
-                                    <button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="<?= $tr('ui.edit') ?>" aria-label="<?= $tr('ui.edit') ?>" data-edit-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                                <?php if (empty($message->is_quoted)): ?>
-                                    <?php
-                                        $canDeleteThis = false;
-                                        if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
-                                            if ($isPersonalChat || $isCurrentUserAdmin) {
-                                                $canDeleteThis = true;
-                                            } else {
-                                                $dw = $groupDeleteWindow ?? 'never';
-                                                if ($dw === 'forever') { $canDeleteThis = true; }
-                                                elseif ($dw !== 'never' && (int)$dw > 0) { $canDeleteThis = (time() - strtotime($message->created_at)) <= (int)$dw; }
-                                            }
-                                        }
-                                    ?>
-                                    <?php if ($canDeleteThis): ?>
-                                    <button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="<?= $tr('ui.delete') ?>" aria-label="<?= $tr('ui.delete') ?>" data-delete-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="<?= $chatLabel('pin') ?>" aria-label="<?= $chatLabel('pin') ?>" data-pin-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="<?= $tr('ui.react') ?>" aria-label="<?= $tr('ui.react') ?>" data-react-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-thumbs-up" aria-hidden="true"></i></button>
-                            </div>
                             <?php endif; ?>
                             <?php $messageReactions = is_array($message->reactions ?? null) ? $message->reactions : []; ?>
                             <?php if (!empty($messageReactions)): ?>

@@ -133,26 +133,71 @@ final class DisplayPreferences
 
     public static function formatTimestamp(string $value, bool $dateOnly = false): string
     {
-        if ($value === '' || !preg_match('/\A\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z)?)?\z/', $value)) {
+        $date = self::localTimestamp($value);
+        return $date === null ? $value : self::formatLocalTimestamp($date, $dateOnly);
+    }
+
+    public static function formatTimelineTimestamp(string $value, string $previous = '', ?DateTimeImmutable $now = null): string
+    {
+        $date = self::localTimestamp($value);
+        if ($date === null) {
             return $value;
+        }
+        $earlier = self::localTimestamp($previous);
+        if ($earlier !== null && $earlier->format('Y-m-d') === $date->format('Y-m-d')
+            && abs($date->getTimestamp() - $earlier->getTimestamp()) <= 60) {
+            return '';
+        }
+        $today = self::shiftTimestamp($now ?? new DateTimeImmutable('now'));
+        $age = (int)$date->setTime(0, 0)->diff($today->setTime(0, 0))->format('%r%a');
+        if ($age < 0 || $age >= 7) {
+            return self::formatLocalTimestamp($date, false);
+        }
+        $locale = Locale::current();
+        $label = match ($age) {
+            0 => $locale->text('dates.today'),
+            1 => $locale->text('dates.yesterday'),
+            default => $locale->text('dates.weekday_' . $date->format('N')),
+        };
+        return $locale->text('dates.compact_date_time', ['date' => $label, 'time' => self::formatTime($date)]);
+    }
+
+    private static function localTimestamp(string $value): ?DateTimeImmutable
+    {
+        if ($value === '' || !preg_match('/\A\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z)?)?\z/', $value)) {
+            return null;
         }
         try {
-            $date = new DateTimeImmutable($value, new DateTimeZone('UTC'));
+            return self::shiftTimestamp(new DateTimeImmutable($value, new DateTimeZone('UTC')));
         } catch (\DateMalformedStringException) {
-            return $value;
+            return null;
         }
+    }
+
+    private static function shiftTimestamp(DateTimeImmutable $date): DateTimeImmutable
+    {
+        $date = $date->setTimezone(new DateTimeZone('UTC'));
         if (preg_match('/\AUTC([+-])(\d{1,2})(?::(\d{2}))?\z/', self::$timezone, $offset)) {
             $minutes = ((int)$offset[2] * 60 + (int)($offset[3] ?? 0)) * ($offset[1] === '-' ? -1 : 1);
             $date = $date->modify(sprintf('%+d minutes', $minutes));
         }
+        return $date;
+    }
 
+    private static function formatTime(DateTimeImmutable $date): string
+    {
+        return $date->format(self::$effective['time_format'] === '12h' ? 'h:i A' : 'H:i');
+    }
+
+    private static function formatLocalTimestamp(DateTimeImmutable $date, bool $dateOnly): string
+    {
         $dateFormat = match (self::$effective['date_format']) {
             'dmy' => 'd/m/Y',
             'mdy' => 'm/d/Y',
             'ymd' => 'Y-m-d',
             default => null,
         };
-        $time = $date->format(self::$effective['time_format'] === '12h' ? 'h:i A' : 'H:i');
+        $time = self::formatTime($date);
         if ($dateFormat !== null) {
             return $date->format($dateFormat) . ($dateOnly ? '' : ' ' . $time);
         }

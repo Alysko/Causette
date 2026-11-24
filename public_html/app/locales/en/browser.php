@@ -205,6 +205,8 @@ return [
     'failed_to_edit_message' => 'Failed to edit message',
     'failed_to_save_settings' => 'Failed to save settings',
     'failed_to_send_message' => 'Failed to send message',
+    'message_sending' => 'Sending…',
+    'message_send_timeout' => 'Sending timed out. Check the conversation before sending again.',
     'failed_to_submit_report' => 'Failed to submit report',
     'favorite' => 'Favorite',
     'friend_removed' => 'Friend removed',

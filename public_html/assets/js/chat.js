@@ -2,8 +2,10 @@
 
 let messageInteractionHandlersBound = false;
 let openReactionPickerMessageId = 0;
-let lastRenderedChatId = 0;
-let lastRenderedMessagesSignature = '';
+const renderedMessageTimelines = new WeakMap();
+const outgoingMessagePreviews = new WeakMap();
+const submittingMessageForms = new WeakSet();
+const quotedMessageDrafts = new WeakMap();
 const expandedSystemEventGroupsByChat = new Map();
 let pendingPinReplaceMessageId = 0;
 let pinnedBannerLastScrollTop = 0;
@@ -733,6 +735,7 @@ function setQuoteDraft(quoteData) {
 
     const messageId = Number(quoteData?.messageId || 0);
     if (!Number.isFinite(messageId) || messageId <= 0) {
+        quotedMessageDrafts.delete(hiddenInput);
         hiddenInput.value = '';
         preview.classList.add('hidden');
         previewUsername.textContent = '';
@@ -745,6 +748,7 @@ function setQuoteDraft(quoteData) {
     const content = String(quoteData?.content || '');
     const mentionMap = normalizeMentionMap(quoteData?.mentionMap || {});
 
+    quotedMessageDrafts.set(hiddenInput, { quoted_username: username, quoted_content: content, quote_mention_map: mentionMap });
     hiddenInput.value = String(messageId);
     previewUsername.textContent = username;
     previewContent.replaceChildren(createMessageContent(getQuotedPreviewText(content, mentionMap), mentionMap));
@@ -1134,7 +1138,6 @@ async function createCurrentGroupPoll(form) {
     chatBannerRevision++;
     chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast(chatLabel('poll_created'), 'success');
     return true;
 }
 
@@ -1181,7 +1184,6 @@ async function expireActivePoll(pollId) {
     chatBannerRevision++;
     chat.active_poll = poll;
     renderActivePollBanner(poll);
-    showToast(chatLabel('poll_expired'), 'success');
 }
 
 function bindActivePollBannerActions() {
@@ -1383,7 +1385,6 @@ async function unpinCurrentChatMessage() {
     chatBannerRevision++;
     chat.pinned_message = null;
     renderPinnedMessageBanner(null);
-    showToast(chatLabel('pin_removed'), 'success');
 }
 
 function bindPinnedMessageBannerActions() {
@@ -1539,7 +1540,6 @@ async function pinMessageInCurrentChat(messageId, forceReplace = false) {
         chatBannerRevision++;
         chat.pinned_message = pinnedMessage;
         renderPinnedMessageBanner(pinnedMessage);
-        showToast(chatLabel(result.replaced ? 'pin_replaced' : 'pinned_success'), 'success');
         return;
     }
 
@@ -2010,7 +2010,7 @@ function renderPendingAttachmentList() {
                </button>`
             : `<div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-1.5">
                    <i class="fa-solid fa-file text-2xl text-zinc-400"></i>
-                   <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
+                   <span class="text-xs font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
                </div>`;
 
         const currentExpiry = Number(attachment.expiry_seconds || 0);
@@ -2765,7 +2765,6 @@ function bindSidebarCustomRenameModal() {
         if (submit.disabled) return;
 
         const submitted = String(input.value || '').trim();
-        const isReset = submitted === '';
 
         submit.disabled = true;
         submit.textContent = uiText('saving');
@@ -2777,7 +2776,6 @@ function bindSidebarCustomRenameModal() {
                 renderSidebarList();
             }
             closeModal();
-            showToast(isReset ? uiText('category_reset') : uiText('category_renamed'), 'success');
         } catch {
             showToast(uiText('unable_to_rename_category'), 'error');
         } finally {
@@ -3982,8 +3980,9 @@ function bindDeleteGroupModal() {
 }
 
 async function renameCurrentChat() {
-    if (!currentChat) return;
-    if (normalizeChatType(currentChat.type) !== 'group') {
+    const chat = currentChat;
+    if (!chat) return;
+    if (normalizeChatType(chat.type) !== 'group') {
         showToast(uiText('only_group_chats_can_be_renamed'), 'error');
         return;
     }
@@ -3996,12 +3995,12 @@ async function renameCurrentChat() {
 
     const result = await postForm('/api/chats/rename', {
         csrf_token: getCsrfToken(),
-        chat_id: String(currentChat.id),
+        chat_id: String(chat.id),
         title: safeTitle
     });
+    if (currentChat !== chat) return;
 
     if (result.success) {
-        showToast(result.reset ? uiText('chat_name_reset') : uiText('chat_renamed'), 'success');
         await reloadCurrentView({ source: 'rename-chat' });
         return;
     }
@@ -4089,26 +4088,151 @@ function bindRenameChatModal() {
 
 const backgroundMessagePolls = new WeakSet();
 
+function createOutgoingMessagePreview(timeline, content, attachments, quote) {
+    const previous = timeline.lastElementChild;
+    const userId = Number(currentUserId);
+    const isNewGroup = Number(previous?.dataset.messageUserId) !== userId || !!previous?.querySelector('[data-bot-badge]');
+    const earlierTimelineTimestamp = previous?.querySelector('[data-timeline-time]')?.dataset.utc || '';
+    const createdAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const markup = renderChatMessage({
+        ...quote,
+        user_id: userId,
+        user_number: window.CURRENT_USER_NUMBER,
+        username: localUsername || window.CURRENT_USERNAME,
+        avatar_url: window.CURRENT_USER_AVATAR_URL,
+        created_at: createdAt,
+        content,
+        attachments,
+    }, { isNewGroup, earlierTimelineTimestamp, pending: true });
+    return document.createRange().createContextualFragment(markup).firstElementChild;
+}
+
+async function submitChatMessage(form) {
+    const chat = currentChat;
+    const input = document.getElementById('message-input');
+    const timeline = document.getElementById('messages');
+    const errorBox = document.getElementById('message-send-error');
+    const quoteInput = document.getElementById('quoted-message-id');
+    const draft = input?.value ?? '';
+    const content = draft.trim();
+    const attachments = [...pendingAttachments];
+    if (!input || !chat || !timeline || submittingMessageForms.has(form) || (!content && !attachments.length)) return;
+    if (!isCurrentChatView(chat, form)) {
+        showToast(uiText('chat_context_changed'), 'error');
+        return;
+    }
+    if (content.length > 16384) {
+        showToast(uiText('message_exceeds_the_maximum_length_of_16_384'), 'error');
+        return;
+    }
+    if (chat.can_send_messages === false) {
+        showToast(getPersonalChatMessageRestrictionToast(chat.message_restriction_reason), 'error');
+        return;
+    }
+    if (errorBox) {
+        errorBox.textContent = '';
+        errorBox.classList.add('hidden');
+        errorBox.classList.remove('message-send-timeout');
+    }
+
+    const preview = createOutgoingMessagePreview(timeline, content, attachments, quotedMessageDrafts.get(quoteInput));
+    const status = preview.querySelector('.message-send-preview-status');
+    const entry = { preview, messageId: null };
+    const previews = outgoingMessagePreviews.get(timeline) ?? new Set();
+    previews.add(entry);
+    outgoingMessagePreviews.set(timeline, previews);
+    timeline.append(preview);
+    timeline.scrollTop = timeline.scrollHeight;
+
+    submittingMessageForms.add(form);
+    const wasReadOnly = input.readOnly;
+    input.readOnly = true;
+    const quoteId = String(quoteInput?.value || '');
+    const ids = new Set(attachments.map(item => item.id));
+    const statusTimer = setTimeout(() => {
+        if (isCurrentChatView(chat, form)) status.textContent = uiText('message_sending');
+    }, 1000);
+    let result;
+    let timedOut = false;
+    try {
+        result = await postForm('/api/messages', {
+            csrf_token: getCsrfToken(), chat_id: String(chat.id), content,
+            quoted_message_id: quoteId, attachment_ids: [...ids].join(','),
+        }, { timeoutMs: 15000 });
+    } catch (error) {
+        timedOut = error?.name === 'TimeoutError';
+    } finally {
+        clearTimeout(statusTimer);
+        input.readOnly = wasReadOnly;
+        submittingMessageForms.delete(form);
+    }
+    if (!isCurrentChatView(chat, form)) return;
+
+    if (result?.success !== true || Object.hasOwn(result, 'raw')) {
+        previews.delete(entry);
+        preview.remove();
+        if (timedOut && errorBox) {
+            errorBox.classList.add('message-send-timeout');
+            errorBox.classList.remove('hidden');
+            errorBox.textContent = uiText('message_send_timeout');
+        } else if (errorBox && ['attachment_upload_busy', 'attachment_unavailable', 'attachment_batch_too_large'].includes(result?.error)) {
+            errorBox.textContent = uiText(result.error);
+            errorBox.classList.remove('hidden');
+        } else {
+            showToast(uiActionError(result?.error, 'failed_to_send_message'), 'error');
+        }
+        return;
+    }
+
+    const messageId = Number(result.message_id);
+    if (Number.isSafeInteger(messageId) && messageId > 0) {
+        entry.messageId = messageId;
+        status.remove();
+    } else {
+        previews.delete(entry);
+        preview.remove();
+    }
+    if (input.value === draft) {
+        input.value = '';
+        typingActive = false;
+        clearTypingStopTimer();
+        void sendTypingStatus(false).catch(() => {});
+    }
+    pendingAttachments = pendingAttachments.filter(item => !ids.has(item.id));
+    renderPendingAttachmentList();
+    if (String(quoteInput?.value || '') === quoteId) clearQuoteDraft();
+    void pollMessages().catch(() => {});
+    void loadSidebarChats().catch(() => {});
+}
+
 async function pollMessages(options = {}) {
     const chat = currentChat;
     const messagesList = document.getElementById('messages');
     if (!chat || !messagesList) return;
     if (options.background && backgroundMessagePolls.has(chat)) return;
     if (options.background) backgroundMessagePolls.add(chat);
+    const rendered = renderedMessageTimelines.get(messagesList);
+    const knownRevision = !options.forceRender && rendered?.chat === chat ? rendered.revision : null;
     const sequence = ++messageRefreshSequence;
     const bannerRevision = chatBannerRevision;
     let data;
     try {
-        const res = await fetch(appPath(`/api/messages/${chat.id}`));
+        const res = await fetch(appPath(`/api/messages/${chat.id}`), knownRevision
+            ? { headers: { 'X-Causette-Timeline': knownRevision } } : undefined);
         if (!res.ok) return;
         data = await res.json();
     } finally {
         if (options.background) backgroundMessagePolls.delete(chat);
     }
     if (currentChat !== chat || document.getElementById('messages') !== messagesList
-        || sequence < lastAppliedMessageRefresh || !Array.isArray(data?.messages)) return;
+        || sequence < lastAppliedMessageRefresh) return;
+    const messages = Array.isArray(data?.messages) ? data.messages : null;
+    const revision = typeof data?.timeline_revision === 'string' && /^[a-f0-9]{64}$/.test(data.timeline_revision)
+        ? data.timeline_revision : null;
+    const latestRendered = renderedMessageTimelines.get(messagesList);
+    if (!messages && (!knownRevision || revision !== knownRevision
+        || latestRendered?.chat !== chat || latestRendered?.revision !== revision)) return;
     lastAppliedMessageRefresh = sequence;
-    const messages = data.messages;
     const typingUsers = Array.isArray(data.typing_users) ? data.typing_users : [];
     const pinnedMessage = normalizePinnedMessage(data.pinned_message);
     const activePoll = normalizeActivePoll(data.active_poll);
@@ -4126,23 +4250,18 @@ async function pollMessages(options = {}) {
         currentChat.can_send_messages = Boolean(data.can_send_message);
         currentChat.message_restriction_reason = nextRestrictionReason;
     }
-    const forceRender = options.forceRender === true;
-    const activeChatId = Number(currentChat.id || 0);
-    const nextMessagesSignature = buildMessagesSignature(messages);
-    const hasNewMessageState = (
-        forceRender
-        || activeChatId !== lastRenderedChatId
-        || nextMessagesSignature !== lastRenderedMessagesSignature
-    );
-
-    // Keep the active editor in place until the user saves or cancels.
-    if (hasNewMessageState && !document.getElementById('messages')?.querySelector('.js-edit-input')) {
-        renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
-        lastRenderedChatId = activeChatId;
-        lastRenderedMessagesSignature = nextMessagesSignature;
+    if (messages) {
+        const signature = revision ?? buildMessagesSignature(messages);
+        const changed = options.forceRender || latestRendered?.chat !== chat || latestRendered.signature !== signature;
+        // A revision can be reused only once the matching timeline is visible.
+        const awaitingSend = [...(outgoingMessagePreviews.get(messagesList) || [])].some(entry => entry.messageId === null);
+        if (changed && !awaitingSend && !messagesList.querySelector('.js-edit-input')) {
+            renderMessages(messages, { scrollMode: options.scrollMode || 'preserve' });
+            renderedMessageTimelines.set(messagesList, { chat, signature, revision });
+        }
+        updatePersonalChatHeaderStatusFromMessages(messages);
     }
 
-    updatePersonalChatHeaderStatusFromMessages(messages);
     renderTypingIndicator(typingUsers);
     // A refresh already in flight may predate a successful pin or poll action.
     if (bannerRevision === chatBannerRevision) {
@@ -4676,6 +4795,88 @@ function handleMessageInputTyping() {
     scheduleTypingStop();
 }
 
+function renderTimelineTimestamp(timestamp, previous) {
+    const label = formatTimelineTimestamp(timestamp, previous);
+    const utc = escapeHtml(timestamp);
+    return `<span class="text-zinc-500" data-timeline-time data-utc="${utc}" data-previous-utc="${escapeHtml(previous)}" title="${utc}"${label === '' ? ' hidden' : ''}>${escapeHtml(label)}</span>`;
+}
+
+function renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStatus = false, pending = false }) {
+    const messageId = Number(msg.id || 0);
+    const messageUserId = Number(msg.user_id);
+    const botName = bannerText(msg.bot_name);
+    const fullTimestamp = String(msg.created_at || '');
+    const profileUrl = botName ? '' : getProfileUrlForUser(msg);
+    const username = escapeHtml(bannerText(msg.username));
+    const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
+    const authorMarkup = botName
+        ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
+        : profileUrl
+            ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
+            : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
+    const avatarMarkup = botName
+        ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
+        : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '';
+    const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
+    const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
+    const mentionMap = normalizeMentionMap(msg?.mention_map || {});
+    const mentionMapJson = escapeHtml(JSON.stringify(mentionMap));
+    const reactionBadgesMarkup = renderReactionBadgesMarkup(messageId, Array.isArray(msg?.reactions) ? msg.reactions : []);
+    const editedAt = String(msg?.edited_at || '');
+    const isQuoted = !!(msg?.is_quoted);
+    const hasAttachments = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
+    const attachmentMarkup = renderMessageAttachments(msg.attachments, canDeleteAttachmentFromMessage(msg));
+    const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
+    const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
+    const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
+    const pinLabel = escapeHtml(chatLabel('pin'));
+
+    let editButton = '';
+    let deleteButton = '';
+    if (canEditMessage(msg, isQuoted)) {
+        editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="${escapeHtml(uiText('edit'))}" aria-label="${escapeHtml(uiText('edit'))}" data-edit-message-id="${messageId}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
+    }
+    if (canDeleteMessage(msg)) {
+        deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="${escapeHtml(uiText('delete'))}" aria-label="${escapeHtml(uiText('delete'))}" data-delete-message-id="${messageId}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
+    }
+
+    const interactionControlsMarkup = isGroupReadOnlyViewer && !pending
+        ? ''
+        : `<div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+                            ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${messageId}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
+                            ${editButton}
+                            ${deleteButton}
+                            ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${messageId}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
+                            <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${messageId}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
+                            ${pending ? '<span class="message-send-preview-status" role="status"></span>' : ''}
+                        </div>`;
+
+    return `
+        <div class="flex gap-3 ${isNewGroup ? 'mt-4' : 'mt-1'} group${pending ? ' message-send-preview' : ''}"${pending ? '' : ` data-message-id="${messageId}"`} data-message-user-id="${messageUserId}" data-message-created-at="${escapeHtml(fullTimestamp)}" data-message-is-quoted="${isQuoted ? '1' : '0'}" data-message-has-attachments="${hasAttachments ? '1' : '0'}" data-message-edited-at="${escapeHtml(editedAt)}">
+            <div class="w-10 shrink-0">
+                ${avatarMarkup}
+            </div>
+            <div class="min-w-0 flex-1">
+                ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
+                ${renderQuotedMessageBlock(msg)}
+                <div class="message-body">
+                    <div class="message-text text-zinc-200 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
+                    ${interactionControlsMarkup}
+                </div>
+                ${pending && attachmentMarkup ? `<div inert>${attachmentMarkup}</div>` : attachmentMarkup}
+                <div class="relative">
+                    ${pending ? '' : renderReactionPickerMarkup(messageId)}
+                    <div class="message-meta text-xs flex items-center gap-3">
+                        ${renderTimelineTimestamp(fullTimestamp, earlierTimelineTimestamp)}
+                        ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
+                        ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderMessages(messages, options = {}) {
     const box = document.getElementById('messages');
     if (!box) return;
@@ -4726,6 +4927,7 @@ function renderMessages(messages, options = {}) {
 
     let previousUserId = null;
     let previousWasSystemEvent = false;
+    let previousTimelineTimestamp = '';
     const chunks = [];
 
     renderEntries.forEach((entry) => {
@@ -4766,10 +4968,11 @@ function renderMessages(messages, options = {}) {
             const isNewSystemCluster = isStandalonePollEvent ? true : !previousWasSystemEvent;
             const isCallSystemEvent = systemEventType.startsWith('call_');
             const sysFullTimestamp = String(msg.created_at || '');
-            const sysCompactTimestamp = formatCompactMessageTimestamp(sysFullTimestamp);
             const groupKey = String(entry?.groupKey || '');
             const isCollapsibleMiddle = Boolean(entry?.isCollapsibleMiddle);
             const isHiddenByDefault = Boolean(entry?.hiddenByDefault);
+            const earlierTimelineTimestamp = previousTimelineTimestamp;
+            if (!isHiddenByDefault) previousTimelineTimestamp = sysFullTimestamp;
             const middleAttrs = isCollapsibleMiddle
                 ? ` data-system-event-group-key="${escapeHtml(groupKey)}" data-system-event-hidden="1"`
                 : '';
@@ -4806,7 +5009,7 @@ function renderMessages(messages, options = {}) {
                         <div class="text-zinc-400 text-[15px] leading-6">${renderPlainTextWithEmoji(systemContent)}</div>
                         <div class="relative mt-0.5">
                             <div class="text-xs flex items-center gap-3">
-                                <span class="text-zinc-500" data-utc="${escapeHtml(sysFullTimestamp)}" title="${escapeHtml(sysFullTimestamp)}">${escapeHtml(sysCompactTimestamp)}</span>
+                                ${renderTimelineTimestamp(sysFullTimestamp, earlierTimelineTimestamp)}
                             </div>
                         </div>
                     </div>
@@ -4828,73 +5031,9 @@ function renderMessages(messages, options = {}) {
             && messageUserId !== Number(currentUserId)
             && latestClusterIndexByUser.get(messageUserId) === index;
         const fullTimestamp = String(msg.created_at || '');
-        const compactTimestamp = formatCompactMessageTimestamp(fullTimestamp);
-        const profileUrl = botName ? '' : getProfileUrlForUser(msg);
-        const username = escapeHtml(bannerText(msg.username));
-        const quoteUsername = botName ? uiText('bot_name', { name: botName }) : bannerText(msg.username);
-        const authorMarkup = botName
-            ? `<span data-bot-badge class="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1 text-xs text-zinc-300">${escapeHtml(uiText('bot'))}</span><bdi class="min-w-0 break-words text-sm font-semibold leading-5 causette-accent">${escapeHtml(botName)}</bdi>`
-            : profileUrl
-                ? `<a href="${escapeHtml(profileUrl)}" class="text-sm font-bold leading-5 inline-block causette-accent hover:text-emerald-300 hover:underline underline-offset-2">${username}</a>`
-                : `<div class="text-sm font-bold leading-5 inline-block causette-accent">${username}</div>`;
-        const avatarMarkup = botName
-            ? '<div class="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 flex items-center justify-center mt-0.5" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>'
-            : isNewGroup ? renderAvatarMarkup(msg, 'w-10 h-10 mt-0.5', 'text-sm') : '<div class="w-10 h-10"></div>';
-        const statusLabel = showStatus ? presenceLabel(msg?.effective_status) : '';
-        const statusDotClass = String(msg?.effective_status_dot_class || 'bg-zinc-500');
-        const mentionMap = normalizeMentionMap(msg?.mention_map || {});
-        const mentionMapJson = escapeHtml(JSON.stringify(mentionMap));
-        const reactionBadgesMarkup = renderReactionBadgesMarkup(msg.id, Array.isArray(msg?.reactions) ? msg.reactions : []);
-        const editedAt = String(msg?.edited_at || '');
-        const isQuoted = !!(msg?.is_quoted);
-        const hasAttachments = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
-        const canDeleteAttachments = canDeleteAttachmentFromMessage(msg);
-        const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
-        const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
-        const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
-        const pinLabel = escapeHtml(chatLabel('pin'));
-
-        let editButton = '';
-        let deleteButton = '';
-        if (canEditMessage(msg, isQuoted)) {
-            editButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-edit-link" title="${escapeHtml(uiText('edit'))}" aria-label="${escapeHtml(uiText('edit'))}" data-edit-message-id="${Number(msg.id)}"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>`;
-        }
-        if (canDeleteMessage(msg)) {
-            deleteButton = `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-delete-link" title="${escapeHtml(uiText('delete'))}" aria-label="${escapeHtml(uiText('delete'))}" data-delete-message-id="${Number(msg.id)}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>`;
-        }
-
-        const interactionControlsMarkup = isGroupReadOnlyViewer
-            ? ''
-            : `<div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
-                                ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
-                                ${editButton}
-                                ${deleteButton}
-                                ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${Number(msg.id)}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
-                                <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${Number(msg.id)}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
-                            </div>`;
-
-        chunks.push(`
-            <div class="flex gap-3 ${isNewGroup ? 'mt-4' : 'mt-1'} group" data-message-id="${Number(msg.id)}" data-message-user-id="${messageUserId}" data-message-created-at="${escapeHtml(fullTimestamp)}" data-message-is-quoted="${isQuoted ? '1' : '0'}" data-message-has-attachments="${hasAttachments ? '1' : '0'}" data-message-edited-at="${escapeHtml(editedAt)}">
-                <div class="w-10 shrink-0">
-                    ${avatarMarkup}
-                </div>
-                <div class="min-w-0 flex-1">
-                    ${isNewGroup ? `<div class="flex items-center gap-2 mb-0.5">${authorMarkup}${showStatus ? `<span class="presence-dot inline-block w-1.5 h-1.5 rounded-full ${escapeHtml(statusDotClass)}" title="${escapeHtml(statusLabel)}"></span>` : ''}</div>` : ''}
-                    ${renderQuotedMessageBlock(msg)}
-                    <div class="text-zinc-200 text-[17px] leading-6 js-message-content" data-raw-content="${escapeHtml(msg.content)}" data-mention-map="${mentionMapJson}">${renderMessageContent(msg.content, mentionMap)}</div>
-                    ${renderMessageAttachments(msg.attachments, canDeleteAttachments)}
-                    <div class="relative mt-0.5">
-                        ${renderReactionPickerMarkup(msg.id)}
-                        <div class="text-xs flex items-center gap-3">
-                            <span class="text-zinc-500" data-utc="${escapeHtml(fullTimestamp)}" title="${escapeHtml(fullTimestamp)}">${escapeHtml(compactTimestamp)}</span>
-                            ${editedAt ? `<span class="text-zinc-500 italic">${escapeHtml(uiText('edited'))}</span>` : ''}
-                            ${interactionControlsMarkup}
-                            ${isGroupReadOnlyViewer ? '' : reactionBadgesMarkup}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `);
+        const earlierTimelineTimestamp = previousTimelineTimestamp;
+        previousTimelineTimestamp = fullTimestamp;
+        chunks.push(renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStatus }));
 
         previousUserId = botName ? null : messageUserId;
         previousWasSystemEvent = false;
@@ -4902,6 +5041,14 @@ function renderMessages(messages, options = {}) {
 
     const messagesMarkup = chunks.join('');
     const fragment = document.createRange().createContextualFragment(messagesMarkup);
+    const previews = outgoingMessagePreviews.get(box);
+    if (previews?.size) {
+        const displayedIds = new Set(messages.filter(message => !message.is_system_event).map(message => Number(message.id)));
+        for (const entry of previews) {
+            if (displayedIds.has(entry.messageId)) previews.delete(entry);
+            else fragment.append(entry.preview);
+        }
+    }
     box.replaceChildren(fragment);
     if (typeof window.refreshUtcTimestamps === 'function') {
         window.refreshUtcTimestamps(box);

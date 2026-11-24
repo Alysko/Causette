@@ -5,6 +5,30 @@ import { createContext, runInContext } from 'node:vm';
 
 const source = readFileSync(new URL('../public_html/assets/js/app.js', import.meta.url), 'utf8');
 
+test('the timeline shows local calendar days and suppresses only closely spaced times on the same day', () => {
+    const context = createContext({
+        window: {
+            USER_TIMEZONE: 'UTC+2',
+            CAUSETTE_UI: { language: 'fr', dates: {
+                today: 'aujourd’hui', yesterday: 'hier', weekday_1: 'lundi', weekday_4: 'jeudi',
+                compact_date_time: '{date} à {time}',
+            } },
+        },
+        document: { documentElement: { dataset: { dateFormat: 'dmy', timeFormat: '24h' } } },
+    });
+    runInContext(source.slice(source.indexOf('const ONE_MINUTE_IN_MS'), source.indexOf('function getUtcTimestampTargets')), context);
+    const now = Date.parse('2026-11-25T12:00:00Z');
+    const format = (value, previous) => context.formatTimelineTimestamp(value, previous, now);
+    assert.equal(format('2026-11-25 08:15:00'), 'aujourd’hui à 10:15');
+    assert.equal(format('2026-11-24 08:15:00'), 'hier à 10:15');
+    assert.equal(format('2026-11-23 08:15:00'), 'lundi à 10:15');
+    assert.equal(format('2026-11-19 08:15:00'), 'jeudi à 10:15');
+    assert.equal(format('2026-11-18 08:15:00'), '18/11/2026 10:15');
+    assert.equal(format('2026-11-25 08:16:00', '2026-11-25 08:15:00'), '');
+    assert.equal(format('2026-11-25 08:16:01', '2026-11-25 08:15:00'), 'aujourd’hui à 10:16');
+    assert.equal(format('2026-11-24 22:00:10', '2026-11-24 21:59:50'), 'aujourd’hui à 00:00');
+});
+
 function element({ hidden = false, attributes = {} } = {}) {
     const classes = new Set(hidden ? ['hidden'] : []);
     const handlers = new Map();

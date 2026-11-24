@@ -83,10 +83,14 @@ final class FixtureRows
 
 final class Database
 {
+    public static string $messageContent = 'Fixture text';
+    public static string $visibility = 'public';
+    public static array $typing = [];
+
     public static function query(string $sql, array $bindings = []): FixtureRows
     {
         $row = (object) [
-            'id' => 50, 'chat_id' => 8, 'user_id' => 9, 'content' => 'Fixture text',
+            'id' => 50, 'chat_id' => 8, 'user_id' => 9, 'content' => self::$messageContent,
             'created_at' => '2026-01-01 00:00:00', 'quoted_content' => 'Earlier message',
             'quoted_username' => 'earlier', 'username' => 'formeruser', 'user_number' => '1111222233334444',
             'user_email' => 'deleted-retained-9@prologue.local.invalid',
@@ -95,7 +99,7 @@ final class Database
         return new FixtureRows(match (true) {
             str_contains($sql, 'INFORMATION_SCHEMA') => (int)(str_contains($sql, "'non_member_visibility'") || str_contains($sql, "'chat_system_events'")),
             str_starts_with($sql, 'SELECT id, type, non_member_visibility') =>
-                (object) ['id' => 8, 'type' => 'group', 'non_member_visibility' => 'public'],
+                (object) ['id' => 8, 'type' => 'group', 'non_member_visibility' => self::$visibility],
             str_starts_with($sql, 'SELECT id, type, created_by') =>
                 (object) ['id' => 8, 'type' => 'group', 'created_by' => 2],
             str_starts_with($sql, 'SELECT id FROM chat_members') => Auth::$viewer === 2 ? (object) ['id' => 1] : false,
@@ -119,8 +123,9 @@ final class Database
                 'id' => 99, 'chat_id' => 8, 'content' => 'Fixture system event', 'event_type' => 'renamed',
                 'created_at' => '2026-01-02 00:00:00', 'is_system_event' => 1, 'internal_fixture_note' => 'Internal fixture value',
             ]],
+            str_contains($sql, 'FROM chat_typing_status') => self::$typing,
             str_contains($sql, 'FROM message_reactions') || str_contains($sql, 'SELECT DISTINCT quoted_message_id')
-                || str_contains($sql, 'FROM chat_typing_status') || str_contains($sql, 'FROM friend_favorites') => [],
+                || str_contains($sql, 'FROM friend_favorites') => [],
             str_contains($sql, 'JOIN call_participants') || str_contains($sql, 'FROM call_participants') => false,
             default => throw new LogicException('Unexpected fixture database query'),
         });
@@ -199,6 +204,40 @@ foreach ($cases as $name => $case) {
         $failures++;
         fwrite(STDERR, $name . ': ' . $failure->getMessage() . "\n");
     }
+}
+
+try {
+    $history = static function () use ($controller): CapturedMessageResponse {
+        try {
+            $controller->getMessages(['chat_id' => 8]);
+            throw new LogicException('No conversation response captured');
+        } catch (CapturedMessageResponse $response) {
+            return $response;
+        }
+    };
+    Auth::$viewer = 2;
+    $original = $history()->data;
+    $revision = $original['timeline_revision'] ?? '';
+    expectMessageResponse(is_string($revision) && preg_match('/\A[a-f0-9]{64}\z/', $revision) === 1,
+        'A full message response must provide a timeline revision.');
+    $_SERVER['HTTP_X_CAUSETTE_TIMELINE'] = $revision;
+    Database::$typing = [(object) ['id' => 3, 'username' => 'Lina', 'avatar_filename' => null]];
+    $unchanged = $history()->data;
+    expectMessageResponse(!array_key_exists('messages', $unchanged) && $unchanged['timeline_revision'] === $revision
+        && $unchanged['typing_users'][0]->username === 'Lina' && $unchanged['can_send_message'] === true,
+        'An unchanged timeline must omit message bytes while keeping live metadata.');
+
+    Database::$messageContent = 'Changed text';
+    $updated = $history()->data;
+    expectMessageResponse(($updated['messages'][0]->content ?? '') === 'Changed text' && $updated['timeline_revision'] !== $revision,
+        'A replaced message must invalidate the timeline revision even when its ID and date match.');
+    Database::$visibility = 'private';
+    Auth::$viewer = 3;
+    expectMessageResponse($history()->getCode() === 403, 'A timeline revision must not give access to a private conversation.');
+    echo "Conditional message history: passed\n";
+} catch (Throwable $failure) {
+    $failures++;
+    fwrite(STDERR, 'Conditional message history: ' . $failure->getMessage() . "\n");
 }
 
 exit($failures === 0 ? 0 : 1);

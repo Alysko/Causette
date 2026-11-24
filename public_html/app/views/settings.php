@@ -710,7 +710,7 @@ $callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
                     <div class="space-y-2">
                         <?php foreach ($activeBannedIps as $bannedIp): ?>
                             <div class="rounded-xl border border-zinc-700 bg-zinc-800/30 px-4 py-3 flex items-center justify-between gap-4">
-                                <span class="text-zinc-200 font-mono"><?= htmlspecialchars((string)$bannedIp->ip_address, ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="text-zinc-200"><?= htmlspecialchars((string)$bannedIp->ip_address, ENT_QUOTES, 'UTF-8') ?></span>
                                 <span class="text-zinc-100 text-sm">
                                     <?php $minutesLeft = (int)($bannedIp->minutes_left ?? 0); ?>
                                     <?= $tr($minutesLeft === 1 ? 'ui.time_remaining_minute_one' : 'ui.time_remaining_minute_other', ['count' => $minutesLeft]) ?>
@@ -878,7 +878,7 @@ $callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
                 </div>
                 <div>
                     <label for="push_vapid_private_key" class="block text-sm text-zinc-400 mb-1"><?= $tr('ui.vapid_private_key_pem') ?></label>
-                    <textarea id="push_vapid_private_key" name="push_vapid_private_key" rows="5" placeholder="<?= $tr('ui.leave_blank_to_keep_current_key') ?>" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100 font-mono text-xs"></textarea>
+                    <textarea id="push_vapid_private_key" name="push_vapid_private_key" rows="5" placeholder="<?= $tr('ui.leave_blank_to_keep_current_key') ?>" autocomplete="off" class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2.5 text-zinc-100 text-xs"></textarea>
                 </div>
                 <div class="pt-2">
                     <button type="submit" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-medium transition"><?= $tr('ui.save_push_settings') ?></button>
@@ -919,7 +919,7 @@ $callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
                         <?php $inviteUsed = $invite->used_at !== null || $invite->used_by !== null; ?>
                         <div class="flex items-center justify-between gap-3 bg-zinc-800 rounded-lg px-3 py-2">
                             <div class="flex items-center gap-2">
-                                <span class="font-mono"><?= htmlspecialchars($invite->code, ENT_QUOTES, 'UTF-8') ?></span>
+                                <span ><?= htmlspecialchars($invite->code, ENT_QUOTES, 'UTF-8') ?></span>
                                 <button type="button" class="text-zinc-400 hover:text-zinc-200" title="<?= $tr('ui.copy_to_clipboard') ?>" data-copy-invite data-copy-value="<?= htmlspecialchars($invite->code, ENT_QUOTES, 'UTF-8') ?>">
                                     <i class="fa-regular fa-copy"></i>
                                 </button>
@@ -1226,7 +1226,7 @@ $callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
                 <!-- Recovery codes display (shown once after setup) -->
                 <div class="space-y-4">
                     <p class="text-zinc-300"><?= $tr('ui.save_these_recovery_codes_in_a') ?></p>
-                    <div class="bg-zinc-950 border border-zinc-700 rounded-xl p-4 font-mono text-sm grid grid-cols-2 gap-2" id="recovery-codes-grid">
+                    <div class="bg-zinc-950 border border-zinc-700 rounded-xl p-4 text-sm grid grid-cols-2 gap-2" id="recovery-codes-grid">
                         <?php foreach ($totpRecoveryCodes as $code): ?>
                             <span class="text-zinc-200"><?= htmlspecialchars($code, ENT_QUOTES, 'UTF-8') ?></span>
                         <?php endforeach; ?>
@@ -1246,7 +1246,7 @@ $callVideoDefaults = \Causette\Calls\CallVideoPreferences::read((int)$user->id);
                     <?php endif; ?>
                     <div>
                         <p class="text-xs text-zinc-500 mb-1"><?= $tr('ui.or_enter_this_key_manually') ?></p>
-                        <div class="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm text-zinc-300 break-all select-all"><?= htmlspecialchars($totpSecretDisplay, ENT_QUOTES, 'UTF-8') ?></div>
+                        <div class="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-300 break-all select-all"><?= htmlspecialchars($totpSecretDisplay, ENT_QUOTES, 'UTF-8') ?></div>
                     </div>
                     <form method="POST" action="<?= htmlspecialchars(base_path('/settings/2fa/totp/confirm'), ENT_QUOTES, 'UTF-8') ?>" class="space-y-3">
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">

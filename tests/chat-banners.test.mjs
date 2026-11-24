@@ -75,6 +75,7 @@ function fixture(i18n = {}) {
         getProfileUrlByUserNumber: (number) => '/u/' + number,
         escapeHtml: (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
         formatCompactMessageTimestamp: (value) => value,
+        formatTimelineTimestamp: (value) => value,
         normalizeChatType: (type) => type,
     });
     runInContext(source, context);
@@ -82,6 +83,95 @@ function fixture(i18n = {}) {
     context.findOpenMojiForGrapheme = (value) => value === '☕' ? { url: '/emojis/2615.svg' } : null;
     return { context, element };
 }
+
+test('renaming a group and removing a pin update the view without duplicate success toasts', async () => {
+    const { context, element } = fixture();
+    element('rename-chat-input').value = 'Nouveau groupe';
+    const updates = [];
+    const notices = [];
+    context.getCsrfToken = () => 'fixture';
+    context.uiText = (key) => key;
+    context.uiActionError = (_error, fallback) => fallback;
+    context.showToast = (text, type) => notices.push([text, type]);
+    context.reloadCurrentView = async () => updates.push('title');
+    context.renderPinnedMessageBanner = (pin) => updates.push(pin);
+    context.postForm = async () => ({ success: true });
+    await context.renameCurrentChat();
+    await context.unpinCurrentChatMessage();
+    assert.deepEqual(updates, ['title', null]);
+    assert.deepEqual(notices, []);
+
+    context.postForm = async () => ({ success: false });
+    await context.renameCurrentChat();
+    assert.deepEqual(notices, [['unable_to_rename_chat', 'error']]);
+});
+
+test('sending previews the draft immediately, delays the status, and keeps the draft on failure', async () => {
+    const { context, element } = fixture();
+    const timeline = element('messages');
+    const input = element('message-input');
+    input.value = '   Hello & goodbye   ';
+    input.readOnly = false;
+    context.pendingAttachments = [];
+    context.getCsrfToken = () => 'fixture';
+    context.uiText = (key) => key;
+    context.uiActionError = (_error, fallback) => fallback;
+    context.isCurrentChatView = () => true;
+    context.createOutgoingMessagePreview = (_timeline, content) => {
+        const preview = node('div');
+        const status = node('span');
+        preview.append(content, status);
+        preview.querySelector = (selector) => selector === '.message-send-preview-status' ? status : null;
+        preview.remove = () => { preview.removed = true; };
+        return preview;
+    };
+    const notices = [];
+    let finish;
+    let requests = 0;
+    const timers = new Map();
+    const fired = [];
+    context.setTimeout = (callback, delay) => { timers.set(delay, callback); return delay; };
+    context.clearTimeout = (timer) => timers.delete(timer);
+    const advance = (ms) => {
+        for (const [delay, callback] of timers) {
+            if (delay > ms) continue;
+            timers.delete(delay);
+            fired.push(delay);
+            callback();
+        }
+    };
+    context.showToast = (text, type) => notices.push([text, type]);
+    context.postForm = async () => { requests++; return new Promise(resolve => { finish = resolve; }); };
+    const sending = context.submitChatMessage(element('message-form'));
+    assert.equal(timeline.children[0].textContent, 'Hello & goodbye');
+    advance(999);
+    assert.equal(timeline.children[0].textContent, 'Hello & goodbye');
+    assert.equal(input.readOnly, true);
+    await context.submitChatMessage(element('message-form'));
+    assert.equal(requests, 1);
+    advance(1000);
+    assert.deepEqual(fired, [1000]);
+    assert.equal(timeline.children[0].textContent, 'Hello & goodbyemessage_sending');
+    finish({ success: true, raw: '<title>Sign in</title>' });
+    await sending;
+    assert.equal(timeline.children[0].removed, true);
+    assert.equal(input.value, '   Hello & goodbye   ');
+    assert.deepEqual(notices, [['failed_to_send_message', 'error']]);
+
+    context.postForm = async (_route, _data, options) => {
+        assert.equal(options?.timeoutMs, 15000);
+        throw Object.assign(new Error('Synthetic timeout'), { name: 'TimeoutError' });
+    };
+    await context.submitChatMessage(element('message-form'));
+    const alert = element('message-send-error');
+    assert.equal(alert.textContent, 'message_send_timeout');
+    assert.equal(alert.classList.contains('message-send-timeout'), true);
+    assert.equal(alert.classList.contains('hidden'), false);
+    assert.equal(input.value, '   Hello & goodbye   ');
+    assert.equal(input.readOnly, false);
+    assert.deepEqual(notices, [['failed_to_send_message', 'error']]);
+    assert.equal(timers.size, 0);
+});
 
 test('pinned messages use text nodes and preserve supported rich content', () => {
     const { context, element } = fixture();
@@ -459,6 +549,48 @@ test('a completed refresh cannot update a conversation opened after it started',
     await refresh;
     assert.deepEqual(updated, []);
     assert.equal(context.currentChat.pinned_message, undefined);
+});
+
+test('background refreshes pass the rendered timeline revision and still apply live typing', async () => {
+    const { context, element } = fixture();
+    const revision = 'a'.repeat(64);
+    const changed = 'b'.repeat(64);
+    const rendered = [];
+    const typing = [];
+    let editing = false;
+    element('messages').querySelector = () => editing ? {} : null;
+    context.renderMessages = (messages) => rendered.push(messages[0].content);
+    context.renderPinnedMessageBanner = () => {};
+    context.renderActivePollBanner = () => {};
+    context.updatePersonalChatHeaderStatusFromMessages = () => {};
+    context.renderTypingIndicator = (users) => typing.push(users[0]?.username);
+    context.refreshChatCallStatusBar = () => {};
+    const responses = [
+        [undefined, { timeline_revision: revision, messages: [{ id: 8, content: 'First text' }] }],
+        [revision, { timeline_revision: revision, typing_users: [{ username: 'Lina' }] }],
+        [revision, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+        [revision, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+        [undefined, { timeline_revision: changed, messages: [{ id: 8, content: 'Changed text' }] }],
+    ];
+    context.fetch = async (path, options) => {
+        assert.equal(path, '/api/messages/1');
+        const [expectedRevision, data] = responses.shift();
+        assert.equal(options?.headers?.['X-Causette-Timeline'], expectedRevision);
+        return { ok: true, json: async () => data };
+    };
+
+    await context.pollMessages({ background: true });
+    await context.pollMessages({ background: true });
+    assert.deepEqual(typing, [undefined, 'Lina']);
+    assert.deepEqual(rendered, ['First text']);
+    editing = true;
+    await context.pollMessages({ background: true });
+    assert.deepEqual(rendered, ['First text']);
+    editing = false;
+    await context.pollMessages({ background: true });
+    await context.pollMessages({ forceRender: true });
+    assert.deepEqual(rendered, ['First text', 'Changed text', 'Changed text']);
+    assert.equal(responses.length, 0);
 });
 
 test('an incoming message does not discard an active edit', async () => {

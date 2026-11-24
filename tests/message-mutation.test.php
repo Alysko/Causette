@@ -275,15 +275,17 @@ foreach ([
     try {
         (new MutationController())->sendMessage();
         $response = 'no response';
+        $acknowledged = null;
     } catch (MutationResponse $result) {
         $response = $result->status;
+        $acknowledged = $result->payload['message_id'] ?? null;
     }
     $stored = Database::query('SELECT id, content FROM messages')->fetch();
     $upload = Database::query('SELECT message_id, status FROM attachments WHERE id = 1')->fetch();
     $submitted = $expected === 200;
     if ($response !== $expected || ($submitted
         ? (!$stored || $stored->content !== '' || $upload->status !== 'submitted'
-            || $upload->message_id !== $stored->id || empty(Notification::$previews[2]))
+            || $upload->message_id !== $stored->id || empty(Notification::$previews[2]) || $acknowledged !== (int)$stored->id)
         : ($stored || $upload->status !== 'pending' || $upload->message_id !== null || Notification::$previews !== []))) {
         $failures++;
         fwrite(STDERR, "sendMessage — $name: expected HTTP $expected with matching stored state, got $response.\n");
