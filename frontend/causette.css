@@ -4,6 +4,28 @@
 
 :root { color-scheme: dark; }
 
+:root:is([data-theme="dark"], :not([data-theme])) {
+    --color-gray-200: 232 239 245;
+    --color-zinc-100: 247 250 252;
+    --color-zinc-200: 232 239 245;
+    --color-zinc-300: 210 224 234;
+    --color-zinc-400: 180 198 211;
+    --color-zinc-500: 154 175 191;
+    --color-zinc-600: 120 144 163;
+    --color-zinc-700: 106 129 148;
+    --color-zinc-800: 32 46 59;
+    --color-zinc-900: 22 32 43;
+    --color-zinc-950: 14 22 31;
+    --color-emerald-300: 143 231 202;
+    --color-emerald-400: 112 217 183;
+    --color-emerald-500: 23 111 86;
+    --color-emerald-600: 18 101 78;
+    --color-emerald-700: 15 84 65;
+    --color-emerald-800: 21 66 56;
+    --color-emerald-900: 22 54 48;
+    --color-emerald-950: 15 39 37;
+}
+
 :root[data-theme="light"] {
     color-scheme: light;
     --color-gray-200: var(--color-zinc-200);

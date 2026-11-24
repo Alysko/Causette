@@ -23,6 +23,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/reactions.css') ?>">
+    <?php require __DIR__ . '/../partials/typography.php'; ?>
 </head>
 <?php if ($renderMainOnly ?? false): ?>
 <body>

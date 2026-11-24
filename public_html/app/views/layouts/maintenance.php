@@ -6,6 +6,7 @@
     <title><?= htmlspecialchars($title, ENT_QUOTES, 'UTF-8') ?></title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?= htmlspecialchars(base_path('/assets/img/favicon.png'), ENT_QUOTES, 'UTF-8') ?>">
     <link rel="stylesheet" href="<?= htmlspecialchars(base_path('/assets/css/install.css'), ENT_QUOTES, 'UTF-8') ?>">
+    <?php require __DIR__ . '/../partials/typography.php'; ?>
 </head>
 <body>
 <main>

@@ -79,6 +79,9 @@ try {
     Write-Fixture 'storage/emojis/openmoji.csv' 'emoji'
     Write-Fixture 'storage/emojis/LICENSE.txt' 'OpenMoji license fixture'
     Write-Fixture 'public_html/assets/locales/emoji-fr.json' '{"licenseNotice":"Unicode fixture"}'
+    Write-Fixture 'public_html/fonts/atkinson.css' '/* Font stylesheet fixture */'
+    Write-Fixture 'public_html/fonts/atkinson-hyperlegible-next-OFL.txt' 'OFL fixture'
+    Write-Fixture 'public_html/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2' 'Font fixture'
     Write-Fixture 'public_html/assets/img/emoji-3d/catalog.json' '{"1F600":"1F600"}'
     Write-Fixture 'public_html/assets/img/emoji-3d/credits.json' '{"name":"Noto 3D Emoji"}'
     Write-Fixture 'public_html/assets/img/emoji-3d/LICENSE.txt' 'Apache-2.0 notice fixture'
@@ -197,7 +200,10 @@ try {
         Assert-True ($manifest.files.Count -eq ($zip.Entries.Count - 1)) 'The manifest must cover every payload file.'
         $sbom = Read-ZipText ($zip.GetEntry('SBOM.cdx.json')) | ConvertFrom-Json
         Assert-True ($sbom.bomFormat -eq 'CycloneDX' -and $sbom.metadata.component.version -eq $manifest.appVersion) 'The SBOM must identify the packaged version.'
-        Assert-True ($sbom.components.Count -eq 8 -and 'OpenMoji' -in $sbom.components.name -and 'Noto 3D Emoji' -in $sbom.components.name) 'The SBOM must inventory all distributed dependencies.'
+        Assert-True ($sbom.components.Count -eq 10 -and 'OpenMoji' -in $sbom.components.name -and 'Noto 3D Emoji' -in $sbom.components.name) 'The SBOM must inventory all distributed dependencies.'
+        Assert-True ($null -ne $zip.GetEntry('public_html/fonts/atkinson.css') -and $null -ne $zip.GetEntry('public_html/fonts/atkinson-hyperlegible-next-OFL.txt') -and $null -ne $zip.GetEntry('public_html/fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2')) 'The package must include local typography and license files.'
+        $atkinson = @($sbom.components | Where-Object name -Like 'Atkinson Hyperlegible *')
+        Assert-True ($atkinson.Count -eq 2 -and @($atkinson | Where-Object version -eq '5.3.0').Count -eq 2) 'The SBOM must identify both Atkinson font families and versions.'
         $localeComponent = $sbom.components | Where-Object name -eq 'Unicode CLDR Emoji Annotations'
         Assert-True ($localeComponent.version -eq '48.0.0' -and $localeComponent.licenses[0].license.id -eq 'Unicode-3.0') 'The French emoji annotations must record their source version and license.'
         foreach ($file in $manifest.files) {

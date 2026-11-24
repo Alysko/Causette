@@ -121,7 +121,7 @@ if ($requestPath === '/install') {
     header('Content-Type: text/html; charset=UTF-8');
     header('Referrer-Policy: no-referrer');
     header('X-Content-Type-Options: nosniff');
-    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     if (!$setupOnly) {
         http_response_code(404);
         header('Content-Language: ' . Locale::current()->language());
@@ -262,7 +262,7 @@ if ($requestPath === '/credential-upgrade') {
     exit;
 }
 if ($requestPath === '/reset-password') {
-    header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+    header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 }
 if ($dbVersion !== CAUSETTE_DATABASE_VERSION) {
     header('Cache-Control: no-store');
@@ -270,7 +270,7 @@ if ($dbVersion !== CAUSETTE_DATABASE_VERSION) {
     if (!UpdateController::allowsDuringMaintenance($requestPath, $_SERVER['REQUEST_METHOD'] ?? 'GET', $updateAvailable)) {
         header('X-App-Version: ' . APP_VERSION);
         header('Referrer-Policy: no-referrer');
-        header("Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+        header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'");
         http_response_code(503);
         require __DIR__ . '/app/views/update-required.php';
         exit;

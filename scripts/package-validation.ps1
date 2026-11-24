@@ -60,6 +60,7 @@ function Test-PackagePath([string] $Path) {
     return $Path -cmatch (
         '\A(?:LICENSE|README\.md|docs/(?:install|import|maintenance|branding|localization|frontend-assets|dependencies|functional-coverage)\.md' +
         '|public_html/(?:\.htaccess|index\.php|version\.php|robots\.txt|service-worker\.js)' +
+        '|public_html/fonts/(?:atkinson\.css|atkinson-hyperlegible-(?:next|mono)-(?:OFL\.txt|latin(?:-ext)?-wght-(?:normal|italic)\.woff2))' +
         '|public_html/app/config/private-runtime\.php|public_html/app/install/schema-v1\.sql' +
         '|public_html/app/(?:controllers|core|install|models|modules|views|locales)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.php' +
         '|public_html/assets/(?:css|fonts|img|js|locales|sounds)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_.-]+\.(?:css|js|mjs|svg|png|jpg|jpeg|webp|gif|ico|wav|mp3|json|woff2?)' +
@@ -213,6 +214,8 @@ function New-PackageSbom([string] $AppVersion, [string] $BaseCommit) {
         [ordered] @{ type = 'library'; name = 'PHP QR code generator'; licenses = @(@{ license = @{ id = 'MIT' } }) }
         [ordered] @{ type = 'library'; name = 'Tailwind CSS'; version = '3.4.17'; purl = 'pkg:npm/tailwindcss@3.4.17'; licenses = @(@{ license = @{ id = 'MIT' } }) }
         [ordered] @{ type = 'library'; name = 'Font Awesome Free'; version = '6.7.2'; purl = 'pkg:npm/%40fortawesome/fontawesome-free@6.7.2'; licenses = @(@{ expression = 'MIT AND CC-BY-4.0 AND OFL-1.1' }) }
+        [ordered] @{ type = 'data'; name = 'Atkinson Hyperlegible Next'; version = '5.3.0'; purl = 'pkg:npm/%40fontsource-variable/atkinson-hyperlegible-next@5.3.0'; licenses = @(@{ license = @{ id = 'OFL-1.1' } }) }
+        [ordered] @{ type = 'data'; name = 'Atkinson Hyperlegible Mono'; version = '5.3.0'; purl = 'pkg:npm/%40fontsource-variable/atkinson-hyperlegible-mono@5.3.0'; licenses = @(@{ license = @{ id = 'OFL-1.1' } }) }
         [ordered] @{ type = 'data'; name = 'Fluent Emoji 3D'; version = '1ffb34c752ecf5d402f04cfb4b392c77f57c54bc'; licenses = @(@{ license = @{ id = 'MIT' } }) }
         [ordered] @{ type = 'data'; name = 'OpenMoji'; licenses = @(@{ license = @{ id = 'CC-BY-SA-4.0' } }) }
         [ordered] @{

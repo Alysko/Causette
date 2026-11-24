@@ -1149,7 +1149,7 @@ function renderMessageAttachments(attachments, canDelete = false) {
                     <a href="${escapeHtml(attachment.url)}" download="${downloadAttr}" class="block w-full">
                         <div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-1.5">
                             <i class="fa-solid fa-file text-2xl text-zinc-400"></i>
-                            <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
+                            <span class="text-xs font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
                         </div>
                     </a>
                     <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">

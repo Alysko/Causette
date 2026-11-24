@@ -379,7 +379,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                     <?= nl2br(htmlspecialchars($renderStoredMentionsToPlain($initialPinnedMessageContent, $pinnedMessage->mention_map ?? []), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?>
                 </div>
             </div>
-            <div class="flex items-center gap-4 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+            <div class="message-actions flex items-center gap-4 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
                 <button type="button" id="pinned-message-goto" class="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200" title="<?= $chatLabel('goto_pin') ?>" aria-label="<?= $chatLabel('goto_pin') ?>">
                     <i class="fa-solid fa-highlighter" aria-hidden="true"></i>
                     <span class="hidden md:inline"><?= $chatLabel('goto_pin') ?></span>
@@ -803,7 +803,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                         <a href="<?= $attachmentUrl ?>" download="<?= $attachmentDownloadName ?>" class="block w-full">
                                             <div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-1.5">
                                                 <i class="fa-solid fa-file text-2xl text-zinc-400"></i>
-                                                <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.<?= htmlspecialchars($attachmentExt, ENT_QUOTES, 'UTF-8') ?></span>
+                                                <span class="text-xs font-semibold text-zinc-300 uppercase">.<?= htmlspecialchars($attachmentExt, ENT_QUOTES, 'UTF-8') ?></span>
                                             </div>
                                         </a>
                                         <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">
@@ -833,7 +833,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                 <span class="text-zinc-500 italic"><?= $tr('ui.edited') ?></span>
                             <?php endif; ?>
                             <?php if (!$isReadOnlyPublicViewer): ?>
-                            <div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+                            <div class="message-actions flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
                                 <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('browser.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
                                 <?php if (empty($message->is_quoted)): ?>
                                     <?php

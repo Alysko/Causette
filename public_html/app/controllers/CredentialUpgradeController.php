@@ -15,7 +15,7 @@ final class CredentialUpgradeController extends Controller
     {
         header('Cache-Control: no-store');
         header('Referrer-Policy: no-referrer');
-        header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+        header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 
         $token = $this->operatorToken();
         if ($token === null) {

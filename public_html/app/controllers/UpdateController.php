@@ -102,7 +102,7 @@ class UpdateController extends Controller
     {
         header('Cache-Control: no-store');
         header('Referrer-Policy: no-referrer');
-        header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+        header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 
         $secure = defined('CAUSETTE_CANONICAL_URL') ? is_https_request() : SetupConfiguration::acceptsRequest(APP_URL);
         if (!defined('CAUSETTE_UPDATE_SOURCES') || !$secure

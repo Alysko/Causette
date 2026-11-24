@@ -2007,7 +2007,7 @@ function renderPendingAttachmentList() {
                </button>`
             : `<div class="w-full h-24 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-1.5">
                    <i class="fa-solid fa-file text-2xl text-zinc-400"></i>
-                   <span class="text-xs font-mono font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
+                   <span class="text-xs font-semibold text-zinc-300 uppercase">.${escapeHtml(attachment.file_extension)}</span>
                </div>`;
 
         const currentExpiry = Number(attachment.expiry_seconds || 0);
@@ -4975,7 +4975,7 @@ function renderMessages(messages, options = {}) {
 
         const interactionControlsMarkup = isGroupReadOnlyViewer
             ? ''
-            : `<div class="flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+            : `<div class="message-actions flex items-center gap-3 md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
                                 ${canReplyToMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="${escapeHtml(uiText('quote'))}" aria-label="${escapeHtml(uiText('quote'))}" data-quote-message-id="${Number(msg.id)}" data-quote-username="${escapeHtml(quoteUsername)}" data-quote-content="${escapeHtml(String(msg.content || ''))}" data-quote-mention-map="${mentionMapJson}"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>` : ''}
                                 ${editButton}
                                 ${deleteButton}

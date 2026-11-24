@@ -214,12 +214,16 @@ class ErrorHandler {
         if (!headers_sent()) {
             header('Cache-Control: no-store');
             header('Content-Language: ' . $locale->language());
-            header("Content-Security-Policy: default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+            header("Content-Security-Policy: default-src 'none'; style-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
         }
+        ob_start();
+        require __DIR__ . '/../views/partials/typography.php';
+        $typography = ob_get_clean();
         echo '<!doctype html>'
             . '<html lang="' . htmlspecialchars($locale->language(), ENT_QUOTES, 'UTF-8') . '"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             . '<title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title>'
             . '<link rel="stylesheet" href="' . AssetUrl::html('/assets/css/error.css') . '">'
+            . $typography
             . '</head><body><main>'
             . '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
             . '<p>' . $description . '</p>'

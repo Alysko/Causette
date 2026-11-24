@@ -10,6 +10,7 @@ $installPath = $setupBasePath . '/install';
     <title><?= $locale->html('install.title') ?></title>
     <link rel="icon" type="image/png" sizes="64x64" href="<?= $escape($setupBasePath) ?>/assets/img/favicon.png">
     <link rel="stylesheet" href="<?= $escape($setupBasePath) ?>/assets/css/install.css">
+    <?php require __DIR__ . '/partials/typography.php'; ?>
 </head>
 <body>
 <main>

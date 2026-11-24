@@ -78,7 +78,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                                 </span>
                             </div>
                             <div class="flex items-center gap-4 text-sm text-zinc-400 flex-wrap">
-                                <span class="font-mono text-zinc-500"><?= htmlspecialchars($key->key_prefix) ?>...</span>
+                                <span class="text-zinc-500"><?= htmlspecialchars($key->key_prefix) ?>...</span>
                                 <span><i class="fa-regular fa-calendar mr-1"></i><?= $tr('ui.api_key_created_on', ['date' => $createdAtLabel]) ?></span>
                                 <?php if ($expiresAtLabel !== ''): ?>
                                     <span><i class="fa-regular fa-clock mr-1"></i><?= $tr($isExpired ? 'ui.api_key_expired_on' : 'ui.api_key_expires_on', ['date' => $expiresAtLabel]) ?></span>
@@ -225,7 +225,7 @@ require_once __DIR__ . '/../core/HtmlJson.php';
                 <label class="block text-sm text-zinc-300 mb-1"><?= $tr('ui.your_api_key') ?></label>
                 <div class="flex gap-2">
                     <input type="text" id="ak-new-key-display" readonly
-                           class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 font-mono text-sm text-zinc-100 select-all focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                           class="flex-1 rounded-xl border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-zinc-100 select-all focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     <button type="button" id="ak-copy-btn" data-app-action="copy-api-key"
                             class="shrink-0 rounded-xl bg-zinc-700 px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-600 transition">
                         <i class="fa-regular fa-copy"></i>
