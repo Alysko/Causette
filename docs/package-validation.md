@@ -10,19 +10,19 @@ Classify each release by its effect on what users can do. Small changes to an ex
 
 Choose the database version separately. Increment it when the release requires a newer database schema or data migration and record the supported source markers in `compatible_database_versions`.
 
-Build the ZIP on a development workstation or trusted CI with Git and PowerShell 7.4 or later. Review the modified and untracked source files first. The tool packages the working tree, and the manifest records its base commit.
+Build the ZIP on a development workstation or trusted CI with Git, PHP CLI and the PHP `zip` extension. Review the modified and untracked source files first. The tool packages the working tree, and the manifest records its base commit.
 
-```powershell
-pwsh -NoProfile -File scripts/package-validation.ps1 -OutputPath output/Causette-validation.zip
-pwsh -NoProfile -File scripts/package-validation.ps1 -VerifyPath output/Causette-validation.zip
+```sh
+php scripts/package-validation.php --output output/Causette-validation.zip
+php scripts/package-validation.php --verify output/Causette-validation.zip
 ```
 
-Create the output directory before building. Verification needs the ZIP and its adjacent `.sha256` file. When you have an expected digest from a trusted channel, pass it with `-ExpectedSha256`.
+Create the output directory before building. Verification needs the ZIP and its adjacent `.sha256` file. When you have an expected digest from a trusted channel, pass it with `--sha256`.
 
 The archive contains `public_html/`, sibling `storage/`, the license and operator documentation. It includes the bundled OpenMoji files and placeholders for private writable directories. The distribution allowlist excludes local configuration, database exports, logs, user uploads, tests and project journals. Update the allowlist when adding a runtime directory or file type. Review new public assets for embedded credentials before packaging. See [distributed dependencies](dependencies.md) for the component sources and license notices.
 
-A first package dates its entries at build time. For an update, pass the installed version's verified ZIP with `-PreviousPackage`. Its SHA-256 sidecar must be next to it. Files at the same path with identical bytes keep their previous ZIP date. New and modified files use the build date. When a modified file would have the same or an older date, its date advances by two seconds from the previous entry, the minimum change ZIP can represent.
+A first package dates its entries at build time. For an update, pass the installed version's verified ZIP with `--previous`. Its SHA-256 sidecar must be next to it. Files at the same path with identical bytes keep their previous ZIP date. New and modified files use the build date. When a modified file would have the same or an older date, its date advances by two seconds from the previous entry, the minimum change ZIP can represent.
 
-When the file manager preserves entry dates, an FTP client set to overwrite newer files transfers the changed files and adds new ones. Reproduce a build with the same source, toolchain and manifest `builtAt` value as `-BuildTime`. For updates, also use the same `-PreviousPackage`, identified by `previousPackageSha256` in the manifest. If PHP runs old scripts after extraction, check the host's OPcache settings and use its supported cache refresh for the site.
+When the file manager preserves entry dates, an FTP client set to overwrite newer files transfers the changed files and adds new ones. Reproduce a build with the same source, PHP and libzip versions, workstation time zone, and manifest `builtAt` value as `--build-time`. For updates, also use the same `--previous` archive, identified by `previousPackageSha256` in the manifest. If PHP runs old scripts after extraction, check the host's OPcache settings and use its supported cache refresh for the site.
 
 `MANIFEST.json` records the application version, base commit, build time, build tool, SHA-256 hash and byte length of each payload entry. `SBOM.cdx.json` inventories the included components. The verification command checks the ZIP digest and rejects missing, duplicate, modified or disallowed files before extraction. The digest establishes integrity against its supplied reference. Publisher identity requires separate signing or attestation evidence. Test the verified archive on a separate site with synthetic data before publishing it.

@@ -39,6 +39,10 @@ test('the tracked source root matches the shared-hosting layout', () => {
     assert.deepEqual(unexpected, [], 'Review new root entries against the shared-hosting contract');
 });
 
+test('workstation PowerShell files stay out of the repository', () => {
+    assert.deepEqual(trackedPaths().filter(path => /\.(?:ps1|psm1|psd1)$/i.test(path)), []);
+});
+
 test('the icon distribution includes only regular and solid fonts', () => {
     const fonts = readdirSync(new URL('public_html/assets/webfonts/', root));
     assert.deepEqual(fonts.sort(), [
