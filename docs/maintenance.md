@@ -22,6 +22,8 @@ Networks where direct media cannot connect can use an existing external TURN rel
 
 Use one or two URLs with a DNS name, port and explicit transport. A `turns:` URL uses TCP and requires a valid relay certificate. Each joined account gets a pseudonymous ticket for the active call. The browser requests the next ticket after 20 minutes, and each ticket can start new allocations for at most 30 minutes. Manage relay allocation, bandwidth and destination policies with the relay operator. The relay can observe IP addresses and traffic volume, and relayed media consumes the service's bandwidth. Choose limits and costs before enabling it. Protect the configuration file alongside other private keys in backups. [coturn TURN REST settings](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf)
 
+Moving a group to trash stops Causette from issuing or renewing its relay tickets. Tickets issued before archiving retain their original expiry at the relay.
+
 Signaling messages expire for recipients after two minutes. Writes periodically remove an expired batch during ordinary activity. A quiet installation can retain expired rows until new signaling writes trigger cleanup. Camera, screen and microphone data travel between browsers through the WebRTC connection.
 
 ## Save a backup

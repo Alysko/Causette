@@ -6,6 +6,8 @@ namespace Causette\Calls;
 
 use Causette\Installation\SetupConfiguration;
 use Causette\Installation\SetupFailure;
+use Chat;
+use Database;
 use JsonException;
 
 require_once __DIR__ . '/../install/SetupConfiguration.php';
@@ -34,6 +36,16 @@ final class CallTurnConfiguration
         $secret = $config['shared_secret'] ?? null;
         if (count($config) !== 2 || $urls === null || !is_string($secret)
             || !preg_match('/\A[0-9a-f]{64}\z/iD', $secret) || preg_match('/\A([0-9a-f])\1{63}\z/iD', $secret)) {
+            return null;
+        }
+
+        // Both callers check participation. Archiving keeps those membership rows for restore.
+        $archiveFilter = Chat::supportsSoftDelete() ? ' AND ch.deleted_at IS NULL' : '';
+        if (!Database::query(
+            "SELECT 1 FROM calls c JOIN chats ch ON ch.id = c.chat_id
+             WHERE c.id = ? AND c.status = 'active'" . $archiveFilter,
+            [$callId],
+        )->fetchColumn()) {
             return null;
         }
 

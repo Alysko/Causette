@@ -148,6 +148,23 @@ expectSignal(($poll(2, refreshIce: true)->body['turn'] ?? null) === null, 'A gro
 $writeRelay($relayUrls, 0600);
 $priorTicketIdentity = $poll(1, refreshIce: true)->body['turn']['server']['username'];
 
+Auth::$userId = 1;
+$_POST = ['chat_id' => '1'];
+$startCall = (new SendSignalFixture())->startCall(...);
+expectSignal(isset(requestSignal($startCall)->body['turn']['server']['credential']),
+    'An unarchived group call can issue a relay credential.');
+$db->exec('UPDATE chats SET deleted_at = CURRENT_TIMESTAMP WHERE id = 1');
+try {
+    $archivedStart = requestSignal($startCall);
+    $archivedRefresh = $poll(1, refreshIce: true);
+    expectSignal(!isset($archivedStart->body['turn']) && !isset($archivedRefresh->body['turn']),
+        'An archived group must neither issue nor renew relay credentials.');
+} finally {
+    $db->exec('UPDATE chats SET deleted_at = NULL WHERE id = 1');
+}
+expectSignal(isset($poll(1, refreshIce: true)->body['turn']['server']['credential']),
+    'Restoring the group allows a current participant to renew relay credentials.');
+
 $meta = $send(1, 0, 'meta', '{"screen_sharing":true}');
 expectSignal($meta->status === 200, 'A participant can enable screen sharing without sending a targeted packet.');
 expectSignal($poll(2)->body['participants'][0]['screen_sharing'], 'The peer sees the current screen sharing state.');
