@@ -7,6 +7,13 @@ class Message extends Model {
     private const STORED_MENTION_PATTERN = '/@\[(\d{16})\|([a-z][a-z0-9]{3,31})\]/i';
     public const REACTION_CODES = ReactionCatalog::CODES;
 
+    /** @return array<int|string, true> */
+    public static function mentionedUserNumbers(string $content): array
+    {
+        preg_match_all(self::STORED_MENTION_PATTERN, $content, $matches);
+        return array_fill_keys($matches[1], true);
+    }
+
     public static function getRecent($chatId) {
         $messages = Database::query("SELECT m.*, u.username FROM messages m JOIN users u ON m.user_id = u.id WHERE m.chat_id = ? ORDER BY m.created_at DESC LIMIT 50", [$chatId])->fetchAll();
         foreach ($messages as $message) {
@@ -15,6 +22,30 @@ class Message extends Model {
             }
         }
         return $messages;
+    }
+
+    public static function timelineForView(int $chatId, ?int $anchorId = null): array
+    {
+        $anchorJoin = '';
+        $parameters = [$chatId];
+        if ($anchorId !== null) {
+            $anchorJoin = ' JOIN messages anchor ON anchor.id = ? AND anchor.chat_id = m.chat_id
+                AND (m.created_at < anchor.created_at OR (m.created_at = anchor.created_at AND m.id <= anchor.id))';
+            $parameters = [$anchorId, $chatId];
+        }
+        $sql = "SELECT m.*, u.username, u.email AS user_email, u.user_number, %s u.presence_status, u.last_active_at,
+                qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
+            FROM messages m$anchorJoin
+            JOIN users u ON u.id = m.user_id
+            LEFT JOIN users qu ON qu.id = m.quoted_user_id
+            LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
+            WHERE m.chat_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 100";
+        try {
+            return Database::query(sprintf($sql, 'u.avatar_filename,'), $parameters)->fetchAll();
+        } catch (Throwable $error) {
+            if (stripos($error->getMessage(), 'avatar_filename') === false) throw $error;
+            return Database::query(sprintf($sql, ''), $parameters)->fetchAll();
+        }
     }
 
     public static function encodeMentionsForChat($chatId, $content) {

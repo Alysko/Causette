@@ -5,6 +5,8 @@ declare(strict_types=1);
 use Causette\Chat\ReactionCatalog;
 use Causette\Installation\InstallDatabase;
 use Causette\Installation\ReactionSchemaUpgrade;
+use Causette\Messaging\SavedMessages;
+use Causette\Messaging\ThreadReplies;
 
 if (getenv('CAUSETTE_RECOVERY_FIXTURE') !== '1' || !is_readable('/run/mysqld/mysqld.sock')) {
     throw new LogicException('Run with the dedicated database socket in an isolated container.');
@@ -173,3 +175,59 @@ foreach (['message' => '1F44D', 'post' => '2665'] as $kind => $oldCode) {
     );
 }
 echo "Expanded reaction catalog and interrupted upgrade passed.\n";
+
+$db->exec('DROP TABLE IF EXISTS thread_followers');
+$db->exec('DROP TABLE IF EXISTS thread_replies');
+$db->exec('CREATE TABLE thread_replies (id INT PRIMARY KEY) ENGINE=InnoDB');
+$rejected = false;
+try {
+    ReactionSchemaUpgrade::apply('1.0.7', '1.0.8');
+} catch (RuntimeException) {
+    $rejected = true;
+}
+requireReactionUpgrade($rejected && Setting::get('database_version') === '1.0.7',
+    'The thread migration must refuse a malformed pre-existing table and preserve the version marker.');
+$db->exec('DROP TABLE thread_replies');
+requireReactionUpgrade(ReactionSchemaUpgrade::apply('1.0.7', '1.0.8'), 'The thread migration must create a usable table.');
+requireReactionUpgrade(Setting::get('database_version') === '1.0.8', 'The thread migration must advance the marker.');
+$db->exec("INSERT INTO thread_replies (root_id, user_id, client_key, content)
+    VALUES (1, 2, '378a9c19-237a-4f09-98a4-719766ec004e', 'Fixture reply')");
+$db->exec('INSERT INTO thread_followers (root_id, user_id) VALUES (1, 2)');
+Setting::set('database_version', '1.0.7');
+requireReactionUpgrade(ReactionSchemaUpgrade::apply('1.0.7', '1.0.8'), 'The thread migration must resume after committed DDL.');
+requireReactionUpgrade($db->query('SELECT content FROM thread_replies')->fetchColumn() === 'Fixture reply',
+    'Resuming the migration must preserve replies.');
+requireReactionUpgrade((int)$db->query('SELECT user_id FROM thread_followers')->fetchColumn() === 2,
+    'Resuming the migration must preserve followers.');
+foreach (['models/Chat.php', 'models/User.php', 'models/Message.php', 'core/ThreadReplies.php', 'core/SavedMessages.php'] as $file) {
+    require_once $app . $file;
+}
+$db->exec('INSERT INTO chat_members (chat_id, user_id) VALUES (1, 1), (1, 2)');
+$db->exec("UPDATE messages SET created_at = '2026-01-01 12:00:00' WHERE id = 1");
+for ($i = 0; $i < 105; $i++) {
+    $db->exec("INSERT INTO messages (chat_id, user_id, content, created_at) VALUES (1, 1, 'Later', '2026-01-02 12:00:00')");
+}
+requireReactionUpgrade(!in_array(1, array_map('intval', array_column(Message::timelineForView(1), 'id')), true),
+    'The fixture should have more than one window of messages.');
+requireReactionUpgrade(array_map('intval', array_column(Message::timelineForView(1, 1), 'id')) === [1]
+    && Message::timelineForView(1, 999999) === [], 'An older permalink must load an authorized bounded snapshot.');
+$db->exec("INSERT INTO chats (id, chat_number, type, created_by) VALUES (2, '1234123412342222', 'group', 1)");
+requireReactionUpgrade(Message::timelineForView(2, 1) === [], 'A message permalink must stay within its conversation.');
+requireReactionUpgrade(SavedMessages::update(1, 1, true) === 'updated' && SavedMessages::update(1, 1, true) === 'updated'
+    && SavedMessages::ids(1) === [1] && SavedMessages::ids(2) === [], 'InnoDB must persist account-scoped bookmarks idempotently.');
+ThreadReplies::follow(1, 1, true);
+ThreadReplies::follow(1, 1, true);
+requireReactionUpgrade(ThreadReplies::followers(1, 2) === [1], 'An idempotent follow should reach only the remaining eligible follower.');
+$db->beginTransaction();
+try {
+    requireReactionUpgrade(ThreadReplies::root(1, 2, true) !== null, 'A member must be able to lock the message before replying.');
+    $reused = ThreadReplies::reply(1, 2, '378a9c19-237a-4f09-98a4-719766ec004e', 'Fixture reply');
+    requireReactionUpgrade($reused !== null && !$reused['created'], 'The same send must acknowledge the existing row.');
+} finally {
+    $db->rollBack();
+}
+$db->exec('DELETE FROM messages WHERE id = 1');
+requireReactionUpgrade((int)$db->query('SELECT COUNT(*) FROM thread_replies')->fetchColumn() === 0
+    && (int)$db->query('SELECT COUNT(*) FROM thread_followers')->fetchColumn() === 0,
+    'Permanently deleting a root message must also delete its replies and followers.');
+echo "Thread migration, interrupted update and reply cascade passed.\n";

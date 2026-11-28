@@ -34,3 +34,22 @@ test('stored call refusals use the normal notification sound in either language'
 
     assert.deepEqual(played, ['notification.wav', 'notification.wav', 'message.wav', 'poke.wav']);
 });
+
+test('an open conversation leaves other thread notifications available', () => {
+    const dialog = {open: false, dataset: {loadedThreadId: '42'}};
+    const context = createContext({
+        window: {},
+        currentChat: {chat_number: '1000000000000001'},
+        document: {getElementById: () => dialog},
+    });
+    runInContext(source, context);
+    const plain = {type: 'message', link: '/c/1000-0000-0000-0001'};
+    const thread = {...plain, link: plain.link + '?thread=42'};
+    assert.equal(context.shouldSuppressNotificationToast(plain), true);
+    assert.equal(context.shouldSuppressNotificationToast(thread), false);
+    dialog.open = true;
+    assert.equal(context.shouldSuppressNotificationToast(thread), true);
+    assert.equal(context.shouldSuppressNotificationToast({...thread, link: plain.link + '?thread=43'}), false);
+    context.currentChat.viewing_history = true;
+    assert.equal(context.shouldSuppressNotificationToast(plain), false);
+});

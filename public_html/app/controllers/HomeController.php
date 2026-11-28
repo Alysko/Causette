@@ -229,12 +229,13 @@ class HomeController extends Controller {
         Auth::requireAuth();
 
         $mode = strtolower(trim((string)($_GET['mode'] ?? 'users')));
-        if (!in_array($mode, ['users', 'messages', 'posts'], true)) {
+        if (!in_array($mode, ['users', 'messages', 'posts', 'saved'], true)) {
             $mode = 'users';
         }
 
         $this->view('search', [
             'mode' => $mode,
+            'initialQuery' => is_string($_GET['q'] ?? null) ? mb_substr($_GET['q'], 0, 200) : '',
             'csrf' => $this->csrfToken()
         ]);
     }

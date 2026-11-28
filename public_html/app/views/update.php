@@ -26,6 +26,9 @@ ob_start();
     <?php if (!empty($openMojiUpgrade)): ?>
         <p><?= $tr('ui.openmoji_upgrade') ?></p>
     <?php endif; ?>
+    <?php if (!empty($threadsUpgrade)): ?>
+        <p><?= $tr('ui.thread_upgrade') ?></p>
+    <?php endif; ?>
     <form method="post" action="<?= htmlspecialchars(base_path('/update'), ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
         <label><input type="checkbox" name="backup_confirmed" value="1" required> <?= $tr('ui.i_have_saved_the_database_configuration') ?></label>

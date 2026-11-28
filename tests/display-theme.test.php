@@ -61,6 +61,28 @@ foreach ([['light'], null, '', 'unknown'] as $invalidTheme) {
 saveThemePreferences(1, $preferences + ['theme' => 'dark'], true);
 expectTheme(1, 'dark');
 
+$chatDefaults = ['message_density' => 'standard', 'chat_width' => 'full', 'chat_open_at' => 'unread',
+    'image_preview' => 'expanded', 'unread_grouping' => 'inline'];
+$chatOverrides = ['message_density' => 'compact', 'chat_width' => 'centered', 'chat_open_at' => 'latest',
+    'image_preview' => 'collapsed', 'unread_grouping' => 'separate'];
+saveThemePreferences(1, $preferences + ['theme' => 'system'] + $chatOverrides, true);
+expectTheme(1, 'system');
+if (array_intersect_key(DisplayPreferences::effective(), $chatDefaults) !== $chatOverrides) {
+    throw new RuntimeException('The chat display settings should apply to the current account.');
+}
+saveThemePreferences(1, $preferences, true);
+expectTheme(1, 'system');
+if (array_intersect_key(DisplayPreferences::effective(), $chatDefaults) !== $chatOverrides) {
+    throw new RuntimeException('An older form should preserve the saved chat display settings.');
+}
+foreach ($chatDefaults as $field => $value) {
+    saveThemePreferences(1, $preferences + [$field => [$value]], false);
+}
+DisplayPreferences::initialize(2);
+if (array_intersect_key(DisplayPreferences::effective(), $chatDefaults) !== $chatDefaults) {
+    throw new RuntimeException('Chat display settings should default independently per account.');
+}
+
 DisplayPreferences::initialize(1, 'UTC+2');
 $now = new DateTimeImmutable('2026-11-25T12:00:00Z');
 foreach ([

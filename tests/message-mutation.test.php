@@ -52,17 +52,23 @@ final class Auth
 
 final class Setting
 {
+    public static array $overrides = [];
     public static function get(string $key): ?string
     {
-        return match ($key) {
+        return self::$overrides[$key] ?? match ($key) {
             'group_edit_window_1', 'group_delete_window_1' => '600',
             default => null,
         };
     }
 
+    public static function set(string $key, string $value): void
+    {
+        self::$overrides[$key] = $value;
+    }
+
     public static function getMany(array $keys): array
     {
-        return [];
+        return array_intersect_key(self::$overrides, array_fill_keys($keys, true));
     }
 }
 
@@ -82,7 +88,10 @@ final class Database
         } elseif (str_contains($sql, 'INFORMATION_SCHEMA.COLUMNS')) {
             $sql = "SELECT COUNT(*) FROM pragma_table_info('chats') WHERE name = 'deleted_at'";
         }
-        $statement = self::$connection->prepare(str_replace('NOW()', 'CURRENT_TIMESTAMP', $sql));
+        $statement = self::$connection->prepare(str_replace(
+            ['NOW()', ' FOR UPDATE', 'ON DUPLICATE KEY UPDATE user_id = user_id'],
+            ['CURRENT_TIMESTAMP', '', 'ON CONFLICT DO NOTHING'], $sql,
+        ));
         $statement->execute($parameters);
         return $statement;
     }
@@ -91,6 +100,11 @@ final class Database
 final class Notification
 {
     public static array $previews = [];
+
+    public static function createInAppBatch(array $notifications): void
+    {
+        foreach ($notifications as $notification) self::create(...$notification);
+    }
 
     public static function create(int $userId, string $type, string $title, string $message, string $link): void
     {
@@ -295,3 +309,107 @@ if ($failures > 0) {
     exit(1);
 }
 echo ($legacy ? 'Legacy' : 'Current') . " schema: message and attachment mutation checks passed.\n";
+
+if (!$legacy) {
+    Database::$connection->exec(<<<'SQL'
+        ALTER TABLE users ADD COLUMN email TEXT;
+        ALTER TABLE users ADD COLUMN is_banned INTEGER DEFAULT 0;
+        ALTER TABLE messages ADD COLUMN bot_name TEXT;
+        CREATE TABLE friends (user_id INTEGER, friend_id INTEGER, status TEXT);
+        CREATE TABLE thread_replies (id INTEGER PRIMARY KEY, root_id INTEGER, user_id INTEGER, client_key TEXT,
+            content TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE (root_id, user_id, client_key));
+        CREATE TABLE thread_followers (root_id INTEGER, user_id INTEGER, PRIMARY KEY (root_id, user_id));
+        INSERT INTO messages VALUES (61, 1, 1, 'Group thread', CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL);
+        INSERT INTO messages VALUES (62, 2, 1, 'Direct thread', CURRENT_TIMESTAMP, NULL, NULL, NULL, NULL, NULL);
+        INSERT INTO chat_members (chat_id, user_id) VALUES (2, 2);
+        SQL);
+
+    function threadAction(string $action, mixed $root, int $viewer, int $status, array $input = [], bool $csrf = true): array
+    {
+        Auth::$viewer = $viewer;
+        Auth::$csrfValid = $csrf;
+        $_POST = $input;
+        $_GET = $input;
+        try {
+            (new MutationController())->$action(['message_id' => $root]);
+        } catch (MutationResponse $result) {
+            if ($result->status === $status) return $result->payload;
+            throw new RuntimeException("$action returned {$result->status}, expected $status.");
+        }
+        throw new RuntimeException("$action returned no response.");
+    }
+
+    $first = threadAction('getThread', '61', 1, 200);
+    if (!$first['can_reply'] || $first['root']['content'] !== 'Group thread' || $first['replies'] !== []) {
+        throw new RuntimeException('A group member should be able to start a thread.');
+    }
+    threadAction('setThreadFollow', '61', 1, 200, ['following' => '1']);
+    if (!threadAction('getThread', '61', 1, 200)['following'] || threadAction('getThread', '61', 2, 200)['following']) {
+        throw new RuntimeException('Following should be scoped to the current account.');
+    }
+    threadAction('setThreadFollow', '61', 4, 404, ['following' => '1']);
+    $input = ['content' => '<b>Plain text</b>', 'client_key' => sprintf('00000000-0000-4000-8000-%012d', 1)];
+    Notification::$previews = [];
+    $reply = threadAction('replyToThread', '61', 2, 200, $input)['reply'];
+    if (array_keys(Notification::$previews) !== [1]) throw new RuntimeException('Only the following account should receive a notification.');
+    Notification::$previews = [];
+    $retry = threadAction('replyToThread', '61', 2, 200, $input)['reply'];
+    $loaded = threadAction('getThread', '61', 1, 200)['replies'];
+    if ($reply !== $retry || $loaded !== [$reply] || $reply['content'] !== $input['content'] || isset($reply['email']) || Notification::$previews !== []) {
+        throw new RuntimeException('The thread should keep exactly one reply when a request is retried.');
+    }
+    threadAction('replyToThread', '61', 1, 403, $input, false);
+    threadAction('replyToThread', '61', 2, 400, ['content' => ['no']] + $input);
+    threadAction('getThread', '61', 4, 404);
+    threadAction('getThread', '61', 0, 401);
+    threadAction('getThread', ['61'], 1, 400);
+    threadAction('replyToThread', '61', 4, 404, $input);
+    threadAction('replyToThread', '62', 2, 403, $input);
+    Database::query("INSERT INTO friends VALUES (1, 2, 'accepted')");
+    threadAction('replyToThread', '62', 2, 200, $input);
+    Database::query('UPDATE users SET is_banned = 1 WHERE id = 1');
+    threadAction('replyToThread', '62', 2, 403, $input);
+    Database::query('UPDATE chat_members SET is_muted = 1 WHERE chat_id = 1 AND user_id = 2');
+    threadAction('replyToThread', '61', 2, 403, $input);
+    Database::query('DELETE FROM chat_members WHERE chat_id = 1 AND user_id = 2');
+    threadAction('getThread', '61', 2, 404);
+    Database::query('UPDATE chats SET deleted_at = CURRENT_TIMESTAMP WHERE id = 1');
+    threadAction('getThread', '61', 1, 404);
+    threadAction('replyToThread', '61', 1, 404, $input);
+    echo "Thread reply authorization, direct-message restrictions and retry checks passed.\n";
+
+    Database::query('UPDATE chats SET deleted_at = NULL WHERE id = 1');
+    Database::query("INSERT INTO users (id, username, user_number) VALUES (3, 'carole', '1000000000000003')");
+    Database::query('INSERT INTO chat_members (chat_id, user_id) VALUES (1, 2)');
+    $mode = ['chat_id' => '1', 'mode' => 'none'];
+    threadAction('setConversationNotifications', '61', 4, 404, $mode);
+    threadAction('setConversationNotifications', '61', 2, 403, $mode, false);
+    threadAction('setConversationNotifications', '61', 2, 400, ['mode' => ['none']] + $mode);
+    threadAction('setConversationNotifications', '61', 2, 200, $mode);
+    Notification::$previews = [];
+    $_POST = ['chat_id' => '1', 'content' => 'A normal message'];
+    Auth::$viewer = 1;
+    try {
+        (new MutationController())->sendMessage();
+    } catch (MutationResponse $result) {
+        if ($result->status !== 200) throw $result;
+    }
+    if (isset(Notification::$previews[2]) || !isset(Notification::$previews[3])) {
+        throw new RuntimeException('A muted conversation should suppress its message notifications for that account.');
+    }
+    threadAction('setConversationNotifications', '61', 2, 200, ['mode' => 'mentions'] + $mode);
+    Auth::$viewer = 1;
+    foreach (['No mention' => false, 'Hello @bruno' => true] as $text => $expectsNotification) {
+        Notification::$previews = [];
+        $_POST = ['chat_id' => '1', 'content' => $text];
+        try {
+            (new MutationController())->sendMessage();
+        } catch (MutationResponse $result) {
+            if ($result->status !== 200) throw $result;
+        }
+        if (isset(Notification::$previews[2]) !== $expectsNotification) {
+            throw new RuntimeException('The mentions-only conversation setting did not match the addressed recipient.');
+        }
+    }
+    echo "Conversation notification settings passed.\n";
+}

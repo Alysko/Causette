@@ -9,6 +9,11 @@ use Causette\Security\TrustedBrowser;
 
 class Auth {
     public static function user() {
+        $user = self::authenticatedAccount();
+        return $user ? User::attachEffectiveStatus($user) : null;
+    }
+
+    private static function authenticatedAccount(): ?object {
         if (!empty($_SESSION['auth_session_retired'])) {
             return null;
         }
@@ -68,7 +73,7 @@ class Auth {
             $_SESSION['last_activity_touch_at'] = $now;
         }
 
-        return User::attachEffectiveStatus($user);
+        return $user;
     }
 
     private static function activeAccount(int $userId, string $digest): ?object {
@@ -108,8 +113,8 @@ class Auth {
         return $renewed;
     }
 
-    public static function requireAuth() {
-        $user = self::user();
+    public static function requireAuth(): object {
+        $user = self::authenticatedAccount();
         if (!$user) {
             self::redirect('/login');
         }
@@ -120,6 +125,7 @@ class Auth {
             self::redirect('/verify-email');
         }
         Locale::bindAuthenticatedAccount((int)$user->id);
+        return $user;
     }
 
     public static function passwordBinding(object $user): string {

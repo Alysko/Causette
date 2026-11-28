@@ -159,6 +159,7 @@ function setChatUserInActiveCall(inActiveCall) {
     }
 
     applyVoiceCallButtonState();
+    refreshGroupMemberActionMenus();
 }
 
 function canPokeInCurrentGroup() {
@@ -1566,6 +1567,7 @@ async function startVoiceCall(options = {}) {
         processedStream = rawMicStream;
     }
     localStream = new MediaStream(processedStream.getAudioTracks());
+    refreshGroupMemberActionMenus();
     bindCallAudioUnlockHandlers();
     startLocalSpeakingDetection();
     const localVideo = document.getElementById('local-video');

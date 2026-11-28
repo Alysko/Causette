@@ -1,9 +1,27 @@
 Options -Indexes
 RewriteEngine On
 
+# Keep certificate validation available without rewriting missing challenges to PHP.
+RewriteRule ^\.well-known/(?:acme-challenge/[A-Za-z0-9_-]+|pki-validation/[A-Za-z0-9_-]+\.txt)$ - [L]
+
+# Browser requests use GET and POST. Keep HEAD and OPTIONS available to the web server.
+RewriteCond %{REQUEST_METHOD} !^(?:GET|HEAD|POST|OPTIONS)$
+RewriteRule ^ - [F]
+
 # Storage must be outside the document root and must have no public alias.
 RewriteRule ^storage(?:/|$) - [F,NC]
 RewriteRule ^(?:app|vendor)(?:/|$) - [F,NC]
+RewriteRule (?:^|/)\. - [F,NC]
+
+# Deny configuration, logs and backup files before serving static files.
+RewriteRule (?:^|/)(?:composer\.(?:json|lock)|package(?:-lock)?\.json|Dockerfile|Makefile)(?:/|$) - [F,NC]
+RewriteRule (?:^|/)[^/]+\.(?:bak|backup|conf|config|dump|ini|log|old|orig|save|sql|sqlite3?|swp|tmp)(?:[./]|$) - [F,NC]
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule \.(?:zip|7z|tar|gz|tgz|bz2|xz)$ - [F,NC]
+
+# The front controller is the only public script entry point.
+RewriteRule ^index\.php$ - [L]
+RewriteRule (?:^|/)[^/]+\.(?:php[0-9]*|phtml|phar|cgi|pl|py|sh)(?:[./]|$) - [F,NC]
 
 # Serve existing files/directories directly
 RewriteCond %{REQUEST_FILENAME} -f [OR]
@@ -12,3 +30,8 @@ RewriteRule ^ - [L]
 
 # Send all other requests through MVC front controller
 RewriteRule ^ index.php [L,QSA]
+
+<IfModule mod_headers.c>
+    Header onsuccess unset X-Content-Type-Options
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>

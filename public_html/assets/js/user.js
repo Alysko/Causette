@@ -1541,15 +1541,14 @@ function stripMessageMentions(content) {
     return String(content || '').replace(/@\[\d{16}\|([a-zA-Z][a-zA-Z0-9]{3,31})\]/g, '@$1');
 }
 
-function highlightSearchTerm(text, query) {
-    if (!query || !text) return escapeHtml(text);
-    const escapedText = escapeHtml(text);
-    const escapedQuery = escapeHtml(query);
-    const regexSafe = escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return escapedText.replace(
-        new RegExp(regexSafe, 'gi'),
-        '<mark class="search-match">$&</mark>'
-    );
+function highlightSearchTerm(text, search) {
+    const terms = (Array.isArray(search) ? search : [search]).filter(term => typeof term === 'string' && term);
+    if (!terms.length || !text) return escapeHtml(text);
+    const alternatives = terms.sort((a, b) => b.length - a.length)
+        .map(term => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const matches = new RegExp(`(${alternatives.join('|')})`, 'gi');
+    return text.split(matches).map((part, index) => index % 2
+        ? `<mark class="search-match">${escapeHtml(part)}</mark>` : escapeHtml(part)).join('');
 }
 
 function replaceElementMarkup(element, markup) {
@@ -1672,28 +1671,36 @@ async function searchPosts(event) {
     await searchPostsPage(query, 1);
 }
 
-async function searchMessagesPage(query, page) {
+let messageSearchRequest = null;
+
+async function searchMessagesPage(query, page, savedOnly = false) {
     const results = document.getElementById('message-search-results');
     if (!results) return;
 
+    messageSearchRequest?.abort();
+    const request = new AbortController();
+    messageSearchRequest = request;
     results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_pending'))}</p>`;
 
     try {
-        const res = await fetch(appPath(`/api/messages/search?q=${encodeURIComponent(query)}&page=${page}`));
+        const encoded = new URLSearchParams({q: query, page: String(page)});
+        if (savedOnly) encoded.set('saved', '1');
+        const res = await fetch(appPath(`/api/messages/search?${encoded}`), { signal: request.signal });
+        const data = await res.json().catch(() => ({}));
+        if (request.signal.aborted || !results.isConnected) return;
         if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            showToast(uiActionError(data.error, 'search_failed'), 'error');
-            results.innerHTML = '';
+            const error = document.createElement('p');
+            error.textContent = uiActionError(data.error, 'search_failed');
+            results.replaceChildren(error);
             return;
         }
 
-        const data = await res.json();
         const messages = data.messages || [];
         const totalPages = Number(data.total_pages || 1);
         const currentPage = Number(data.page || 1);
 
         if (messages.length === 0) {
-            results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText('search_no_messages'))}</p>`;
+            results.innerHTML = `<p class="text-zinc-400 text-sm">${escapeHtml(uiText(savedOnly && !query ? 'no_saved_messages' : 'search_no_messages'))}</p>`;
             return;
         }
 
@@ -1705,7 +1712,7 @@ async function searchMessagesPage(query, page) {
             const msgId = Number(msg.message_id || 0);
             const chatUrl = appPath(`/c/${chatNumFormatted}?msg=${msgId}`);
             const rawContent = stripMessageMentions(String(msg.content || ''));
-            const highlightedContent = highlightSearchTerm(rawContent, query);
+            const highlightedContent = highlightSearchTerm(rawContent, data.highlight_terms ?? query);
             const senderUsername = msg.bot_name
                 ? uiText('bot_name', { name: msg.bot_name }) : String(msg.sender_username || '');
             const createdAtRaw = String(msg.created_at || '');
@@ -1751,30 +1758,29 @@ async function searchMessagesPage(query, page) {
         results.querySelectorAll('.js-msg-search-page').forEach(btn => {
             btn.addEventListener('click', () => {
                 const targetPage = Number(btn.dataset.page || 1);
-                searchMessagesPage(query, targetPage);
+                searchMessagesPage(query, targetPage, savedOnly);
             });
         });
     } catch {
+        if (request.signal.aborted || !results.isConnected) return;
         showToast(uiText('search_failed'), 'error');
         results.innerHTML = '';
+    } finally {
+        if (messageSearchRequest === request) messageSearchRequest = null;
     }
 }
 
 async function searchMessages(event) {
     event.preventDefault();
     const input = document.getElementById('message-search-input');
-    const help = document.getElementById('message-search-help');
     if (!input) return;
 
     const query = input.value.trim();
-    if (query.length < 2) {
+    const savedOnly = event.currentTarget.dataset.savedOnly === '1';
+    if (query.length < 2 && (!savedOnly || query)) {
         showToast(uiText('please_enter_at_least_2_characters'), 'error');
         return;
     }
 
-    if (help) {
-        help.classList.add('hidden');
-    }
-
-    await searchMessagesPage(query, 1);
+    await searchMessagesPage(query, 1, savedOnly);
 }

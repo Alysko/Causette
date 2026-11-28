@@ -2,13 +2,21 @@
 use Causette\Calls\CallSignals;
 use Causette\Calls\CallTurnConfiguration;
 use Causette\Http\ChatResponse;
+use Causette\Localization\DisplayPreferences;
 use Causette\Localization\Locale;
+use Causette\Messaging\MessageSearch;
+use Causette\Messaging\SavedMessages;
+use Causette\Messaging\ThreadReplies;
 use Causette\Security\ConversationRead;
 
 require_once __DIR__ . '/../core/CallSignals.php';
 require_once __DIR__ . '/../core/CallTurnConfiguration.php';
 require_once __DIR__ . '/../core/ChatResponse.php';
 require_once __DIR__ . '/../core/ConversationRead.php';
+require_once __DIR__ . '/../core/DisplayPreferences.php';
+require_once __DIR__ . '/../core/MessageSearch.php';
+require_once __DIR__ . '/../core/SavedMessages.php';
+require_once __DIR__ . '/../core/ThreadReplies.php';
 
 class ApiController extends Controller {
     private const SIDEBAR_CUSTOM_MAX_CHATS = 8;
@@ -400,68 +408,23 @@ class ApiController extends Controller {
     public function searchMessages() {
         Auth::requireAuth();
         $userId = (int)Auth::user()->id;
-        $q = trim($_GET['q'] ?? '');
-
-        if ($q === '' || mb_strlen($q) < 2) {
+        $savedOnly = ($_GET['saved'] ?? null) === '1';
+        $input = $_GET['q'] ?? '';
+        $blank = is_string($input) && trim($input) === '';
+        if (!$savedOnly && $blank) {
             $this->json(['messages' => [], 'total' => 0, 'total_pages' => 0, 'page' => 1]);
+            return;
+        }
+        $search = $blank ? MessageSearch::savedOnly() : MessageSearch::parse($input, DisplayPreferences::timezone());
+        if ($search === null) {
+            $this->json(['error' => Locale::current()->text('ui.message_search_invalid')], 422);
+            return;
         }
 
-        if (mb_strlen($q) > 200) {
-            $q = mb_substr($q, 0, 200);
-        }
-
-        $perPage = 10;
-        $page = max(1, (int)($_GET['page'] ?? 1));
-        $supportsChatTitle = $this->supportsChatTitle();
-        $search = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
-
-        $countQuery = "SELECT COUNT(*)
-              FROM messages m
-              JOIN chats c ON c.id = m.chat_id
-              JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?
-              WHERE m.content LIKE ?";
-
-        if ($this->supportsChatSoftDelete()) {
-            $countQuery .= " AND c.deleted_at IS NULL";
-        }
-
-        $total = (int)Database::query($countQuery, [$userId, $search])->fetchColumn();
-        $totalPages = max(1, (int)ceil($total / $perPage));
-        $page = min($page, $totalPages);
-        $offset = ($page - 1) * $perPage;
-
-        $query = "SELECT
-                    m.id AS message_id,
-                    m.content,
-                    m.created_at,
-                    m.user_id AS sender_id,
-                    m.bot_name,
-                    u.username AS sender_username,
-                    u.email AS sender_email,
-                    u.user_number AS sender_user_number,
-                    u.avatar_filename AS sender_avatar_filename,
-                    c.id AS chat_id,
-                    c.chat_number,
-                    c.type AS chat_type,"
-            . ($supportsChatTitle ? "c.title AS chat_custom_title," : "NULL AS chat_custom_title,")
-            . "(SELECT u2.username
-               FROM chat_members cm2
-               JOIN users u2 ON u2.id = cm2.user_id
-               WHERE cm2.chat_id = c.id AND cm2.user_id != ?
-               ORDER BY cm2.joined_at ASC LIMIT 1) AS other_username
-              FROM messages m
-              JOIN chats c ON c.id = m.chat_id
-              JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?
-              JOIN users u ON u.id = m.user_id
-              WHERE m.content LIKE ?";
-
-        if ($this->supportsChatSoftDelete()) {
-            $query .= " AND c.deleted_at IS NULL";
-        }
-
-        $query .= " ORDER BY m.created_at DESC LIMIT $perPage OFFSET $offset";
-
-        $results = Database::query($query, [$userId, $userId, $search])->fetchAll();
+        $page = filter_var($_GET['page'] ?? 1, FILTER_VALIDATE_INT) ?: 1;
+        $savedIds = $savedOnly ? SavedMessages::ids($userId) : null;
+        $matched = $search->results($userId, $page, $this->supportsChatTitle(), $savedIds);
+        $results = $matched['rows'];
 
         foreach ($results as $r) {
             $r->sender_username = User::decorateDeletedRetainedUsername($r->sender_username ?? '', $r->sender_email ?? null);
@@ -489,7 +452,27 @@ class ApiController extends Controller {
             ]);
         }
 
-        $this->json(['messages' => ChatResponse::searchResults($results), 'total' => $total, 'total_pages' => $totalPages, 'page' => $page]);
+        $this->json(['messages' => ChatResponse::searchResults($results), 'total' => $matched['total'],
+            'total_pages' => $matched['total_pages'], 'page' => $matched['page'], 'highlight_terms' => $search->terms()]);
+    }
+
+    public function setSavedMessage(): void
+    {
+        Auth::requireAuth();
+        Auth::csrfValidate();
+        $id = filter_var($_POST['message_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $saved = $_POST['saved'] ?? null;
+        if ($id === false || !in_array($saved, ['0', '1'], true)) {
+            $this->json(['error' => Locale::current()->text('ui.saved_messages_invalid')], 400);
+            return;
+        }
+        $result = SavedMessages::update((int)Auth::user()->id, $id, $saved === '1');
+        if ($result !== 'updated') {
+            $label = $result === 'full' ? 'ui.saved_messages_limit' : 'ui.saved_message_unavailable';
+            $this->json(['error' => Locale::current()->text($label, ['limit' => SavedMessages::LIMIT])], $result === 'full' ? 409 : 404);
+            return;
+        }
+        $this->json(['saved' => $saved === '1']);
     }
 
     public function searchUsers() {
@@ -830,12 +813,15 @@ class ApiController extends Controller {
                 $message->username = User::decorateDeletedRetainedUsername($message->username ?? '', $message->user_email ?? null);
             }
             $message->avatar_url = User::avatarUrl($message);
-            User::attachEffectiveStatus($message);
         }
+        User::attachMessageAuthorStatuses($messages);
         Message::attachMentionMaps($messages);
         Message::attachQuoteMentionMaps($messages);
         Message::attachReactions($messages, (int)$userId);
         Attachment::attachSubmittedToMessages($messages);
+        if ($allowed) {
+            ThreadReplies::attachCounts($messages);
+        }
 
         $isGroupChat = Chat::isGroupType($chatRow->type ?? null);
         $groupEditWindow = 'never';

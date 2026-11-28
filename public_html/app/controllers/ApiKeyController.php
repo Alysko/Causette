@@ -1,6 +1,9 @@
 <?php
 
 use Causette\Localization\DisplayPreferences;
+use Causette\Messaging\ConversationNotifications;
+
+require_once __DIR__ . '/../core/ConversationNotifications.php';
 
 class ApiKeyController extends Controller {
 
@@ -337,15 +340,12 @@ class ApiKeyController extends Controller {
 
         ApiKey::logUsage((int)$keyRecord->id, $clientIp, 'bot/send');
 
-        $members = Database::query(
-            "SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?",
-            [$chatId, (int)$keyRecord->user_id]
-        )->fetchAll();
-        DisplayPreferences::preloadRecipients(array_column($members, 'user_id'));
-        foreach ($members as $m) {
-            $locale = DisplayPreferences::localeForRecipient((int) $m->user_id);
+        $recipients = ConversationNotifications::recipients($chatId, (int)$keyRecord->user_id, $content);
+        DisplayPreferences::preloadRecipients($recipients);
+        foreach ($recipients as $recipient) {
+            $locale = DisplayPreferences::localeForRecipient($recipient);
             Notification::create(
-                $m->user_id,
+                $recipient,
                 'message',
                 $locale->text('notifications.new_message_title'),
                 mb_substr($text, 0, 50),

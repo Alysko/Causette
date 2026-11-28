@@ -14,7 +14,9 @@ $displayOptions = [
     'time_format' => ['ui.time_format', array_map($locale->text(...), DisplayPreferences::TIME_FORMATS)],
 ];
 if (!$displayForSite) {
-    $displayOptions['theme'] = ['ui.theme', array_map($locale->text(...), DisplayPreferences::THEMES)];
+    foreach (DisplayPreferences::PERSONAL_OPTIONS as $field => [$label, $choices]) {
+        $displayOptions[$field] = [$label, array_map($locale->text(...), $choices)];
+    }
 }
 ?>
 <form method="POST" action="<?= htmlspecialchars(base_path($displayAction), ENT_QUOTES, 'UTF-8') ?>" class="space-y-4">

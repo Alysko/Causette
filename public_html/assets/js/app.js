@@ -116,6 +116,9 @@ let typingBeforeUnloadBound = false;
 let clientNavigationBound = false;
 let clientNavigation = null;
 let currentClientRenderedUrl = '';
+const groupMessagePreviews = new Map();
+const GROUP_PREVIEW_LIMIT = 8;
+const GROUP_PREVIEW_MAX_AGE_MS = 5 * 60 * 1000;
 let serverConnectionFailureCount = 0;
 let serverConnectionOverlayVisible = false;
 let serverConnectionRetryTimeoutId = null;
@@ -548,6 +551,115 @@ function shouldHandleClientNavigationForUrl(targetUrl) {
     return true;
 }
 
+function groupPreviewKey(url) {
+    const route = appRoute(url.pathname);
+    return !url.search && !url.hash && /^\/c\/\d{4}(?:-\d{4}){3}$/.test(route) ? url.pathname : null;
+}
+
+function rememberGroupPreview(url) {
+    const key = groupPreviewKey(url);
+    if (!key) return;
+    const chat = document.getElementById('chat-view');
+    const viewer = String(window.CURRENT_USER_ID);
+    groupMessagePreviews.delete(key);
+    if (chat?.dataset.chatType !== 'group' || chat.dataset.isGroupMember !== '1'
+        || chat.dataset.currentUserId !== viewer || formatNumber(chat.dataset.chatNumber) !== key.split('/').at(-1)) return;
+
+    const list = chat.querySelector('#messages');
+    if (!list) return;
+    const title = chat.querySelector('#chat-title')?.textContent || '';
+    const rows = [];
+    let totalLength = 0;
+    for (const row of Array.from(list.querySelectorAll(':scope > [data-message-id]')).slice(-60).reverse()) {
+        const body = row.querySelector('.js-message-content');
+        if (!body) continue;
+        const text = decodeStoredMentionsToPlainText(body.dataset.rawContent ?? body.textContent)
+            || (row.dataset.messageHasAttachments === '1' ? uiText('attachment_label') : '');
+        if (totalLength + text.length > 160000) break;
+        totalLength += text.length;
+        rows.push({
+            author: row.querySelector(':scope > .min-w-0 > div > .causette-accent')?.textContent.trim() || '',
+            text,
+            timestamp: row.querySelector('[data-timeline-time]:not([hidden])')?.textContent.trim() || '',
+        });
+    }
+    if (rows.length === 0) return;
+    groupMessagePreviews.set(key, { viewer, title, rows: rows.reverse(), capturedAt: Date.now() });
+    if (groupMessagePreviews.size > GROUP_PREVIEW_LIMIT) {
+        groupMessagePreviews.delete(groupMessagePreviews.keys().next().value);
+    }
+}
+
+async function showAuthorizedGroupPreview(navigation, targetUrl) {
+    const key = groupPreviewKey(targetUrl);
+    const snapshot = groupMessagePreviews.get(key);
+    if (!snapshot) return;
+    if (Date.now() - snapshot.capturedAt > GROUP_PREVIEW_MAX_AGE_MS || snapshot.viewer !== String(window.CURRENT_USER_ID)) {
+        groupMessagePreviews.delete(key);
+        return;
+    }
+    try {
+        const response = await fetch(key, {
+            mode: 'same-origin', cache: 'no-store', redirect: 'manual', signal: navigation.controller.signal,
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-Causette-View': 'group-access' },
+        });
+        if (clientNavigation !== navigation || navigation.controller.signal.aborted) return;
+        if (response.status !== 204 || response.headers.get('X-Causette-Group-Viewer') !== snapshot.viewer) {
+            groupMessagePreviews.delete(key);
+            return;
+        }
+        const main = document.getElementById('app-main-content');
+        if (!main || versionUpdateDetected) return;
+
+        // Only previously displayed text is reused. Controls and resources come from the fresh view.
+        const preview = document.createElement('section');
+        preview.className = 'group-message-preview flex flex-1 min-h-0 flex-col';
+        const heading = document.createElement('h2');
+        heading.className = 'h-16 shrink-0 border-b border-zinc-800 flex items-center px-6 font-semibold';
+        heading.textContent = snapshot.title;
+        const timeline = document.createElement('div');
+        timeline.className = 'group-preview-timeline flex-1 min-h-0 p-6 overflow-y-auto';
+        for (const row of snapshot.rows) {
+            const item = document.createElement('div');
+            item.className = row.author ? 'mt-4' : 'mt-1';
+            if (row.author) {
+                const author = document.createElement('bdi');
+                author.className = 'text-sm font-bold causette-accent';
+                author.textContent = row.author;
+                item.append(author);
+            }
+            const message = document.createElement('div');
+            message.className = 'message-text whitespace-pre-wrap text-zinc-200';
+            message.textContent = row.text;
+            item.append(message);
+            if (row.timestamp) {
+                const time = document.createElement('div');
+                time.className = 'text-xs text-zinc-500';
+                time.textContent = row.timestamp;
+                item.append(time);
+            }
+            timeline.append(item);
+        }
+        preview.append(heading, timeline);
+        navigation.preview = preview;
+        main.append(preview);
+        main.classList.add('show-group-preview');
+        timeline.scrollTop = timeline.scrollHeight;
+        updateSidebarCurrentPage(targetUrl.pathname);
+    } catch {
+        // The full navigation can still succeed if the preview request fails.
+    }
+}
+
+function closeGroupPreview(navigation, pathname) {
+    const preview = navigation?.preview;
+    if (!preview) return;
+    preview.parentElement?.classList.remove('show-group-preview');
+    preview.remove();
+    navigation.preview = null;
+    if (pathname) updateSidebarCurrentPage(pathname);
+}
+
 function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
     const responseNonce = policy?.match(/(?:^|;)\s*script-src\s+[^;]*?'nonce-([A-Za-z0-9+/]{32})'/)?.[1];
     if (!documentScriptNonce || !responseNonce) return false;
@@ -566,6 +678,11 @@ function replaceMainContentFromHtml(htmlText, policy, targetUrl, options = {}) {
     const nextMain = nextDoc.getElementById('app-main-content') || nextDoc.querySelector('main');
     const currentMain = document.getElementById('app-main-content') || document.querySelector('main');
     if (!nextMain || !currentMain) {
+        return false;
+    }
+    const nextChat = nextMain.querySelector('#chat-view');
+    if (nextChat && nextChat.dataset.currentUserId !== String(window.CURRENT_USER_ID)) {
+        groupMessagePreviews.clear();
         return false;
     }
 
@@ -625,6 +742,7 @@ async function navigateApp(url, options = {}) {
 
     if (targetUrl.href === currentUrl.href && (!options.force || source === 'popstate')) {
         clientNavigation?.controller.abort();
+        closeGroupPreview(clientNavigation, currentUrl.pathname);
         clientNavigation = null;
         setNavigationStatus(null);
         return true;
@@ -632,6 +750,8 @@ async function navigateApp(url, options = {}) {
 
     if (!shouldHandleClientNavigationForUrl(targetUrl)) {
         clientNavigation?.controller.abort();
+        closeGroupPreview(clientNavigation, currentUrl.pathname);
+        groupMessagePreviews.clear();
         window.location.href = targetUrl.href;
         return true;
     }
@@ -641,6 +761,8 @@ async function navigateApp(url, options = {}) {
     }
 
     clientNavigation?.controller.abort();
+    closeGroupPreview(clientNavigation, currentUrl.pathname);
+    if (targetUrl.href !== currentUrl.href) rememberGroupPreview(currentUrl);
     const controller = new AbortController();
     const navigation = { controller, url: targetUrl.href, updateHistory };
     clientNavigation = navigation;
@@ -648,11 +770,20 @@ async function navigateApp(url, options = {}) {
     const fromUrl = currentUrl.pathname + currentUrl.search + currentUrl.hash;
     const toUrl = targetUrl.pathname + targetUrl.search + targetUrl.hash;
     const detail = { from: fromUrl, to: toUrl, source };
+    const keepCurrentView = () => {
+        if (source === 'popstate') {
+            window.history.replaceState(window.history.state, '', fromUrl);
+        }
+        const message = document.getElementById('app-route-status')?.dataset.errorLabel;
+        if (message && !serverConnectionOverlayVisible) showToast(message, 'error');
+        return false;
+    };
 
     try {
         const headers = { 'X-Requested-With': 'XMLHttpRequest' };
         if (appRoute(targetUrl.pathname)?.startsWith('/c/')) {
             headers['X-Causette-View'] = 'main';
+            if (targetUrl.href !== currentUrl.href) void showAuthorizedGroupPreview(navigation, targetUrl);
         }
         const response = await fetch(toUrl, {
             method: 'GET',
@@ -662,7 +793,11 @@ async function navigateApp(url, options = {}) {
         });
 
         if (controller.signal.aborted) return true;
+        if ([408, 429, 502, 503, 504].includes(response.status)) {
+            return keepCurrentView();
+        }
         if (!response.ok || response.redirected) {
+            groupMessagePreviews.delete(groupPreviewKey(targetUrl));
             window.location.href = toUrl;
             return true;
         }
@@ -673,6 +808,7 @@ async function navigateApp(url, options = {}) {
         const swapped = replaceMainContentFromHtml(htmlText, policy, targetUrl, {
             updateHistory,
             beforeReplace() {
+                closeGroupPreview(navigation);
                 runRouteLifecycleHooks('before', detail);
                 if (controller.signal.aborted) return false;
                 clearRouteScopedState();
@@ -693,15 +829,15 @@ async function navigateApp(url, options = {}) {
     } catch (error) {
         if (controller.signal.aborted) return true;
         if (isLikelyServerConnectionError(error)) {
-            const message = document.getElementById('app-route-status')?.dataset.errorLabel;
-            if (message && !serverConnectionOverlayVisible) showToast(message, 'error');
-            return false;
+            return keepCurrentView();
         }
 
         window.location.href = toUrl;
         return true;
     } finally {
         if (clientNavigation === navigation) {
+            controller.abort();
+            closeGroupPreview(navigation, currentUrl.pathname);
             clientNavigation = null;
             setNavigationStatus(null);
         }
@@ -711,6 +847,12 @@ async function navigateApp(url, options = {}) {
 function bindClientNavigation() {
     if (clientNavigationBound) return;
     clientNavigationBound = true;
+
+    window.addEventListener('pagehide', () => {
+        clientNavigation?.controller.abort();
+        closeGroupPreview(clientNavigation);
+        groupMessagePreviews.clear();
+    });
 
     document.addEventListener('click', (event) => {
         if (event.defaultPrevented) return;
@@ -1098,7 +1240,7 @@ function formatAttachmentExpiryLabel(expirySeconds) {
     return uiText('attachment_no_expiry');
 }
 
-function renderMessageAttachments(attachments, canDelete = false) {
+function renderMessageAttachments(attachments, canDelete = false, collapseImages = false) {
     if (!Array.isArray(attachments) || attachments.length === 0) {
         return '';
     }
@@ -1127,10 +1269,13 @@ function renderMessageAttachments(attachments, canDelete = false) {
                 : '';
 
             if (category === 'image' || category === 'video') {
+                const imageLabel = collapseImages
+                    ? `<span class="chat-image-filename"><i class="fa-regular fa-image" aria-hidden="true"></i>${escapeHtml(attachment.original_name)}</span>`
+                    : `<img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.original_name)}" class="w-full h-24 object-cover rounded-lg border border-zinc-700" loading="lazy" decoding="async">`;
                 const preview = category === 'video'
                     ? `<video controls playsinline preload="none" src="${escapeHtml(attachment.url)}" aria-label="${escapeHtml(attachment.original_name)}" class="w-full rounded-lg bg-black aspect-video"></video>`
                     : `<button type="button" class="js-lightbox-trigger block w-full" data-image-url="${escapeHtml(attachment.url)}" data-image-title="${escapeHtml(attachment.original_name)}">
-                            <img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.original_name)}" class="w-full h-24 object-cover rounded-lg border border-zinc-700" loading="lazy" decoding="async">
+                            ${imageLabel}
                         </button>`;
                 return `
                     <div class="${category === 'video' ? 'w-72 max-w-full' : 'w-44'} bg-zinc-800/70 border border-zinc-700 rounded-xl p-2">
@@ -1273,6 +1418,7 @@ function init() {
         currentUserId = Number(chatView.dataset.currentUserId || 0);
         currentChat = {
             id: Number(chatView.dataset.chatId),
+            viewing_history: !!chatView.querySelector('[data-chat-history]'),
             chat_number: chatView.dataset.chatNumber,
             type: normalizeChatType(chatView.dataset.chatType),
             owner_user_id: Number(chatView.dataset.chatOwnerId || 0),
@@ -1315,6 +1461,7 @@ function init() {
         bindDeleteMessageModal();
         bindMessageEditAndDelete();
         bindChatHeaderMenu();
+        bindConversationNotifications(chatView);
         bindMessageQuotesAndReactions();
         maybePromptForNewGroupName();
         setChatComposerEnabled(currentChat.can_send_messages !== false, currentChat.message_restriction_reason || '');
@@ -1375,6 +1522,9 @@ function init() {
     const messageSearchForm = document.getElementById('message-search-form');
     if (messageSearchForm) {
         messageSearchForm.addEventListener('submit', searchMessages);
+        const query = document.getElementById('message-search-input')?.value.trim() || '';
+        const savedOnly = messageSearchForm.dataset.savedOnly === '1';
+        if (savedOnly || query) searchMessagesPage(query, 1, savedOnly);
     }
 
     const postSearchForm = document.getElementById('post-search-form');
@@ -2089,6 +2239,7 @@ function bindAppActions() {
         'clear-notifications': () => clearAllNotifications(),
         'new-post': () => openNewPostModal(),
         'create-group-chat': () => createGroupChat(),
+        'toggle-saved-message': (_data, button) => toggleSavedMessage(button),
         'open-add-user': () => window.openAddUserModal?.(),
         'approve-group-join': (data) => approveGroupJoinRequest(Number(data.userId)),
         'deny-group-join': (data) => denyGroupJoinRequest(Number(data.userId)),
@@ -2135,6 +2286,8 @@ function bindAppActions() {
 function startAppInitOnce() {
     if (appInitStarted) return;
     appInitStarted = true;
+    bindConversationSwitcher();
+    bindThreadDialog();
     bindDynamicViewportHeight();
     applyTopProgressPreference();
     bindServerConnectionOverlayControls();

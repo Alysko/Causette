@@ -82,7 +82,7 @@ test('native username search validation agrees with the localized feedback', asy
 });
 
 test('post and message searches use localized progress and empty results', async () => {
-    const results = { innerHTML: '' };
+    const results = { innerHTML: '', isConnected: true };
     const labels = {
         search_pending: 'Recherche en cours…',
         search_no_posts: 'Aucune publication trouvée.',
@@ -90,6 +90,7 @@ test('post and message searches use localized progress and empty results', async
     };
     const context = createContext({
         document: { getElementById: () => results },
+        AbortController, URLSearchParams,
         fetch: async () => ({ ok: true, json: async () => ({}) }),
         appPath: (path) => path,
         uiText: (key) => labels[key],
@@ -106,6 +107,29 @@ test('post and message searches use localized progress and empty results', async
         await pending;
         assert.match(results.innerHTML, new RegExp(label));
     }
+});
+
+test('the newest search keeps its results when an older response arrives late', async () => {
+    const results = { innerHTML: '', isConnected: true };
+    const requests = [];
+    const context = createContext({
+        document: { getElementById: () => results },
+        AbortController, URLSearchParams,
+        fetch: (url, {signal}) => new Promise(resolve => requests.push({url, signal, resolve})),
+        appPath: path => path,
+        uiText: key => key,
+        escapeHtml: text => text,
+    });
+    runInContext(users, context);
+    const older = context.searchMessagesPage('release', 1, true);
+    const latest = context.searchMessagesPage('', 1, true);
+    assert.match(requests[1].url, /[?&]saved=1/);
+    assert.ok(requests[0].signal.aborted);
+    requests[1].resolve({ok: true, json: async () => ({messages: []})});
+    await latest;
+    requests[0].resolve({ok: true, json: async () => ({messages: []})});
+    await older;
+    assert.match(results.innerHTML, /no_saved_messages/);
 });
 
 test('user search shows the appropriate localized direct message or friend action', () => {

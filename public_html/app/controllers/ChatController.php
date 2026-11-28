@@ -4,6 +4,8 @@ use Causette\Chat\PollDraft;
 use Causette\Http\ChatResponse;
 use Causette\Localization\DisplayPreferences;
 use Causette\Localization\Locale;
+use Causette\Messaging\ConversationNotifications;
+use Causette\Messaging\ThreadReplies;
 use Causette\Security\ConversationRead;
 use Causette\Storage\AttachmentBudget;
 
@@ -11,6 +13,8 @@ require_once __DIR__ . '/../core/AttachmentBudget.php';
 require_once __DIR__ . '/../core/ChatResponse.php';
 require_once __DIR__ . '/../core/ConversationRead.php';
 require_once __DIR__ . '/../core/PollDraft.php';
+require_once __DIR__ . '/../core/ThreadReplies.php';
+require_once __DIR__ . '/../core/ConversationNotifications.php';
 
 class ChatController extends Controller {
     private const GROUP_CHAT_USER_LIMIT = 999;
@@ -521,11 +525,14 @@ class ChatController extends Controller {
     }
 
     public function show($params) {
-        Auth::requireAuth();
-        $authUser = Auth::user();
+        $authUser = Auth::requireAuth();
         $currentUserId = (int)$authUser->id;
-        $isCurrentUserAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
         $chatNumber = (string)($params['chat_number'] ?? '');
+        if (($_SERVER['HTTP_X_CAUSETTE_VIEW'] ?? '') === 'group-access') {
+            $this->authorizeGroupPreview($chatNumber, $currentUserId);
+            return;
+        }
+        $isCurrentUserAdmin = strtolower((string)($authUser->role ?? '')) === 'admin';
         if (!preg_match('/^\d{4}-\d{4}-\d{4}-\d{4}$/', $chatNumber)) {
             $this->flash('error', 'invalid_chat');
             $this->redirect('/');
@@ -544,17 +551,16 @@ class ChatController extends Controller {
 
         $chat->type = Chat::normalizeType($chat->type ?? null);
 
-        $supportsLastSeen = $this->supportsLastSeenMessageId();
-        $supportsChatTitle = $this->supportsChatTitle();
-
+        $supportsChatTitle = property_exists($chat, 'title');
         $isGroupChat = Chat::isGroupType($chat->type ?? null);
-        $groupVisibility = $isGroupChat && $this->supportsGroupVisibility()
+        $groupVisibility = $isGroupChat
             ? $this->getGroupVisibility($chat)
             : self::GROUP_VISIBILITY_NONE;
 
         $userId = $currentUserId;
         $member = $this->getGroupMember((int)$chat->id, $userId);
         $isMember = (bool)$member;
+        $supportsLastSeen = $isMember && property_exists($member, 'last_seen_message_id');
         $isReadOnlyPublicViewer = false;
         $isRequestablePreview = false;
 
@@ -654,38 +660,16 @@ class ChatController extends Controller {
         }
 
         $messages = [];
+        $historyAnchor = null;
         if ($isMember || $isReadOnlyPublicViewer) {
             Attachment::cleanupExpiredForChat((int)$chat->id);
-            try {
-                $messages = Database::query(
-                    "SELECT m.*, u.username, u.email AS user_email, u.user_number, u.avatar_filename, u.presence_status, u.last_active_at,
-                            qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
-                     FROM messages m
-                     JOIN users u ON m.user_id = u.id
-                     LEFT JOIN users qu ON qu.id = m.quoted_user_id
-                     LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
-                     WHERE m.chat_id = ?
-                     ORDER BY m.created_at DESC, m.id DESC
-                     LIMIT 100",
-                    [$chat->id]
-                )->fetchAll();
-            } catch (Throwable $e) {
-                if (stripos($e->getMessage(), 'avatar_filename') === false) {
-                    throw $e;
-                }
-
-                $messages = Database::query(
-                    "SELECT m.*, u.username, u.email AS user_email, u.user_number, u.presence_status, u.last_active_at,
-                            qu.username AS quoted_username, qu.user_number AS quoted_user_number, qm.bot_name AS quoted_bot_name
-                     FROM messages m
-                     JOIN users u ON m.user_id = u.id
-                     LEFT JOIN users qu ON qu.id = m.quoted_user_id
-                     LEFT JOIN messages qm ON qm.id = m.quoted_message_id AND qm.chat_id = m.chat_id
-                     WHERE m.chat_id = ?
-                     ORDER BY m.created_at DESC, m.id DESC
-                     LIMIT 100",
-                    [$chat->id]
-                )->fetchAll();
+            $requestedMessage = filter_var($_GET['msg'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($requestedMessage !== false) {
+                $messages = Message::timelineForView((int)$chat->id, $requestedMessage);
+                $historyAnchor = $messages === [] ? null : $requestedMessage;
+            }
+            if ($historyAnchor === null) {
+                $messages = Message::timelineForView((int)$chat->id);
             }
         }
         foreach ($messages as $message) {
@@ -695,14 +679,17 @@ class ChatController extends Controller {
                 $message->username = User::decorateDeletedRetainedUsername($message->username ?? '', $message->user_email ?? null);
             }
             $message->avatar_url = User::avatarUrl($message);
-            User::attachEffectiveStatus($message);
         }
+        User::attachMessageAuthorStatuses($messages);
         Message::attachMentionMaps($messages);
         Message::attachQuoteMentionMaps($messages);
         Message::attachReactions($messages, (int)$currentUserId);
+        if (!$isReadOnlyPublicViewer) {
+            ThreadReplies::attachCounts($messages);
+        }
         Attachment::attachSubmittedToMessages($messages);
 
-        if ($this->supportsSystemEvents()) {
+        if ($historyAnchor === null && $this->supportsSystemEvents()) {
             $systemEvents = Database::query(
                 "SELECT id, chat_id, event_type, content, created_at, 1 AS is_system_event
                  FROM chat_system_events WHERE chat_id = ? ORDER BY created_at DESC, id DESC LIMIT 100",
@@ -727,7 +714,8 @@ class ChatController extends Controller {
             $messages = array_slice($combined, 0, 100);
         }
 
-        $messageRestrictionReason = $this->getPersonalChatMessageRestrictionReason((int)$chat->id, (int)$currentUserId);
+        $messageRestrictionReason = $isGroupChat
+            ? null : $this->getPersonalChatMessageRestrictionReason((int)$chat->id, $currentUserId);
         $canSendMessages = $messageRestrictionReason === null;
         $canStartCalls = $messageRestrictionReason !== 'banned_user';
         if ($isGroupChat) {
@@ -740,7 +728,7 @@ class ChatController extends Controller {
                     ? 'group_read_only_public'
                     : 'group_members_only';
             } else {
-                $isMuted = $this->isGroupMemberMuted((int)$chat->id, (int)$currentUserId);
+                $isMuted = (int)($member->is_muted ?? 0) === 1;
                 $canSendMessages = !$isMuted;
                 if ($isMuted) {
                     $messageRestrictionReason = 'group_muted';
@@ -749,12 +737,12 @@ class ChatController extends Controller {
         }
         $isUserInActiveCall = $this->isUserInJoinedActiveCall((int)$currentUserId);
 
-        if ($supportsLastSeen && $isMember) {
+        if ($historyAnchor === null && $supportsLastSeen && $isMember) {
             $latestMessageId = $this->getLatestMessageId((int)$chat->id);
             $this->markChatSeenUpToMessageId((int)$chat->id, (int)$currentUserId, $latestMessageId);
         }
 
-        $pendingAttachments = $isMember
+        $pendingAttachments = $isMember && $historyAnchor === null
             ? Attachment::listPendingForChatUser((int)$chat->id, (int)$currentUserId)
             : [];
         $pinnedMessage = ($isMember || $isReadOnlyPublicViewer)
@@ -802,6 +790,7 @@ class ChatController extends Controller {
             'chat' => $chat,
             'chatTitle' => $chatTitle,
             'messages' => ChatResponse::messages(array_reverse($messages)),
+            'historyAnchor' => $historyAnchor,
             'members' => $members,
             'pendingAttachments' => $pendingAttachments,
             'currentUserId' => $currentUserId,
@@ -827,6 +816,25 @@ class ChatController extends Controller {
             'groupDeleteWindow' => $groupDeleteWindow,
             'csrf' => $this->csrfToken()
         ]);
+    }
+
+    private function authorizeGroupPreview(string $chatNumber, int $userId): void
+    {
+        $chat = preg_match('/^\d{4}-\d{4}-\d{4}-\d{4}$/D', $chatNumber)
+            ? Database::query(
+                'SELECT c.* FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
+                 WHERE c.chat_number = ? AND cm.user_id = ?',
+                [str_replace('-', '', $chatNumber), $userId]
+            )->fetch()
+            : null;
+        header('Cache-Control: no-store');
+        header('X-App-Version: ' . APP_VERSION);
+        if (!$chat || !Chat::isGroupType($chat->type) || !ConversationRead::allows($chat, true)) {
+            http_response_code(404);
+            return;
+        }
+        header('X-Causette-Group-Viewer: ' . $userId);
+        http_response_code(204);
     }
 
     public function createGroupPoll() {
@@ -1122,6 +1130,141 @@ class ChatController extends Controller {
         ]);
     }
 
+    public function setConversationNotifications(): void
+    {
+        Auth::requireAuth();
+        Auth::csrfValidate();
+        $chatId = filter_var($_POST['chat_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $mode = $_POST['mode'] ?? null;
+        if ($chatId === false || !is_string($mode) || !isset(ConversationNotifications::MODES[$mode])) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+            return;
+        }
+        $accountId = (int)Auth::user()->id;
+        $chat = Database::query('SELECT c.id FROM chats c JOIN chat_members cm ON cm.chat_id = c.id
+            WHERE c.id = ? AND cm.user_id = ? AND c.deleted_at IS NULL', [$chatId, $accountId])->fetch();
+        if (!$chat) {
+            $this->json(['error' => Locale::current()->text('response.chat_not_found')], 404);
+            return;
+        }
+        ConversationNotifications::save($chatId, $accountId, $mode);
+        $this->json(['mode' => $mode]);
+    }
+
+    public function getThread(array $params): void
+    {
+        Auth::requireAuth();
+        $userId = (int)Auth::user()->id;
+        $id = filter_var($params['message_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $before = isset($_GET['before']) ? filter_var($_GET['before'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : null;
+        $after = isset($_GET['after']) ? filter_var($_GET['after'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) : null;
+        if ($id === false || $before === false || $after === false || ($before !== null && $after !== null)) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+            return;
+        }
+        $root = ThreadReplies::root($id, $userId);
+        if (!$root) {
+            $this->json(['error' => Locale::current()->text('ui.thread_unavailable')], 404);
+            return;
+        }
+        $this->json([
+            'root' => ThreadReplies::project($root), 'chat_id' => (int)$root->chat_id,
+            'can_reply' => $this->canReplyToThread($root, $userId), 'following' => ThreadReplies::following($id, $userId),
+        ] + ThreadReplies::page($id, $before, $after));
+    }
+
+    public function setThreadFollow(array $params): void
+    {
+        Auth::requireAuth();
+        Auth::csrfValidate();
+        $userId = (int)Auth::user()->id;
+        $id = filter_var($params['message_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $mode = $_POST['following'] ?? null;
+        if ($id === false || !in_array($mode, ['0', '1'], true)) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+            return;
+        }
+        if (!ThreadReplies::root($id, $userId)) {
+            $this->json(['error' => Locale::current()->text('ui.thread_unavailable')], 404);
+            return;
+        }
+        ThreadReplies::follow($id, $userId, $mode === '1');
+        $this->json(['following' => $mode === '1']);
+    }
+
+    public function replyToThread(array $params): void
+    {
+        Auth::requireAuth();
+        Auth::csrfValidate();
+        $userId = (int)Auth::user()->id;
+        $id = filter_var($params['message_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $key = $_POST['client_key'] ?? null;
+        $raw = $_POST['content'] ?? null;
+        $content = is_string($raw) && strlen($raw) <= ThreadReplies::MAX_LENGTH * 4 && mb_check_encoding($raw, 'UTF-8') ? trim($raw) : '';
+        if ($id === false || $content === '' || mb_strlen($content) > ThreadReplies::MAX_LENGTH
+            || !is_string($key) || !preg_match('/\A[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\z/', $key)) {
+            $this->json(['error' => Locale::current()->text('response.invalid_payload')], 400);
+            return;
+        }
+        [$payload, $status] = $this->storeThreadReply($id, $userId, $key, $content);
+        $this->json($payload, $status);
+    }
+
+    private function canReplyToThread(object $root, int $userId): bool
+    {
+        return Chat::isGroupType($root->type)
+            ? (int)$root->is_muted !== 1
+            : $this->canMessageInChat((int)$root->chat_id, $userId);
+    }
+
+    private function storeThreadReply(int $id, int $userId, string $key, string $content): array
+    {
+        $db = Database::getInstance();
+        $db->beginTransaction();
+        try {
+            $locale = Locale::current();
+            $root = ThreadReplies::root($id, $userId, true);
+            if (!$root) {
+                return [['error' => $locale->text('ui.thread_unavailable')], 404];
+            }
+            if (!$this->canReplyToThread($root, $userId)) {
+                return [['error' => $locale->text('response.access_denied')], 403];
+            }
+            $stored = ThreadReplies::reply($id, $userId, $key, $content);
+            if ($stored === null) {
+                return [['error' => $locale->text('response.invalid_payload')], 409];
+            }
+            $db->commit();
+            if ($stored['created']) {
+                $this->notifyThreadFollowers($root, $userId, $content);
+            }
+            return [['reply' => $stored['reply']], 200];
+        } finally {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+        }
+    }
+
+    private function notifyThreadFollowers(object $root, int $sender, string $content): void
+    {
+        try {
+            $followers = ConversationNotifications::threadRecipients((int)$root->chat_id, ThreadReplies::followers((int)$root->id, $sender));
+            DisplayPreferences::preloadRecipients($followers);
+            $path = '/c/' . User::formatUserNumber($root->chat_number) . '?thread=' . (int)$root->id;
+            $preview = mb_strimwidth($content, 0, 50, '…', 'UTF-8');
+            $notifications = [];
+            foreach ($followers as $recipient) {
+                $locale = DisplayPreferences::localeForRecipient($recipient);
+                $notifications[] = [$recipient, 'message', $locale->text('ui.thread_reply_notification'), $preview, $path];
+            }
+            // Keep new thread replies independent of external push delivery latency.
+            Notification::createInAppBatch($notifications);
+        } catch (Throwable) {
+            error_log('[Causette] A thread notification could not be created.');
+        }
+    }
+
     public function sendMessage() {
         Auth::requireAuth();
         Auth::csrfValidate();
@@ -1233,9 +1376,8 @@ class ChatController extends Controller {
             $messageId = $submitted['message_id'];
         }
 
-        // Notify other members
-        $members = Database::query("SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?", [$chatId, $userId])->fetchAll();
-        DisplayPreferences::preloadRecipients(array_column($members, 'user_id'));
+        $recipients = ConversationNotifications::recipients($chatId, (int)$userId, $content);
+        DisplayPreferences::preloadRecipients($recipients);
         $notificationPreview = mb_substr($rawContent, 0, 20);
         if (mb_strlen($rawContent) > 20) {
             $notificationPreview .= '…';
@@ -1245,10 +1387,10 @@ class ChatController extends Controller {
             : 'notifications.direct_message_title';
         $titleParameters = ['username' => Auth::user()->username];
         $chatPath = '/c/' . User::formatUserNumber($chat->chat_number);
-        foreach ($members as $m) {
-            $locale = DisplayPreferences::localeForRecipient((int) $m->user_id);
+        foreach ($recipients as $recipient) {
+            $locale = DisplayPreferences::localeForRecipient($recipient);
             $preview = $rawContent === '' ? $locale->text('browser.attachment_label') : $notificationPreview;
-            Notification::create($m->user_id, 'message', $locale->text($notificationTitleKey, $titleParameters), $preview, $chatPath);
+            Notification::create($recipient, 'message', $locale->text($notificationTitleKey, $titleParameters), $preview, $chatPath);
         }
 
         $this->json(['success' => true, 'message_id' => $messageId]);
@@ -1483,11 +1625,12 @@ class ChatController extends Controller {
                 $message->username = User::decorateDeletedRetainedUsername($message->username ?? '', $message->user_email ?? null);
             }
             $message->avatar_url = User::avatarUrl($message);
-            User::attachEffectiveStatus($message);
         }
+        User::attachMessageAuthorStatuses($messages);
         Message::attachMentionMaps($messages);
         Message::attachQuoteMentionMaps($messages);
         Message::attachReactions($messages, (int)$userId);
+        ThreadReplies::attachCounts($messages);
         Attachment::attachSubmittedToMessages($messages);
 
         $firstUnseenMessageId = 0;

@@ -18,7 +18,7 @@ final class ChatResponse
         'bot_name', 'username', 'user_number', 'avatar_url',
         'effective_status', 'effective_status_label', 'effective_status_text_class', 'effective_status_dot_class',
         'mention_map', 'quote_mention_map', 'reactions', 'attachments', 'is_quoted', 'has_attachments',
-        'is_system_event', 'event_type',
+        'is_system_event', 'event_type', 'thread_replies',
     ];
 
     private const PIN_FIELDS = [

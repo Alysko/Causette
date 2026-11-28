@@ -16,6 +16,8 @@ final class Setting
             'attachments_maximum_file_size_mb', 'system_messages_auto_combine_2' => '1',
             'attachments_expiry_enabled', 'attachments_expiry_hours' => null,
             'display_defaults', 'display_preferences_2', 'webrtc_stun_servers' => null,
+            'saved_messages_2' => '[91]',
+            'chat_notify_101_2' => 'mentions',
             default => throw new RuntimeException('Unexpected setting in chat view: ' . $key),
         };
     }

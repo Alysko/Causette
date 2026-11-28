@@ -3,6 +3,8 @@ use Causette\Chat\GroupHistoryText;
 use Causette\Chat\PollDraft;
 use Causette\Localization\DisplayPreferences;
 use Causette\Localization\Locale;
+use Causette\Messaging\ConversationNotifications;
+use Causette\Messaging\SavedMessages;
 use Causette\View\HtmlJson;
 
 require_once __DIR__ . '/../core/HtmlJson.php';
@@ -13,8 +15,11 @@ require_once __DIR__ . '/../core/GroupHistoryText.php';
 require_once __DIR__ . '/../core/DisplayPreferences.php';
 require_once __DIR__ . '/../core/PollDraft.php';
 require_once __DIR__ . '/../core/ReactionCatalog.php';
+require_once __DIR__ . '/../core/SavedMessages.php';
+require_once __DIR__ . '/../core/ConversationNotifications.php';
 
 $chatLocale = Locale::current();
+$showImageThumbnails = DisplayPreferences::effective()['image_preview'] !== 'collapsed';
 $tr = $chatLocale->html(...);
 $chatLabel = static fn(string $key): string => $chatLocale->html('chat.' . $key);
 
@@ -57,6 +62,9 @@ $isGroupChat = (($chat->type ?? 'personal') === 'group');
 $isPersonalChat = !$isGroupChat;
 $isGroupMember = (bool)($isGroupMember ?? true);
 $isReadOnlyPublicViewer = (bool)($isReadOnlyPublicViewer ?? false);
+$viewingHistory = !empty($historyAnchor);
+$savedMessageIds = $isReadOnlyPublicViewer ? [] : SavedMessages::ids((int)$currentUserId);
+$savedMessageLookup = array_fill_keys($savedMessageIds, true);
 $isRequestablePreview = (bool)($isRequestablePreview ?? false);
 $groupVisibility = strtolower((string)($groupVisibility ?? 'none'));
 $currentUserJoinRequestStatus = strtolower((string)($currentUserJoinRequestStatus ?? ''));
@@ -96,7 +104,8 @@ if ($isGroupChat && $isGroupMember) {
 $canManageGroupSettings = $isGroupChat && ($isGroupOwner || $isCurrentUserAdmin);
 $canModerateMembers = $isGroupChat && $isGroupMember && ($isGroupOwner || $isGroupModerator || $isCurrentUserAdmin);
 $canAddUsers = $isGroupChat && $canManageGroupSettings && $isGroupMember;
-$hasChatActions = ($isGroupChat && ($isGroupMember || $isCurrentUserAdmin)) || $canReportChat;
+$canSetConversationNotifications = $isPersonalChat || $isGroupMember;
+$hasChatActions = $canSetConversationNotifications || ($isGroupChat && $isCurrentUserAdmin) || $canReportChat;
 $pinnedMessage = $pinnedMessage ?? null;
 $activePoll = $activePoll ?? null;
 $canCreatePoll = (bool)($canCreatePoll ?? false);
@@ -172,6 +181,18 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                 <i class="fa-solid fa-ellipsis-vertical"></i>
             </button>
             <div id="chat-header-menu" class="hidden absolute top-full left-0 mt-2 min-w-44 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-1 z-30">
+                <?php if ($canSetConversationNotifications): ?>
+                    <?php $notificationMode = ConversationNotifications::mode((int)$chat->id, (int)$currentUserId); ?>
+                    <div class="px-3 py-2 text-sm">
+                        <label for="chat-notification-mode" class="block"><?= $tr('ui.chat_notification_mode') ?></label>
+                        <select id="chat-notification-mode" class="mt-1 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1" aria-describedby="chat-notification-status">
+                            <?php foreach (ConversationNotifications::MODES as $mode => $label): ?>
+                                <option value="<?= $mode ?>"<?= $mode === $notificationMode ? ' selected' : '' ?>><?= $tr($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div id="chat-notification-status" role="status"></div>
+                    </div>
+                <?php endif; ?>
                 <?php if ($isGroupChat): ?>
                 <?php if ($canAddUsers): ?>
                 <button type="button" data-chat-action="add-user" class="w-full text-left text-sm px-3 py-2 rounded-lg hover:bg-zinc-800"><?= $tr('ui.add_user') ?></button>
@@ -202,6 +223,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             <?php endif; ?>
         </div>
         <div class="flex gap-6">
+            <?php if (!$isReadOnlyPublicViewer && !$isRequestablePreview): ?>
+                <a class="chat-search-link" href="<?= htmlspecialchars(base_url('/search?mode=messages&q=in%3A' . rawurlencode($chat->chat_number)), ENT_QUOTES, 'UTF-8') ?>" title="<?= $tr('ui.search_this_conversation') ?>" aria-label="<?= $tr('ui.search_this_conversation') ?>"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></a>
+            <?php endif; ?>
             <button id="start-voice-call-button" type="button" data-app-action="start-voice-call" class="causette-accent hover:text-emerald-300 <?= $canStartCalls ? '' : 'opacity-50 cursor-not-allowed' ?> <?= !empty($isUserInActiveCall) ? 'hidden' : '' ?>" title="<?= $tr($canStartCalls ? 'calls.start_call' : 'calls.cannot_call_banned_user') ?>" aria-label="<?= $tr('calls.start_call') ?>" <?= $canStartCalls ? '' : 'disabled' ?>><i class="fa fa-phone text-2xl" aria-hidden="true"></i></button>
         </div>
     </div>
@@ -266,12 +290,12 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     ?>
     <div class="px-6 py-3 border-b border-zinc-800 text-sm">
         <div class="text-xs uppercase tracking-wide text-zinc-400 mb-2"><?= $tr('ui.users_in_group') ?></div>
-        <div class="flex flex-wrap items-center gap-2">
+        <div id="group-members" class="flex flex-wrap items-center gap-2">
             <?php foreach ($groupMembersOrdered as $member): ?>
                 <?php $memberIsSelf = (int)($member->id ?? 0) === (int)$currentUserId; ?>
                 <?php $memberIsInCall = (int)($member->is_in_group_call ?? 0) === 1; ?>
                 <?php $friendLabel = $chatLocale->text($memberIsSelf ? 'ui.you' : (((int)($member->is_friend ?? 0) === 1) ? 'ui.friend_status' : 'ui.not_friend_status')); ?>
-                <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 border <?= $memberIsSelf ? 'bg-zinc-700 border-zinc-600' : 'bg-zinc-800 border-zinc-700' ?> <?= $memberIsInCall ? 'border-b-2 border-b-emerald-400' : '' ?>" data-group-member-user-id="<?= (int)$member->id ?>" data-group-member-in-call="<?= $memberIsInCall ? '1' : '0' ?>" data-group-member-username="<?= htmlspecialchars((string)$member->username, ENT_QUOTES, 'UTF-8') ?>">
+                <span class="group-member-chip inline-flex items-center gap-2 rounded-full px-3 py-0.5 border <?= $memberIsSelf ? 'bg-zinc-700 border-zinc-600' : 'bg-zinc-800 border-zinc-700' ?> <?= $memberIsInCall ? 'border-b-2 border-b-emerald-400' : '' ?>" data-group-member-user-id="<?= (int)$member->id ?>" data-group-member-in-call="<?= $memberIsInCall ? '1' : '0' ?>" data-group-member-username="<?= htmlspecialchars((string)$member->username, ENT_QUOTES, 'UTF-8') ?>">
                     <span class="presence-dot inline-block w-1.5 h-1.5 rounded-full <?= htmlspecialchars($member->effective_status_dot_class ?? 'bg-zinc-500', ENT_QUOTES, 'UTF-8') ?>" title="<?= $tr('ui.' . (User::normalizePresenceStatus($member->effective_status ?? null) ?? 'offline')) ?>"></span>
                     <a href="<?= htmlspecialchars(base_url('/u/' . User::formatUserNumber($member->user_number)), ENT_QUOTES, 'UTF-8') ?>" class="font-bold hover:underline underline-offset-2" title="<?= htmlspecialchars($friendLabel, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($member->username, ENT_QUOTES, 'UTF-8') ?></a>
                     <?php if ((int)$member->id === (int)$chat->created_by): ?>
@@ -292,18 +316,19 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         $canRoleManageMember = $canManageGroupSettings && !$memberIsOwner && !$memberIsSelf;
                         $canMuteManageMember = $canModerateMembers && !$memberIsOwner && !$memberIsModerator && !$memberIsSelf;
                         $canRemoveMember = $canModerateMembers && !$memberIsOwner && !$memberIsSelf;
-                        $hasMemberManageActions = $canPokeMember || $canRoleManageMember || $canMuteManageMember || $canRemoveMember;
+                        $hasMemberManageActions = $canRoleManageMember || $canMuteManageMember || $canRemoveMember;
                     ?>
-                    <?php if ($hasMemberManageActions): ?>
+                    <?php if ($hasMemberManageActions || $canPokeMember): ?>
                     <span class="relative inline-flex items-center">
                         <button
                             type="button"
-                            class="inline-flex items-center justify-center w-9 h-9 rounded-full text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/70"
+                            class="inline-flex items-center justify-center w-6 h-6 rounded-full text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700/70<?= $hasMemberManageActions ? '' : ' hidden' ?>"
                             title="<?= $tr('ui.user_actions') ?>"
                             aria-label="<?= $tr('ui.user_actions') ?>"
                             aria-expanded="false"
                             aria-controls="group-member-menu-<?= $memberId ?>"
                             data-group-member-menu-toggle
+                            <?= $hasMemberManageActions ? '' : 'data-group-member-call-only' ?>
                             data-menu-id="group-member-menu-<?= $memberId ?>"
                         >
                             <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i>
@@ -407,6 +432,12 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
             </div>
         </div>
     </div>
+    <?php if ($viewingHistory): ?>
+        <div class="chat-history-banner" data-chat-history>
+            <span><?= $tr('ui.viewing_message_history') ?></span>
+            <a href="<?= htmlspecialchars(base_url('/c/' . User::formatUserNumber($chat->chat_number)), ENT_QUOTES, 'UTF-8') ?>"><?= $tr('ui.back_to_current_messages') ?></a>
+        </div>
+    <?php endif; ?>
     <div id="messages" class="flex-1 p-6 overflow-y-auto">
         <?php
             $previousUserId = null;
@@ -722,6 +753,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                         <div class="message-text text-zinc-200 js-message-content" data-raw-content="<?= htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8') ?>" data-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><?= nl2br(htmlspecialchars($message->content, ENT_QUOTES, 'UTF-8')) ?></div>
                         <?php if (!$isReadOnlyPublicViewer): ?>
                             <div class="message-actions message-body-actions flex items-center gap-1 text-xs md:opacity-0 md:group-hover:opacity-100 md:pointer-events-none md:group-hover:pointer-events-auto md:transition-opacity md:duration-150 md:ease-out">
+                                <?php if (!$viewingHistory): ?>
                                 <button type="button" class="text-zinc-400 hover:text-zinc-300 js-quote-link" title="<?= $tr('ui.quote') ?>" aria-label="<?= $tr('ui.quote') ?>" data-quote-message-id="<?= (int)$message->id ?>" data-quote-username="<?= htmlspecialchars($isBot ? $chatLocale->text('browser.bot_name', ['name' => $botName]) : (string)$message->username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" data-quote-content="<?= htmlspecialchars((string)$message->content, ENT_QUOTES, 'UTF-8') ?>" data-quote-mention-map="<?= htmlspecialchars($mentionMapJson, ENT_QUOTES, 'UTF-8') ?>"><i class="fa-solid fa-reply" aria-hidden="true"></i></button>
                                 <?php if (empty($message->is_quoted)): ?>
                                     <?php
@@ -759,12 +791,16 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                 <?php endif; ?>
                                 <button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="<?= $chatLabel('pin') ?>" aria-label="<?= $chatLabel('pin') ?>" data-pin-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>
                                 <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="<?= $tr('ui.react') ?>" aria-label="<?= $tr('ui.react') ?>" data-react-message-id="<?= (int)$message->id ?>"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
+                                <?php endif; ?>
+                                <?php $threadReplies = (int)($message->thread_replies ?? 0); ?>
+                                <button type="button" class="message-thread-trigger text-zinc-400 hover:text-zinc-300" data-thread-id="<?= (int)$message->id ?>" title="<?= $tr('ui.thread_title') ?>" aria-label="<?= $tr($threadReplies ? 'ui.thread_reply_count' : 'ui.thread_title', ['count' => $threadReplies]) ?>" aria-haspopup="dialog"><i class="fa-regular fa-comments" aria-hidden="true"></i><?php if ($threadReplies): ?><span aria-hidden="true"><?= $threadReplies ?></span><?php endif; ?></button>
+                                <button type="button" class="text-zinc-400 hover:text-zinc-300" data-app-action="toggle-saved-message" data-message-key="<?= (int)$message->id ?>" title="<?= $tr('browser.save_message') ?>" aria-label="<?= $tr('browser.save_message') ?>" aria-pressed="<?= isset($savedMessageLookup[$message->id]) ? 'true' : 'false' ?>"><i class="fa-bookmark <?= isset($savedMessageLookup[$message->id]) ? 'fa-solid' : 'fa-regular' ?>" aria-hidden="true"></i></button>
                             </div>
                         <?php endif; ?>
                     </div>
                     <?php
                         $canDeleteAttachmentThisMessage = false;
-                        if ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin) {
+                        if (!$viewingHistory && ((int)$message->user_id === (int)$currentUserId || $isCurrentUserAdmin)) {
                             if ($isPersonalChat || $isCurrentUserAdmin) {
                                 $canDeleteAttachmentThisMessage = true;
                             } else {
@@ -817,6 +853,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                             data-image-url="<?= $attachmentUrl ?>"
                                             data-image-title="<?= $attachmentName ?>"
                                         >
+                                            <?php if ($showImageThumbnails): ?>
                                             <img
                                                 src="<?= $attachmentUrl ?>"
                                                 alt="<?= $attachmentName ?>"
@@ -825,6 +862,9 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
                                                 loading="lazy"
                                                 decoding="async"
                                             >
+                                            <?php else: ?>
+                                                <span class="chat-image-filename"><i class="fa-regular fa-image" aria-hidden="true"></i><?= $attachmentName ?></span>
+                                            <?php endif; ?>
                                         </button>
                                         <?php endif; ?>
                                         <div class="mt-2 text-xs text-zinc-400 flex items-center justify-between gap-2">
@@ -908,7 +948,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
         <?php endforeach; ?>
     </div>
     <div id="typing-indicator" class="px-6 pb-2 text-sm text-zinc-400 min-h-6 hidden" aria-live="polite"></div>
-    <?php if (!$isReadOnlyPublicViewer): ?>
+    <?php if (!$isReadOnlyPublicViewer && !$viewingHistory): ?>
     <form id="message-form" class="p-6 border-t border-zinc-800 flex gap-4 relative">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" id="quoted-message-id" value="">
@@ -978,6 +1018,7 @@ $renderStoredMentionsToPlain = static function (string $content, $mentionMap): s
     window.PENDING_ATTACHMENTS = <?= HtmlJson::encode($pendingAttachments ?? []) ?>;
     window.CAUSETTE_ATTACHMENT_EXPIRY_OPTIONS = <?= HtmlJson::encode(Attachment::expiryOptions()) ?>;
     window.INITIAL_PINNED_MESSAGE = <?= HtmlJson::encode($pinnedMessage) ?>;
+    window.CAUSETTE_SAVED_MESSAGES = <?= HtmlJson::encode($savedMessageIds) ?>;
     window.INITIAL_ACTIVE_POLL = <?= HtmlJson::encode($activePoll) ?>;
 </script>
 

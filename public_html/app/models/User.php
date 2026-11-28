@@ -239,13 +239,13 @@ class User extends Model {
         return (bool)$active;
     }
 
-    public static function effectivePresenceStatus($user) {
+    public static function effectivePresenceStatus($user, ?bool $inActiveCall = null) {
         if (!$user) {
             return 'offline';
         }
 
         $userId = (int)($user->id ?? 0);
-        if ($userId > 0 && self::hasActiveCall($userId)) {
+        if ($inActiveCall ?? ($userId > 0 && self::hasActiveCall($userId))) {
             return 'busy';
         }
 
@@ -267,12 +267,12 @@ class User extends Model {
         return $status === 'online' && $lastActiveTimestamp < time() - 180 ? 'paused' : $status;
     }
 
-    public static function attachEffectiveStatus($user) {
+    public static function attachEffectiveStatus($user, ?bool $inActiveCall = null) {
         if (!$user) {
             return null;
         }
 
-        $status = self::effectivePresenceStatus($user);
+        $status = self::effectivePresenceStatus($user, $inActiveCall);
         $user->effective_status = $status;
         $user->effective_status_label = self::presenceStatusLabel($status);
         $user->effective_status_text_class = self::presenceStatusTextClass($status);
@@ -291,6 +291,25 @@ class User extends Model {
         }
 
         return $users;
+    }
+
+    public static function attachMessageAuthorStatuses(array $messages): void
+    {
+        if ($messages === []) {
+            return;
+        }
+        $authorIds = array_values(array_unique(array_map('intval', array_column($messages, 'user_id'))));
+        $placeholders = implode(', ', array_fill(0, count($authorIds), '?'));
+        $activeAuthors = array_fill_keys(self::query(
+            "SELECT DISTINCT cp.user_id
+             FROM call_participants cp
+             JOIN calls c ON c.id = cp.call_id
+             WHERE cp.user_id IN ($placeholders) AND cp.left_at IS NULL AND c.status = 'active'",
+            $authorIds
+        )->fetchAll(PDO::FETCH_COLUMN), true);
+        foreach ($messages as $message) {
+            self::attachEffectiveStatus($message, isset($activeAuthors[(int)$message->user_id]));
+        }
     }
 
     public static function touchActivity($userId) {

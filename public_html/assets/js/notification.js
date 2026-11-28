@@ -1507,14 +1507,7 @@ function bindNotificationHistory() {
 }
 
 function shouldSuppressNotificationToast(notification) {
-    if (!currentChat || notification.type !== 'message' || !notification.link) return false;
-
-    const linkMatch = String(notification.link).match(/\/c\/([^/?#]+)/);
-    if (!linkMatch) return false;
-
-    const notificationChatNumber = linkMatch[1].replace(/\D/g, '');
-    const currentChatNumber = String(currentChat.chat_number || '').replace(/\D/g, '');
-    return notificationChatNumber !== '' && notificationChatNumber === currentChatNumber;
+    return isToastForCurrentChatMessage({metadata: notification});
 }
 
 function getNormalizedChatNumberFromNotificationLink(linkValue) {
@@ -1538,7 +1531,11 @@ function isToastForCurrentChatMessage(toast) {
     if (!currentChatNumber) return false;
 
     const notificationChatNumber = getNormalizedChatNumberFromNotificationLink(metadata.link);
-    return notificationChatNumber !== '' && notificationChatNumber === currentChatNumber;
+    if (notificationChatNumber === '' || notificationChatNumber !== currentChatNumber) return false;
+    const threadId = String(metadata.link).match(/[?&]thread=(\d+)(?:[&#]|$)/)?.[1];
+    if (!threadId) return !currentChat?.viewing_history;
+    const dialog = document.getElementById('message-thread');
+    return dialog?.open === true && dialog.dataset.loadedThreadId === threadId;
 }
 
 async function clearCurrentChatMessageNotifications() {

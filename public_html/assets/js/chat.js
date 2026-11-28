@@ -2680,9 +2680,12 @@ function renderSidebarList() {
     updateSidebarCustomCount();
     updateSidebarModeButtons();
 
-    const chats = getVisibleSidebarChats();
+    let chats = getVisibleSidebarChats();
+    const groupUnread = sidebarMode === 'all' && document.documentElement?.dataset?.unreadGrouping === 'separate';
+    const unread = groupUnread ? chats.filter(chat => Number(chat.unread_count) > 0) : [];
+    if (unread.length) chats = [...unread, ...chats.filter(chat => !(Number(chat.unread_count) > 0))];
     const customLabel = sidebarMode === 'custom' ? getSidebarCustomDisplayLabel() : null;
-    const signature = JSON.stringify([sidebarMode, customLabel, chats]);
+    const signature = JSON.stringify([sidebarMode, customLabel, groupUnread, chats]);
     if (signature === sidebarRenderSignature) return;
 
     const focusedChatNumber = list.contains(document.activeElement)
@@ -2690,6 +2693,18 @@ function renderSidebarList() {
         : '';
     const options = { customMode: sidebarMode === 'custom', showTypeBadge: !['group', 'pm'].includes(sidebarMode) };
     const nodes = chats.map((chat) => buildSidebarChatNode(chat, options));
+    if (unread.length > 0) {
+        const heading = document.createElement('h3');
+        heading.className = 'sidebar-unread-heading';
+        heading.textContent = uiText('sidebar_unread_section');
+        nodes.unshift(heading);
+        if (unread.length < chats.length) {
+            const readHeading = document.createElement('h3');
+            readHeading.className = 'sidebar-unread-heading';
+            readHeading.textContent = uiText('sidebar_other_section');
+            nodes.splice(unread.length + 1, 0, readHeading);
+        }
+    }
 
     if (nodes.length === 0) {
         const empty = document.createElement('div');
@@ -2710,6 +2725,129 @@ function renderSidebarList() {
         const focusTarget = focusedChat ?? modeToggle?.querySelector('[aria-pressed="true"]');
         focusTarget?.focus({ preventScroll: true });
     }
+}
+
+async function toggleSavedMessage(button) {
+    const id = Number(button.dataset.messageKey);
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    const requested = button.getAttribute('aria-pressed') !== 'true';
+    button.disabled = true;
+    try {
+        const result = await postForm('/api/messages/saved', {
+            csrf_token: getCsrfToken(), message_id: id, saved: requested ? '1' : '0',
+        });
+        if (typeof result?.saved !== 'boolean') {
+            showToast(uiActionError(result?.error, 'save_message_failed'), 'error');
+            return;
+        }
+        const ids = new Set(window.CAUSETTE_SAVED_MESSAGES || []);
+        if (result.saved) ids.add(id);
+        else ids.delete(id);
+        window.CAUSETTE_SAVED_MESSAGES = [...ids];
+        const visible = document.querySelector(`[data-app-action="toggle-saved-message"][data-message-key="${id}"]`);
+        if (visible) {
+            visible.setAttribute('aria-pressed', String(result.saved));
+            visible.firstElementChild.classList.toggle('fa-solid', result.saved);
+            visible.firstElementChild.classList.toggle('fa-regular', !result.saved);
+        }
+    } catch {
+        showToast(uiText('save_message_failed'), 'error');
+    } finally {
+        button.disabled = false;
+    }
+}
+
+function bindConversationNotifications(chatView) {
+    const select = chatView.querySelector('#chat-notification-mode');
+    if (!select || select.dataset.bound) return;
+    select.dataset.bound = '1';
+    const status = chatView.querySelector('#chat-notification-status');
+    let previous = select.value;
+    select.addEventListener('change', async () => {
+        const mode = select.value;
+        select.disabled = true;
+        status.textContent = '';
+        try {
+            const result = await postForm('/api/chats/notifications', {
+                csrf_token: getCsrfToken(), chat_id: chatView.dataset.chatId, mode,
+            }, {timeoutMs: 15000});
+            if (result?.mode === mode) previous = mode;
+            else status.textContent = uiActionError(result?.error, 'chat_notifications_save_failed');
+        } catch {
+            status.textContent = uiText('chat_notifications_save_failed');
+        } finally {
+            select.value = previous;
+            select.disabled = false;
+        }
+    });
+}
+
+function bindConversationSwitcher() {
+    const dialog = document.getElementById('chat-switcher');
+    if (!dialog || dialog.dataset.bound) return;
+    dialog.dataset.bound = '1';
+    const input = document.getElementById('chat-switcher-input');
+    const results = document.getElementById('chat-switcher-results');
+    const empty = document.getElementById('chat-switcher-empty');
+    const normalize = (value) => value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase(uiLanguage());
+
+    function renderChoices() {
+        const query = normalize(input.value.trim());
+        const choices = sidebarChatsCache.filter(chat => normalize(getChatSidebarTitle(chat)).includes(query)
+            || formatNumber(chat.chat_number).includes(query) || String(chat.chat_number).includes(query)).slice(0, 20);
+        empty.hidden = choices.length > 0;
+        empty.textContent = empty.hidden ? '' : dialog.dataset.emptyLabel;
+        results.replaceChildren(...choices.map(chat => {
+            const row = document.createElement('li');
+            const link = document.createElement('a');
+            link.href = appPath(`/c/${formatNumber(chat.chat_number)}`);
+            link.textContent = getChatSidebarTitle(chat);
+            updateSidebarLinkCurrent(link, window.location.pathname);
+            row.append(link);
+            return row;
+        }));
+    }
+
+    function open() {
+        if (!dialog.open) {
+            input.value = '';
+            renderChoices();
+            dialog.showModal();
+        }
+        input.focus();
+    }
+
+    document.getElementById('open-chat-switcher').addEventListener('click', open);
+    document.getElementById('close-chat-switcher').addEventListener('click', () => dialog.close());
+    document.getElementById('chat-switcher-form').addEventListener('submit', event => {
+        event.preventDefault();
+        results.querySelector('a')?.click();
+    });
+    input.addEventListener('input', renderChoices);
+    results.addEventListener('click', event => {
+        if (event.target.closest('a') && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) dialog.close();
+    });
+    dialog.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            dialog.close();
+            return;
+        }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        const links = Array.from(results.querySelectorAll('a'));
+        if (!links.length) return;
+        const current = links.indexOf(document.activeElement);
+        const next = current + (event.key === 'ArrowDown' ? 1 : -1);
+        event.preventDefault();
+        (next < 0 ? input : links[Math.min(next, links.length - 1)]).focus();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.defaultPrevented || event.repeat || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey)
+            || event.key.toLowerCase() !== 'k' || (!dialog.open && document.querySelector('dialog[open]'))) return;
+        event.preventDefault();
+        open();
+    });
 }
 
 function bindSidebarCustomRenameModal() {
@@ -4208,7 +4346,7 @@ async function submitChatMessage(form) {
 async function pollMessages(options = {}) {
     const chat = currentChat;
     const messagesList = document.getElementById('messages');
-    if (!chat || !messagesList) return;
+    if (!chat || !messagesList || chat.viewing_history) return;
     if (options.background && backgroundMessagePolls.has(chat)) return;
     if (options.background) backgroundMessagePolls.add(chat);
     const rendered = renderedMessageTimelines.get(messagesList);
@@ -4703,7 +4841,7 @@ function applyInitialChatScrollPosition() {
     const firstUnseenMessageId = Number(chatView.dataset.firstUnseenMessageId || 0);
     const anchor = getMessageScrollAnchor(firstUnseenMessageId);
 
-    if (anchor !== null) {
+    if (anchor !== null && document.documentElement.dataset.chatOpenAt !== 'latest') {
         box.scrollTop = anchor;
         return;
     }
@@ -4825,11 +4963,16 @@ function renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStat
     const editedAt = String(msg?.edited_at || '');
     const isQuoted = !!(msg?.is_quoted);
     const hasAttachments = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
-    const attachmentMarkup = renderMessageAttachments(msg.attachments, canDeleteAttachmentFromMessage(msg));
+    const attachmentMarkup = renderMessageAttachments(msg.attachments, canDeleteAttachmentFromMessage(msg),
+        document.documentElement?.dataset?.imagePreview === 'collapsed');
     const isGroupReadOnlyViewer = normalizeChatType(currentChat?.type) === 'group' && !Boolean(currentChat?.is_group_member);
     const canReplyToMessage = !isGroupReadOnlyViewer && !isCurrentUserGroupMuted();
     const canPinMessage = !isGroupReadOnlyViewer && canCurrentUserPinMessages();
     const pinLabel = escapeHtml(chatLabel('pin'));
+    const saved = (window.CAUSETTE_SAVED_MESSAGES || []).includes(messageId);
+    const saveLabel = escapeHtml(uiText('save_message'));
+    const threadReplies = Math.max(0, Number(msg.thread_replies) || 0);
+    const threadLabel = escapeHtml(uiText(threadReplies ? 'thread_reply_count' : 'thread_title', {count: threadReplies}));
 
     let editButton = '';
     let deleteButton = '';
@@ -4848,6 +4991,8 @@ function renderChatMessage(msg, { isNewGroup, earlierTimelineTimestamp, showStat
                             ${deleteButton}
                             ${canPinMessage ? `<button type="button" class="text-zinc-400 hover:text-zinc-300 js-pin-link" title="${pinLabel}" aria-label="${pinLabel}" data-pin-message-id="${messageId}"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i></button>` : ''}
                             <button type="button" class="text-zinc-400 hover:text-zinc-300 js-react-link" title="${escapeHtml(uiText('react'))}" aria-label="${escapeHtml(uiText('react'))}" data-react-message-id="${messageId}"><i class="fa-solid fa-face-smile" aria-hidden="true"></i></button>
+                            <button type="button" class="message-thread-trigger text-zinc-400 hover:text-zinc-300" data-thread-id="${messageId}" title="${threadLabel}" aria-label="${threadLabel}" aria-haspopup="dialog"><i class="fa-regular fa-comments" aria-hidden="true"></i>${threadReplies ? `<span aria-hidden="true">${threadReplies}</span>` : ''}</button>
+                            <button type="button" class="text-zinc-400 hover:text-zinc-300" data-app-action="toggle-saved-message" data-message-key="${messageId}" title="${saveLabel}" aria-label="${saveLabel}" aria-pressed="${saved}"><i class="fa-bookmark ${saved ? 'fa-solid' : 'fa-regular'}" aria-hidden="true"></i></button>
                             ${pending ? '<span class="message-send-preview-status" role="status"></span>' : ''}
                         </div>`;
 
@@ -5401,6 +5546,34 @@ function closeGroupMemberActionMenus(exceptMenuId = '') {
     });
 }
 
+function syncGroupMemberActionMenu(toggle, menu, canPoke) {
+    const member = toggle.closest('[data-group-member-in-call]');
+    const poke = menu.querySelector('[data-app-action="poke-group-member"]');
+    poke?.classList.toggle('hidden', !canPoke || member?.dataset.groupMemberInCall === '1');
+
+    const hasActions = Boolean(menu.querySelector('[data-group-member-action]:not(.hidden)'));
+    const hadFocus = toggle === document.activeElement || menu.contains(document.activeElement);
+    toggle.classList.toggle('hidden', !hasActions);
+    if (!hasActions) {
+        menu.classList.add('hidden');
+        toggle.setAttribute('aria-expanded', 'false');
+        if (hadFocus) member?.querySelector('a')?.focus();
+    }
+    return hasActions;
+}
+
+function refreshGroupMemberActionMenus() {
+    const members = document.getElementById('group-members');
+    if (!members) return;
+    const toggles = members.querySelectorAll('[data-group-member-call-only], [data-group-member-menu-toggle][aria-expanded="true"]');
+    if (toggles.length === 0) return;
+    const canPoke = canPokeInCurrentGroup();
+    for (const toggle of toggles) {
+        const menu = document.getElementById(toggle.dataset.menuId);
+        if (menu) syncGroupMemberActionMenu(toggle, menu, canPoke);
+    }
+}
+
 function bindGroupMemberActionMenus() {
     if (document.body.dataset.groupMemberActionMenusBound === '1') return;
     document.body.dataset.groupMemberActionMenusBound = '1';
@@ -5427,12 +5600,7 @@ function bindGroupMemberActionMenus() {
             }
 
             const shouldOpen = menu.classList.contains('hidden');
-            const poke = menu.querySelector('[data-app-action="poke-group-member"]');
-            if (poke) {
-                const member = toggle.closest('[data-group-member-in-call]');
-                poke.classList.toggle('hidden', !canPokeInCurrentGroup() || member?.dataset.groupMemberInCall === '1');
-            }
-            const hasActions = menu.querySelector('[data-group-member-action]:not(.hidden)');
+            const hasActions = syncGroupMemberActionMenu(toggle, menu, canPokeInCurrentGroup());
             closeGroupMemberActionMenus(shouldOpen && hasActions ? menuId : '');
             return;
         }

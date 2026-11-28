@@ -237,14 +237,15 @@ ErrorHandler::register();
 
 try {
     $installationId = defined('CAUSETTE_INSTALLATION_ID') ? CAUSETTE_INSTALLATION_ID : null;
-    if ($installationId !== null && Setting::get('causette_installation_id') !== $installationId) {
+    $runtimeSettings = Setting::getMany(['causette_installation_id', 'database_version', 'error_display']);
+    if ($installationId !== null && ($runtimeSettings['causette_installation_id'] ?? null) !== $installationId) {
         header('Cache-Control: no-store');
         header('Content-Type: text/plain; charset=UTF-8');
         http_response_code(503);
         echo Locale::current()->text('error.database_configuration_mismatch');
         exit;
     }
-    $dbVersion = Setting::get('database_version');
+    $dbVersion = $runtimeSettings['database_version'] ?? null;
 } catch (Throwable $exception) {
     ErrorHandler::abort(503, 'The Causette database is unavailable.');
 }
@@ -276,10 +277,7 @@ if ($dbVersion !== CAUSETTE_DATABASE_VERSION) {
         exit;
     }
 } else {
-    try {
-        ErrorHandler::setDebugMode(Setting::get('error_display') === '1');
-    } catch (Throwable $exception) {
-    }
+    ErrorHandler::setDebugMode(($runtimeSettings['error_display'] ?? null) === '1');
 }
 if (strpos($requestPath, '/api') === 0) {
     RateLimiter::enforceApiLimit($requestPath, $_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -456,8 +454,13 @@ $router->group('/api', function($r) {
     $r->post('/chats/sidebar-custom', 'ApiController@saveSidebarCustomChats');
     $r->get('/chats/sidebar-custom-label', 'ApiController@getSidebarCustomLabel');
     $r->post('/chats/sidebar-custom-label', 'ApiController@saveSidebarCustomLabel');
+    $r->post('/chats/notifications', 'ChatController@setConversationNotifications');
     $r->get('/messages/search', 'ApiController@searchMessages');
+    $r->post('/messages/saved', 'ApiController@setSavedMessage');
     $r->get('/messages/{chat_id}', 'ApiController@getMessages');
+    $r->get('/threads/{message_id}', 'ChatController@getThread');
+    $r->post('/threads/{message_id}', 'ChatController@replyToThread');
+    $r->post('/threads/{message_id}/follow', 'ChatController@setThreadFollow');
     $r->get('/posts/search', 'ApiController@searchPosts');
     $r->get('/notifications', 'ApiController@getNotifications');
     $r->get('/invites', 'ApiController@getInvites');

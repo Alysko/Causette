@@ -46,7 +46,9 @@ class UpdateController extends Controller
                 && version_compare($version, ReactionSchemaUpgrade::API_LIMIT_TARGET, '<'),
             'groupNotificationsUpgrade' => version_compare(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::GROUP_NOTIFICATIONS_TARGET, '>=')
                 && version_compare($version, ReactionSchemaUpgrade::GROUP_NOTIFICATIONS_TARGET, '<'),
-            'openMojiUpgrade' => CAUSETTE_DATABASE_VERSION === ReactionSchemaUpgrade::OPENMOJI_TARGET,
+            'openMojiUpgrade' => version_compare(CAUSETTE_DATABASE_VERSION, ReactionSchemaUpgrade::OPENMOJI_TARGET, '>=')
+                && version_compare($version, ReactionSchemaUpgrade::OPENMOJI_TARGET, '<'),
+            'threadsUpgrade' => CAUSETTE_DATABASE_VERSION === ReactionSchemaUpgrade::THREADS_TARGET,
         ]);
     }
 

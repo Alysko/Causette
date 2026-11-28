@@ -124,8 +124,10 @@ final class Database
                 'created_at' => '2026-01-02 00:00:00', 'is_system_event' => 1, 'internal_fixture_note' => 'Internal fixture value',
             ]],
             str_contains($sql, 'FROM chat_typing_status') => self::$typing,
-            str_contains($sql, 'FROM message_reactions') || str_contains($sql, 'SELECT DISTINCT quoted_message_id')
+            str_contains($sql, 'FROM message_reactions') || str_contains($sql, 'FROM thread_replies') || str_contains($sql, 'SELECT DISTINCT quoted_message_id')
                 || str_contains($sql, 'FROM friend_favorites') => [],
+            str_starts_with($sql, 'SELECT cp.id') => ($bindings[0] ?? null) === 9,
+            str_starts_with($sql, 'SELECT DISTINCT cp.user_id') => in_array(9, $bindings, true) ? [9] : [],
             str_contains($sql, 'JOIN call_participants') || str_contains($sql, 'FROM call_participants') => false,
             default => throw new LogicException('Unexpected fixture database query'),
         });
@@ -190,6 +192,7 @@ foreach ($cases as $name => $case) {
                 expectMessageResponse($row->quoted_content === 'Earlier message' && $row->attachments[0]->url === '/attachment/fixture.png'
                     && ($data[1]->is_system_event ?? 0) === 1, 'Quotes, attachments and system events must still render');
                 expectMessageResponse(($response->data['can_send_message'] ?? null) === ($viewer === 2), 'A public reader must remain read-only');
+                expectMessageResponse($row->effective_status === 'busy', 'Message presence must be read for the author, not the message ID');
             }
             if ($expectedStatus === 409) {
                 expectMessageResponse(($response->data['requires_confirm'] ?? false) === true, 'Replacing a pin must still require confirmation');

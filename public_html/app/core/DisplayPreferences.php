@@ -22,11 +22,27 @@ final class DisplayPreferences
     public const THEMES = [
         'dark' => 'ui.theme_dark',
         'light' => 'ui.theme_light',
+        'system' => 'ui.theme_system',
         'colorblind' => 'ui.theme_colorblind',
     ];
+    public const PERSONAL_OPTIONS = [
+        'theme' => ['ui.theme', self::THEMES],
+        'message_density' => ['ui.message_density', ['standard' => 'ui.density_standard', 'compact' => 'ui.density_compact']],
+        'chat_width' => ['ui.chat_width', ['full' => 'ui.width_full', 'centered' => 'ui.width_centered']],
+        'chat_open_at' => ['ui.chat_open_at', ['unread' => 'ui.open_first_unread', 'latest' => 'ui.open_latest']],
+        'image_preview' => ['ui.image_preview', ['expanded' => 'ui.image_preview_expanded', 'collapsed' => 'ui.image_preview_collapsed']],
+        'unread_grouping' => ['ui.unread_grouping', ['inline' => 'ui.unread_grouping_inline', 'separate' => 'ui.unread_grouping_separate']],
+    ];
 
-    private const DEFAULT_THEME = 'dark';
-    private const DEFAULTS = ['language' => '', 'date_format' => 'locale', 'time_format' => '24h', 'theme' => self::DEFAULT_THEME];
+    private const PERSONAL_DEFAULTS = [
+        'theme' => 'dark',
+        'message_density' => 'standard',
+        'chat_width' => 'full',
+        'chat_open_at' => 'unread',
+        'image_preview' => 'expanded',
+        'unread_grouping' => 'inline',
+    ];
+    private const DEFAULTS = ['language' => '', 'date_format' => 'locale', 'time_format' => '24h'] + self::PERSONAL_DEFAULTS;
     private static array $effective = self::DEFAULTS;
     private static array $stored = [];
     private static string $timezone = 'UTC+0';
@@ -102,8 +118,12 @@ final class DisplayPreferences
                 $preferences[$field] = $value;
             }
         }
-        $theme = $stored['theme'] ?? null;
-        $preferences['theme'] = $userId !== null && self::valid($theme, self::THEMES, false) ? $theme : self::DEFAULT_THEME;
+        if ($userId !== null) {
+            foreach (self::PERSONAL_OPTIONS as $field => [, $options]) {
+                $value = $stored[$field] ?? null;
+                $preferences[$field] = self::valid($value, $options, false) ? $value : self::PERSONAL_DEFAULTS[$field];
+            }
+        }
         return $preferences;
     }
 
@@ -119,15 +139,18 @@ final class DisplayPreferences
         }
         if ($userId !== null) {
             // Cached forms from older releases can update the other preferences.
-            $theme = array_key_exists('theme', $input) ? $input['theme'] : self::read($userId)['theme'];
-            if (!self::valid($theme, self::THEMES, false)) {
-                return false;
+            $previous = self::read($userId);
+            foreach (self::PERSONAL_OPTIONS as $field => [, $options]) {
+                $value = array_key_exists($field, $input) ? $input[$field] : $previous[$field];
+                if (!self::valid($value, $options, false)) {
+                    return false;
+                }
+                $preferences[$field] = $value;
             }
-            $preferences['theme'] = $theme;
         }
         $key = self::key($userId);
         Setting::set($key, json_encode($preferences, JSON_THROW_ON_ERROR));
-        self::$stored[$key] = $preferences + ['theme' => self::DEFAULT_THEME];
+        self::$stored[$key] = $preferences + self::PERSONAL_DEFAULTS;
         return true;
     }
 

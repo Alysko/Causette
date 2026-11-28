@@ -255,6 +255,27 @@ CREATE TABLE IF NOT EXISTS messages (
 	FOREIGN KEY (quoted_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS thread_replies (
+	id INT AUTO_INCREMENT PRIMARY KEY,
+	root_id INT NOT NULL,
+	user_id INT NOT NULL,
+	client_key CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+	content TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	CONSTRAINT fk_thread_replies_root FOREIGN KEY (root_id) REFERENCES messages(id) ON DELETE CASCADE,
+	CONSTRAINT fk_thread_replies_author FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+	UNIQUE KEY uniq_thread_reply_request (root_id, user_id, client_key),
+	KEY idx_thread_reply_page (root_id, id)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS thread_followers (
+	root_id INT NOT NULL,
+	user_id INT NOT NULL,
+	PRIMARY KEY (root_id, user_id),
+	CONSTRAINT fk_thread_followers_root FOREIGN KEY (root_id) REFERENCES messages(id) ON DELETE CASCADE,
+	CONSTRAINT fk_thread_followers_account FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS message_reactions (
 	id BIGINT AUTO_INCREMENT PRIMARY KEY,
 	message_id INT NOT NULL,

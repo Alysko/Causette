@@ -8,17 +8,24 @@ require_once __DIR__ . '/../../core/AssetUrl.php';
 require_once __DIR__ . '/../../core/ReactionCatalog.php';
 require_once __DIR__ . '/../../core/CallIceServers.php';
 require_once __DIR__ . '/../../core/CallVideoPreferences.php';
-$scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'app.js'];
+$scripts = ['notification.js', 'chat.js', 'call.js', 'user.js', 'threads.js', 'app.js'];
 $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
+$initialTheme = $displayFormats['theme'] === 'system' ? 'dark' : $displayFormats['theme'];
 ?>
 <!DOCTYPE html>
-<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>" data-theme="<?= htmlspecialchars($displayFormats['theme'], ENT_QUOTES, 'UTF-8') ?>"<?= $displayFormats['theme'] === 'light' ? '' : ' class="dark"' ?>>
+<html lang="<?= $locale->language() ?>" data-date-format="<?= $displayFormats['date_format'] ?>" data-time-format="<?= $displayFormats['time_format'] ?>"
+      data-theme="<?= $initialTheme ?>" data-message-density="<?= $displayFormats['message_density'] ?>"
+      data-chat-width="<?= $displayFormats['chat_width'] ?>" data-chat-open-at="<?= $displayFormats['chat_open_at'] ?>"
+      data-image-preview="<?= $displayFormats['image_preview'] ?>" data-unread-grouping="<?= $displayFormats['unread_grouping'] ?>"<?= $initialTheme === 'light' ? '' : ' class="dark"' ?>>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8') ?>">
     <link rel="icon" type="image/png" sizes="64x64" href="<?= \Causette\View\AssetUrl::html('/assets/img/favicon.png') ?>">
     <title>Causette</title>
+    <?php if ($displayFormats['theme'] === 'system' && !($renderMainOnly ?? false)): ?>
+        <script nonce="<?= \Causette\Security\ContentSecurityPolicy::nonce() ?>" src="<?= \Causette\View\AssetUrl::html('/assets/js/system-theme.js') ?>"></script>
+    <?php endif; ?>
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/causette.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/fontawesome.min.css') ?>">
     <link rel="stylesheet" href="<?= \Causette\View\AssetUrl::html('/assets/css/layout.css') ?>">
@@ -232,6 +239,15 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
             <div id="sidebar-resize-handle" role="separator" tabindex="0" aria-orientation="vertical"
                  aria-controls="app-sidebar" aria-label="<?= $tr('ui.resize_sidebar') ?>"></div>
             <div class="flex-1 min-h-0 p-4 flex flex-col gap-3">
+                <button id="open-chat-switcher" type="button" aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K"
+                        class="conversation-switcher-button">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                    <span><?= $tr('ui.switch_conversation') ?></span>
+                </button>
+                <a href="<?= htmlspecialchars(base_url('/search?mode=saved'), ENT_QUOTES, 'UTF-8') ?>" class="conversation-switcher-button">
+                    <i class="fa-regular fa-bookmark" aria-hidden="true"></i>
+                    <span><?= $tr('ui.saved_messages') ?></span>
+                </a>
                 <div class="inline-flex flex-wrap self-start max-w-full items-center rounded-lg border border-zinc-700 p-1 text-xs" id="chat-sidebar-mode-toggle">
                     <button type="button" data-chat-sidebar-mode="all" aria-pressed="true" class="px-2.5 py-1 rounded-md transition bg-zinc-700 text-zinc-100"><?= $tr('ui.all') ?></button>
                     <button type="button" data-chat-sidebar-mode="unread" aria-pressed="false" class="px-2.5 py-1 rounded-md transition text-zinc-400 hover:text-zinc-200"><?= $tr('ui.unread') ?></button>
@@ -328,6 +344,21 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
 
         <?php require __DIR__ . '/../partials/app-main.php'; ?>
 
+        <dialog id="chat-switcher" class="conversation-switcher" aria-labelledby="chat-switcher-label" data-empty-label="<?= $tr('ui.no_chat_matches') ?>">
+            <div class="conversation-switcher-heading">
+                <h2 id="chat-switcher-label"><?= $tr('ui.switch_conversation') ?></h2>
+                <button type="button" id="close-chat-switcher" class="conversation-switcher-close" aria-label="<?= $tr('ui.close') ?>">
+                    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+            </div>
+            <form id="chat-switcher-form" role="search">
+                <input type="search" id="chat-switcher-input" name="find" autofocus autocomplete="off" maxlength="80"
+                       aria-label="<?= $tr('ui.filter_conversations') ?>" placeholder="<?= $tr('ui.filter_conversations') ?>">
+            </form>
+            <p id="chat-switcher-empty" role="status" hidden></p>
+            <ul id="chat-switcher-results"></ul>
+        </dialog>
+        <?php require __DIR__ . '/../partials/thread-dialog.php'; ?>
         <div id="sidebar-custom-rename-modal" class="hidden fixed inset-0 bg-black/70 z-50 p-4 md:p-6" aria-hidden="true">
             <div class="h-full w-full flex items-center justify-center">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl p-6" role="dialog" aria-modal="true" aria-labelledby="sidebar-custom-rename-title">
@@ -347,7 +378,7 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
 
         <aside id="notification-history-panel" class="notification-history-empty w-20 shrink-0 border-l border-zinc-800 bg-zinc-900/90 flex flex-col"
                aria-label="<?= $tr('ui.notifications') ?>" inert>
-            <div class="p-4 border-b border-zinc-700 flex items-center justify-center" id="notification-history-header">
+            <div class="p-4 border-b border-zinc-700 flex shrink-0 items-center justify-center" id="notification-history-header">
                 <div id="notification-history-title" class="hidden font-semibold text-zinc-100 mr-3"><?= $tr('ui.notifications') ?></div>
                 <button id="notification-clear-all-btn" class="hidden text-xs text-zinc-400 hover:text-zinc-200 mr-auto" data-app-action="clear-notifications"><?= $tr('ui.clear_all') ?></button>
                 <button type="button" id="notification-history-button" class="relative w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-700 hover:bg-zinc-800"
@@ -356,8 +387,8 @@ $brandTitle = htmlspecialchars('Causette ' . APP_VERSION, ENT_QUOTES, 'UTF-8');
                     <span id="notification-history-count" class="hidden absolute -top-2 -right-2 min-w-[1.25rem] h-5 px-1 rounded-full bg-emerald-600 text-white text-xs flex items-center justify-center">0</span>
                 </button>
             </div>
-            <div id="notification-icon-preview" class="flex-1 overflow-auto"></div>
-            <div id="notification-history-list" class="hidden flex-1 overflow-auto"></div>
+            <div id="notification-icon-preview" class="flex-1" role="group" tabindex="0" aria-label="<?= $tr('ui.notifications') ?>"></div>
+            <div id="notification-history-list" class="hidden flex-1" role="group" tabindex="0" aria-labelledby="notification-history-title"></div>
         </aside>
     </div>
 

@@ -20,7 +20,8 @@ final class ReactionSchemaUpgrade
     public const API_LIMIT_TARGET = '1.0.5';
     public const GROUP_NOTIFICATIONS_TARGET = '1.0.6';
     public const OPENMOJI_TARGET = '1.0.7';
-    public const TARGETS = [self::TARGET, self::API_LIMIT_TARGET, self::GROUP_NOTIFICATIONS_TARGET, self::OPENMOJI_TARGET];
+    public const THREADS_TARGET = '1.0.8';
+    public const TARGETS = [self::TARGET, self::API_LIMIT_TARGET, self::GROUP_NOTIFICATIONS_TARGET, self::OPENMOJI_TARGET, self::THREADS_TARGET];
     public const PROGRESS_KEY = 'reaction_schema_upgrade_104';
     private const ORIGINAL_NOTIFICATION_TYPES = "'message','call','friend_request','friend_request_accepted','report','poke'";
     private const GROUP_NOTIFICATION_TYPES = "'group_join_request','group_join_approved','group_join_denied'";
@@ -45,12 +46,13 @@ final class ReactionSchemaUpgrade
             }
             $previousTimeout = (int)$connection->query('SELECT @@SESSION.lock_wait_timeout')->fetchColumn();
             $connection->exec('SET SESSION lock_wait_timeout = 5');
+            $usesOpenMoji = version_compare($targetVersion, self::OPENMOJI_TARGET, '>=');
             if (version_compare($expectedVersion, self::TARGET, '<')) {
                 $server = (string)$connection->query('SELECT VERSION()')->fetchColumn();
                 $drop = stripos($server, 'MariaDB') === false ? 'DROP CHECK' : 'DROP CONSTRAINT';
                 $step = 0;
                 foreach (self::TABLES as $table => $oldCheck) {
-                    self::applyTable($connection, $table, $oldCheck, $drop, $targetVersion === self::OPENMOJI_TARGET);
+                    self::applyTable($connection, $table, $oldCheck, $drop, $usesOpenMoji);
                     Setting::set(self::PROGRESS_KEY, (string)++$step);
                 }
             }
@@ -61,8 +63,11 @@ final class ReactionSchemaUpgrade
             if (version_compare($targetVersion, self::GROUP_NOTIFICATIONS_TARGET, '>=')) {
                 self::installGroupNotificationTypes($connection);
             }
-            if ($targetVersion === self::OPENMOJI_TARGET) {
+            if ($usesOpenMoji && version_compare($expectedVersion, self::OPENMOJI_TARGET, '<')) {
                 self::installOpenMojiCodes($connection);
+            }
+            if ($targetVersion === self::THREADS_TARGET) {
+                self::installThreadReplies($connection);
             }
 
             return Setting::advanceDatabaseVersion($expectedVersion, $targetVersion);
@@ -78,6 +83,41 @@ final class ReactionSchemaUpgrade
                     // A closed connection releases its advisory lock.
                 }
             }
+        }
+    }
+
+    private static function installThreadReplies(PDO $connection): void
+    {
+        [$tables] = InstallDatabase::schema();
+        $connection->exec($tables['thread_replies']);
+        $connection->exec($tables['thread_followers']);
+        $engine = $connection->query("SELECT ENGINE FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'thread_replies'")->fetchColumn();
+        $indexes = $connection->query("SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'thread_replies'
+                AND INDEX_NAME IN ('uniq_thread_reply_request', 'idx_thread_reply_page') ORDER BY INDEX_NAME, SEQ_IN_INDEX")
+            ->fetchAll(PDO::FETCH_NUM);
+        $references = static fn(string $table): array => Database::query("SELECT rc.REFERENCED_TABLE_NAME, kcu.COLUMN_NAME, kcu.REFERENCED_COLUMN_NAME, rc.DELETE_RULE
+            FROM information_schema.REFERENTIAL_CONSTRAINTS rc JOIN information_schema.KEY_COLUMN_USAGE kcu
+            ON kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA AND kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND kcu.TABLE_NAME = rc.TABLE_NAME
+            WHERE rc.CONSTRAINT_SCHEMA = DATABASE() AND rc.TABLE_NAME = ? ORDER BY rc.REFERENCED_TABLE_NAME", [$table])
+            ->fetchAll(PDO::FETCH_NUM);
+        $cascades = [['messages', 'root_id', 'id', 'CASCADE'], ['users', 'user_id', 'id', 'CASCADE']];
+        $columns = $connection->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'thread_replies' ORDER BY ORDINAL_POSITION")->fetchAll(PDO::FETCH_COLUMN);
+        if ($engine !== 'InnoDB' || $columns !== ['id', 'root_id', 'user_id', 'client_key', 'content', 'created_at']
+            || array_map(static fn(array $index): array => [$index[0], $index[1], (int)$index[2]], $indexes) !== [
+                ['idx_thread_reply_page', 'root_id', 1], ['idx_thread_reply_page', 'id', 1],
+                ['uniq_thread_reply_request', 'root_id', 0], ['uniq_thread_reply_request', 'user_id', 0],
+                ['uniq_thread_reply_request', 'client_key', 0],
+            ] || $references('thread_replies') !== $cascades) {
+            throw new RuntimeException('The thread replies table is incomplete.');
+        }
+        $followerKey = $connection->query("SELECT COLUMN_NAME FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'thread_followers' AND INDEX_NAME = 'PRIMARY' ORDER BY SEQ_IN_INDEX")
+            ->fetchAll(PDO::FETCH_COLUMN);
+        if ($followerKey !== ['root_id', 'user_id'] || $references('thread_followers') !== $cascades) {
+            throw new RuntimeException('The thread followers table is incomplete.');
         }
     }
 

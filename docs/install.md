@@ -39,6 +39,8 @@ If PHP receives the proxy address in `REMOTE_ADDR`, visitors share a network bud
 
 For a mounted path, the web server must route that public prefix to the dedicated `public_html/` directory while preserving the request path. Keep `storage/` private and outside every document root. Local Apache tests exercise installed browser navigation at a mounted path, including when the mount is `/api` and an application API path begins with a second `/api` segment. The service worker script and scope use the same public mount. The shared-hosting profile uses a dedicated domain or subdomain.
 
+The distributed Apache rules deny direct requests for hidden files, internal code, backups, logs and configuration files. They allow the certificate challenge paths and keep attachment routes in the application. Use your hosting panel's directory protection to add HTTP Basic authentication to an HTTPS test site. Keep its password file outside all document roots. The protection may be inherited from the site's parent directory. Preserve the panel-managed authentication settings when updating the application rules.
+
 ## Install in the browser
 
 1. Open `/install` at the exact HTTPS address in the setup file. Enter the operator token. The administrator form appears after verification, with a ten-minute authorization window.
